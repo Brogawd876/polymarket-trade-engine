@@ -10,6 +10,7 @@ import { WalletTracker } from "../../../engine/wallet-tracker.ts";
 import type { Strategy } from "../../../engine/strategy/types.ts";
 import { SimOrderBook } from "./sim-orderbook.ts";
 import { SimTickerTracker } from "./sim-ticker.ts";
+import type { LogColor } from "../../../engine/log.ts";
 import {
   MockAPIQueue,
   FIXTURE_SLUG,
@@ -19,6 +20,7 @@ import {
 import { SimUserChannel } from "../../../engine/user-channel.ts";
 import {
   createEventClock,
+  type RiskGate,
   type ResolutionPriceEvent,
   type ResolutionSourceAdapter,
   type RoundWindow,
@@ -42,6 +44,11 @@ type LogEvent = {
   ts: number;
   type: string;
   [k: string]: unknown;
+};
+
+type FixtureRunnerOptions = {
+  log?: (msg: string, color?: LogColor) => void;
+  riskGate?: RiskGate;
 };
 
 function loadFixtureEvents(): LogEvent[] {
@@ -122,7 +129,10 @@ export class FixtureRunner {
   /** Interval (fake ms) at which lifecycle.tick() is automatically fired. */
   static readonly TICK_MS = 100;
 
-  constructor(walletBalance = Infinity) {
+  constructor(
+    walletBalance = Infinity,
+    private readonly opts: FixtureRunnerOptions = {},
+  ) {
     this.events = loadFixtureEvents();
     this.simBook = new SimOrderBook();
     this.simTicker = new SimTickerTracker();
@@ -183,7 +193,7 @@ export class FixtureRunner {
       slug: FIXTURE_SLUG,
       apiQueue: this.apiQueue,
       client: this.client,
-      log: () => {},
+      log: this.opts.log ?? (() => {}),
       strategyName: "test",
       strategy,
       tracker: this.tracker,
@@ -191,6 +201,7 @@ export class FixtureRunner {
       orderBook: this.simBook,
       userChannel: this.simUserChannel,
       resolution: makeResolutionAdapter(this.simTicker),
+      riskGate: this.opts.riskGate,
     });
 
     // Apply the first real snapshot (second line has non-null data at LOG_START_TS + 1001ms)

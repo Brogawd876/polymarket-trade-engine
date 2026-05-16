@@ -38,6 +38,7 @@ import {
 
 const DEFAULT_FEED_READINESS_TIMEOUT_MS = 5000;
 const DEFAULT_FEED_READINESS_POLL_MS = 100;
+const EMERGENCY_SELL_RETRY_DELAY_MS = 350;
 
 function parseEnvInt(name: string, fallback: number): number {
   const parsed = parseInt(process.env[name] ?? "", 10);
@@ -774,6 +775,15 @@ export class MarketLifecycle {
 
         if (filled) break;
         if (!failed) break; // unexpected stop (e.g. sell blocked)
+
+        const remainingMs = this.slotEndMs - this._clock.nowMs();
+        if (remainingMs <= 0) break;
+        await new Promise<void>((resolve) =>
+          this._clock.setTimeout(
+            () => resolve(),
+            Math.min(EMERGENCY_SELL_RETRY_DELAY_MS, Math.max(1, remainingMs)),
+          ),
+        );
       }
     })()
       .catch((e) =>

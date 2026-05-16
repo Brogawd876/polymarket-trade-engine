@@ -8,6 +8,7 @@ import {
   SLOT_START_MS,
 } from "./helpers/fixture-runner.ts";
 import { waitForAsk } from "../../engine/strategy/utils.ts";
+import type { RiskGate } from "../../engine/bot-core/index.ts";
 
 // Timestamps derived from the fixture log
 const LOG_START_TS = 1777108047232;
@@ -784,6 +785,115 @@ describe("Test 13: emergencySells promise awaits all loops", () => {
       );
       expect(sellHistory).toHaveLength(1);
       expect(sellHistory[0]!.shares).toBe(6);
+    },
+    TEST_TIMEOUT,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Test 14: rejected emergencySells must yield between retries
+// ---------------------------------------------------------------------------
+
+describe("Test 14: rejected emergencySells yields between retries", () => {
+  let runner: FixtureRunner;
+  let emergencyTriggered = false;
+  let emergencyResolved = false;
+  let rejectCount = 0;
+  const logs: string[] = [];
+
+  const emergencyRejectingRiskGate: RiskGate = {
+    evaluate: (intent: any, snapshot) => {
+      const shouldRejectEmergencySell =
+        intent.action === "sell" && intent.price < 0.9;
+
+      if (shouldRejectEmergencySell) {
+        rejectCount++;
+        return {
+          approved: false,
+          intent,
+          checkedAtMs: snapshot.nowMs,
+          reasons: ["best bid or ask is missing from venue"],
+        };
+      }
+
+      return {
+        approved: true,
+        intent,
+        checkedAtMs: snapshot.nowMs,
+        reasons: ["approved"],
+      };
+    },
+  };
+
+  beforeEach(async () => {
+    emergencyTriggered = false;
+    emergencyResolved = false;
+    rejectCount = 0;
+    logs.length = 0;
+    runner = new FixtureRunner(Infinity, {
+      riskGate: emergencyRejectingRiskGate,
+      log: (msg) => logs.push(msg),
+    });
+
+    await runner.setup(async (ctx) => {
+      const release = ctx.hold();
+
+      ctx.postOrders([
+        {
+          req: { tokenId: DOWN_TOKEN, action: "buy", price: 0.5, shares: 6 },
+          expireAtMs: SLOT_END_MS,
+          onFilled: (boughtShares) => {
+            ctx.postOrders([
+              {
+                req: {
+                  tokenId: DOWN_TOKEN,
+                  action: "sell",
+                  price: 0.99,
+                  shares: boughtShares,
+                },
+                expireAtMs: SLOT_END_MS,
+              },
+            ]);
+
+            setTimeout(() => {
+              const sellIds = ctx.pendingOrders
+                .filter((o) => o.action === "sell")
+                .map((o) => o.orderId);
+              emergencyTriggered = true;
+              void ctx.emergencySells(sellIds).finally(() => {
+                emergencyResolved = true;
+                release();
+              });
+            }, 500);
+          },
+        },
+      ]);
+    });
+  });
+
+  afterEach(() => runner.teardown());
+
+  test(
+    "blocked emergency placement does not spin and fake time keeps advancing",
+    async () => {
+      await runner.advanceTo(LOG_START_TS + 1_000);
+
+      expect(emergencyTriggered).toBe(true);
+      expect(emergencyResolved).toBe(false);
+      expect(rejectCount).toBeGreaterThan(0);
+      expect(rejectCount).toBeLessThanOrEqual(3);
+
+      await runner.advanceTo(LOG_START_TS + 2_000);
+
+      expect(emergencyResolved).toBe(false);
+      expect(rejectCount).toBeLessThanOrEqual(6);
+      expect(
+        logs.some((line) =>
+          line.includes(
+            "Risk gate blocked SELL DOWN @ 0.49: best bid or ask is missing from venue",
+          ),
+        ),
+      ).toBe(true);
     },
     TEST_TIMEOUT,
   );

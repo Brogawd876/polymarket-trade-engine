@@ -14,15 +14,17 @@ export function SystemStatusPanel() {
                 </div>
                 <div>
                     <span className="text-slate-400 block">Status</span>
-                    <span className="text-emerald-400 uppercase font-medium">{systemStatus?.status || 'Unknown'}</span>
+                    <span className={`uppercase font-medium ${systemStatus?.isShuttingDown ? 'text-amber-400' : (systemStatus ? 'text-emerald-400' : 'text-slate-500')}`}>
+                        {systemStatus?.isShuttingDown ? 'Shutting Down' : (systemStatus ? 'Running' : 'Unknown')}
+                    </span>
                 </div>
                 <div>
                     <span className="text-slate-400 block">Strategy</span>
                     <span className="text-slate-200 font-medium">{bootInfo?.strategy || systemStatus?.strategy || 'None'}</span>
                 </div>
                 <div>
-                    <span className="text-slate-400 block">Active Markets</span>
-                    <span className="text-slate-200 font-medium">{systemStatus?.markets?.length || 0}</span>
+                    <span className="text-slate-400 block">Active Lifecycles</span>
+                    <span className="text-slate-200 font-medium">{systemStatus?.activeLifecycles || 0}</span>
                 </div>
             </div>
         </div>

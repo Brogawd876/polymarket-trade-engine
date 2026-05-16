@@ -14,7 +14,7 @@ export function FeedHealthPanel() {
                             {feed.message && <div className="text-xs text-red-400 mt-0.5">{feed.message}</div>}
                         </div>
                         <div className="flex items-center space-x-3 text-sm">
-                            <span className="text-slate-500">{feed.quality.ageMs}ms</span>
+                            <span className="text-slate-500 capitalize">{feed.quality}</span>
                             <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
                                 feed.status === 'connected' ? 'bg-emerald-500/20 text-emerald-400' :
                                 feed.status === 'stale' ? 'bg-amber-500/20 text-amber-400' :

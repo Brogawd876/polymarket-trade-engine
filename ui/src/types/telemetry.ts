@@ -1,32 +1,50 @@
-// Types synced from engine for telemetry parsing
+export type BotAsset = "btc" | "eth" | "xrp" | "sol" | "doge";
 
-export interface BotAsset {
-    slug: string;
-    description: string;
-}
-
-export interface FeedQuality {
-    ageMs: number;
-    stalenessThresholdMs: number;
-}
+export type FeedQuality = "live" | "delayed" | "stale" | "missing";
 
 export interface PredictiveAggregateSnapshot {
-    ts: number;
-    aggregatePrice: number;
-    divergence: number;
-    sources: {
-        slug: string;
-        price: number;
-        weight: number;
-    }[];
+  asset: BotAsset;
+  timestampMs: number;
+  /** Combined/average reference price from all healthy feeds. */
+  price: number | null;
+  /** Feeds included in this aggregate. */
+  feeds: Record<string, {
+    price: number;
+    quality: FeedQuality;
+    /** Time since the latest event was locally received (ms). */
+    latestEventAgeMs: number;
+    /** Observed source-to-receive delay (ms), where available. */
+    arrivalDelayMs: number | null;
+  }>;
+  /** Absolute difference between highest and lowest feed prices. */
+  divergenceAbs: number | null;
+  /** Percentage difference (relative to average). */
+  divergencePct: number | null;
+  /** True if divergence exceeds threshold or NO healthy feeds remain. */
+  disagreement: boolean;
 }
 
+export type FeedTimingStats = {
+  feed: string;
+  sampleCount: number;
+  latestArrivalDelayMs: number | null;
+  trailingAverageArrivalDelayMs: number | null;
+};
+
 export interface LeadLagSnapshot {
-    ts: number;
-    leader: string;
-    lagSpread: number;
-    confidence: number;
-    sufficientSamples: boolean;
+  asset: BotAsset;
+  timestampMs: number;
+  feeds: Record<string, FeedTimingStats>;
+  /** The feed with the lowest trailing average arrival delay. */
+  observedTimingLeader: string | null;
+  /** The feed with the second lowest trailing average arrival delay. */
+  observedTimingRunnerUp: string | null;
+  /** Difference in trailing average delays between leader and runner-up (ms). */
+  averageDelaySpreadMs: number | null;
+  /** Qualitative measure of how consistently one feed is arriving before the other. */
+  leadershipConfidence: "none" | "weak" | "moderate" | "strong";
+  /** True if we have enough samples for all configured feeds to make a determination. */
+  sufficientSamples: boolean;
 }
 
 export type TelemetryEvent = {
@@ -45,9 +63,15 @@ export type TelemetryEvent = {
     | { type: "REPLAY_PROGRESS"; payload: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } }
 );
 
-export interface SystemStatus {
-    mode: "sim" | "live" | "replay";
-    strategy: string | null;
-    status: "initializing" | "running" | "stopped" | "error";
-    markets: any[];
-}
+export type EngineStatus = {
+  mode: "live" | "sim" | "replay";
+  strategy: string;
+  activeLifecycles: number;
+  isShuttingDown: boolean;
+  sessionPnl: number;
+  sessionLoss: number;
+  summary: string;
+};
+
+// Map backend API status to SystemStatus alias
+export type SystemStatus = EngineStatus;

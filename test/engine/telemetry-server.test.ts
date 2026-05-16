@@ -96,4 +96,35 @@ describe("Telemetry & Control Plane Hardening", () => {
     expect(events).toContain("LIFECYCLE_STATE");
     expect(events).toContain("SESSION_PNL");
   });
+
+  test("ControlServer status remains responsive during replay emergency-sell rejection", async () => {
+    const logPath = join(import.meta.dir, "..", "fixtures", "replay", "filled-order.log");
+    const clock = new VirtualClock();
+    const telemetryBus = new TelemetryBus();
+    const bot = new EarlyBird("simulation", 1, false, 1, true, logPath, {
+      clock,
+      persistState: false,
+      telemetry: telemetryBus,
+    });
+    const server = new ControlServer({ port: 3007, telemetryBus, bot });
+    const runner = new ReplayRunner(bot.replayReader!, bot, clock, telemetryBus);
+
+    server.start();
+    try {
+      const runPromise = runner.run();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1_000);
+      const status = await fetch("http://127.0.0.1:3007/api/status", {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      expect(status.status).toBe(200);
+      const data = await status.json() as any;
+      expect(data.mode).toBe("replay");
+      await runPromise;
+    } finally {
+      server.stop();
+    }
+  }, 30_000);
 });
