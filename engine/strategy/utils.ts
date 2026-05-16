@@ -17,15 +17,15 @@ export function waitForAsk(
   onReached: (price: number) => void,
   pollMs = DEFAULT_POLL_MS,
 ): PriceSignal {
-  const interval = setInterval(() => {
+  const interval = ctx.clock.setInterval(() => {
     const bestAsk = ctx.orderBook.bestAskInfo(side)?.price;
     if (!bestAsk || isNaN(Number(bestAsk))) return;
     if (bestAsk >= targetPrice) {
-      clearInterval(interval);
+      ctx.clock.clearInterval(interval);
       onReached(bestAsk);
     }
   }, pollMs);
-  return { cancel: () => clearInterval(interval) };
+  return { cancel: () => ctx.clock.clearInterval(interval) };
 }
 
 /**
@@ -39,13 +39,13 @@ export function waitForBid(
   onReached: (price: number) => void,
   pollMs = DEFAULT_POLL_MS,
 ): PriceSignal {
-  const interval = setInterval(() => {
+  const interval = ctx.clock.setInterval(() => {
     const bestBid = ctx.orderBook.bestBidPrice(side);
     if (!bestBid || isNaN(Number(bestBid))) return;
     if (bestBid <= targetPrice) {
-      clearInterval(interval);
+      ctx.clock.clearInterval(interval);
       onReached(bestBid);
     }
   }, pollMs);
-  return { cancel: () => clearInterval(interval) };
+  return { cancel: () => ctx.clock.clearInterval(interval) };
 }

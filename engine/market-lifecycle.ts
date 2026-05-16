@@ -12,7 +12,37 @@ import type { CancelOrderResponse } from "../utils/trading.ts";
 import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
+import { Env } from "../utils/config.ts";
 import type { UserChannel } from "./user-channel.ts";
+import {
+  type ResolutionSourceAdapter,
+  type VenueDataAdapter,
+  type PredictiveFeedAdapter,
+  type PredictiveSignalAggregator,
+  type LeadLagMonitor,
+  type RoundWindow,
+  PolymarketVenueAdapter,
+  AggregatedRiskGate,
+  DEFAULT_SIMULATION_RISK_LIMITS,
+  type BotFeedEvent,
+  type RiskGate,
+  type RiskSnapshot,
+  type StrategyIntent,
+  type Clock,
+  RealClock,
+} from "./bot-core/index.ts";
+import { 
+  type TelemetrySink, 
+  NullTelemetrySink 
+} from "./telemetry/index.ts";
+
+const DEFAULT_FEED_READINESS_TIMEOUT_MS = 5000;
+const DEFAULT_FEED_READINESS_POLL_MS = 100;
+
+function parseEnvInt(name: string, fallback: number): number {
+  const parsed = parseInt(process.env[name] ?? "", 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
 
 export type LifecycleState = "INIT" | "RUNNING" | "STOPPING" | "DONE";
 
@@ -66,6 +96,17 @@ type MarketLifecycleOptions = {
   alwaysLog?: boolean;
   /** Optional OrderBook override (used in tests to inject SimOrderBook). */
   orderBook?: OrderBook;
+  resolution?: ResolutionSourceAdapter;
+  binance?: PredictiveFeedAdapter;
+  coinbase?: PredictiveFeedAdapter;
+  aggregator?: PredictiveSignalAggregator;
+  leadLag?: LeadLagMonitor;
+  venue?: VenueDataAdapter;
+  riskGate?: RiskGate;
+  clock?: Clock;
+  feedReadinessTimeoutMs?: number;
+  feedReadinessPollMs?: number;
+  telemetry?: TelemetrySink;
 };
 
 export class MarketLifecycle {
@@ -73,6 +114,8 @@ export class MarketLifecycle {
   private _ticking = false;
   private _orderBook: OrderBook;
   private _userChannel: UserChannel;
+  private _clock: Clock;
+  private _telemetry: TelemetrySink;
 
   private _clobTokenIds: [string, string] | null = null;
   private _conditionId: string | null = null;
@@ -86,9 +129,11 @@ export class MarketLifecycle {
   private _inFlight = 0;
   private _strategyLocks = 0;
   private _marketLogger = new Logger();
-  private _marketOpenTimer: ReturnType<typeof setTimeout> | null = null;
+  private _marketOpenTimer: any = null;
   private _marketPriceHandle: { cancel: () => void } | null = null;
   private _strategyCleanup: (() => void) | null = null;
+  private _feedReadinessDeadlineMs: number | null = null;
+  private _setupPromise: Promise<void> | null = null;
 
   readonly slug: string;
   private readonly apiQueue: APIQueue;
@@ -99,6 +144,15 @@ export class MarketLifecycle {
   private readonly _tracker: WalletTracker;
   private readonly _ticker: TickerTracker;
   private readonly _alwaysLog: boolean;
+  private readonly _resolution?: ResolutionSourceAdapter;
+  private readonly _binance?: PredictiveFeedAdapter;
+  private readonly _coinbase?: PredictiveFeedAdapter;
+  private readonly _aggregator?: PredictiveSignalAggregator;
+  private readonly _leadLag?: LeadLagMonitor;
+  private readonly _venue: VenueDataAdapter;
+  private readonly _riskGate: RiskGate;
+  private readonly _feedReadinessTimeoutMs: number;
+  private readonly _feedReadinessPollMs: number;
 
   constructor(opts: MarketLifecycleOptions) {
     this.slug = opts.slug;
@@ -110,8 +164,35 @@ export class MarketLifecycle {
     this._tracker = opts.tracker;
     this._ticker = opts.ticker;
     this._alwaysLog = opts.alwaysLog ?? false;
-    this._orderBook = opts.orderBook ?? new OrderBook();
+    this._clock = opts.clock ?? new RealClock();
+    this._telemetry = opts.telemetry ?? new NullTelemetrySink();
+    this._orderBook = opts.orderBook ?? new OrderBook(this._clock);
     this._userChannel = opts.userChannel;
+    this._resolution = opts.resolution;
+    this._binance = opts.binance;
+    this._coinbase = opts.coinbase;
+    this._aggregator = opts.aggregator;
+    this._leadLag = opts.leadLag;
+    this._riskGate = opts.riskGate ?? new AggregatedRiskGate();
+    this._feedReadinessTimeoutMs =
+      opts.feedReadinessTimeoutMs ??
+      parseEnvInt(
+        "FEED_READINESS_TIMEOUT_MS",
+        DEFAULT_FEED_READINESS_TIMEOUT_MS,
+      );
+    this._feedReadinessPollMs =
+      opts.feedReadinessPollMs ??
+      parseEnvInt("FEED_READINESS_POLL_MS", DEFAULT_FEED_READINESS_POLL_MS);
+
+    // Per-market venue adapter wraps the per-market orderbook
+    this._venue =
+      opts.venue ??
+      new PolymarketVenueAdapter(
+        Env.get("MARKET_ASSET"),
+        this._orderBook,
+        this.apiQueue,
+        this._clock,
+      );
 
     const recovery = opts.recovery;
     if (recovery) {
@@ -174,7 +255,7 @@ export class MarketLifecycle {
     return slotFromSlug(this.slug).endTime;
   }
   get remainingSecs(): number {
-    return (this.slotEndMs - Date.now()) / 1000;
+    return (this.slotEndMs - this._clock.nowMs()) / 1000;
   }
   get strategyName(): string {
     return this._strategyName;
@@ -210,7 +291,7 @@ export class MarketLifecycle {
       this._buyBlocked = true;
       this._setState("STOPPING");
     }
-    // STOPPING already — no-op
+    // STOPPING already â€” no-op
   }
 
   destroy(): void {
@@ -219,7 +300,8 @@ export class MarketLifecycle {
     }
     this._marketLogger.destroy();
     this._marketPriceHandle?.cancel();
-    if (this._marketOpenTimer) clearTimeout(this._marketOpenTimer);
+    if (this._marketOpenTimer) this._clock.clearTimeout(this._marketOpenTimer);
+    this._venue.stop();
     this._orderBook.destroy();
     for (const pending of this._pendingOrders) {
       this._userChannel.untrackOrder(pending.orderId);
@@ -230,8 +312,14 @@ export class MarketLifecycle {
 
   private _setState(next: LifecycleState): void {
     if (this._state === next) return;
-    this._log(`[${this.slug}] state: ${this._state} → ${next}`, "dim");
+    const from = this._state;
+    this._log(`[${this.slug}] state: ${from} â†’ ${next}`, "dim");
     this._state = next;
+    this._telemetry.push({
+      ts: this._clock.nowMs(),
+      type: "LIFECYCLE_STATE",
+      payload: { slug: this.slug, from, to: next }
+    });
   }
 
   async tick(): Promise<void> {
@@ -239,6 +327,36 @@ export class MarketLifecycle {
     this._ticking = true;
     try {
       await this._step();
+      
+      // Heartbeat market tick
+      if (this._state === "RUNNING" || this._state === "INIT") {
+        this._telemetry.push({
+          ts: this._clock.nowMs(),
+          type: "MARKET_TICK",
+          payload: {
+            slug: this.slug,
+            asset: Env.get("MARKET_ASSET"),
+            price: this._ticker.price,
+            bid: this._orderBook.bestBidPrice("UP"), // Simplification for telemetry HUD
+            ask: this._orderBook.bestAskPrice("UP")
+          }
+        });
+        
+        if (this._aggregator) {
+            this._telemetry.push({
+                ts: this._clock.nowMs(),
+                type: "PREDICTIVE_AGGREGATE",
+                payload: this._aggregator.latest()
+            });
+        }
+        if (this._leadLag) {
+            this._telemetry.push({
+                ts: this._clock.nowMs(),
+                type: "LEAD_LAG_UPDATE",
+                payload: this._leadLag.latest()
+            });
+        }
+      }
     } catch (e) {
       this._log(`[${this.slug}] tick error: ${e}`, "red");
     } finally {
@@ -262,31 +380,92 @@ export class MarketLifecycle {
   }
 
   async setup(): Promise<void> {
-    await this.apiQueue.queueEventDetails(this.slug);
-    const event = this.apiQueue.eventDetails.get(this.slug);
-    if (!event) return;
-    const market = event.markets[0];
-    if (!market) return;
+    if (this._setupPromise) return this._setupPromise;
 
-    this._conditionId = market.conditionId;
-    if (!this._clobTokenIds) {
-      const tokenIds: string[] = JSON.parse(market.clobTokenIds);
-      this._clobTokenIds = [tokenIds[0]!, tokenIds[1]!];
-    }
-    this._feeRate = market.feeSchedule?.rate ?? 0;
-  }
+    this._setupPromise = (async () => {
+      const slot = slotFromSlug(this.slug);
+      const round: RoundWindow = {
+        slug: this.slug,
+        asset: Env.get("MARKET_ASSET"),
+        window: Env.get("MARKET_WINDOW"),
+        startTimeMs: slot.startTime,
+        endTimeMs: slot.endTime,
+      };
 
-  private async _handleInit(): Promise<void> {
+      // Use recovery state if available to avoid refetch
+      const existing = this._conditionId
+        ? {
+            conditionId: this._conditionId,
+            clobTokenIds: this._clobTokenIds!,
+            feeRateBps: this._feeRate,
+          }
+        : undefined;
+
+      this._log(`[${this.slug}] calling venue.initRound`, "dim");
+      const metadata = await this._venue.initRound(round, existing);
+      this._log(
+        `[${this.slug}] venue.initRound returned ${metadata ? "metadata" : "null"}`,
+        "dim",
+      );
+      if (!metadata) {
+        this._setupPromise = null; // Allow retry on next tick if failed
+        return;
+      }
+
+      this._conditionId = metadata.conditionId;
+      this._clobTokenIds = metadata.clobTokenIds;
+      this._feeRate = metadata.feeRateBps;
+
+      this._orderBook.subscribe(metadata.clobTokenIds);
+    })();
+
+    return this._setupPromise;
+  }  private async _handleInit(): Promise<void> {
     await this.setup();
     if (!this._clobTokenIds) return;
 
     const slot = slotFromSlug(this.slug);
-    const delayMs = Math.max(0, slot.startTime - Date.now());
-    this._marketOpenTimer = setTimeout(() => {
-      this._marketPriceHandle = this.apiQueue.queueMarketPrice(slot);
-    }, delayMs);
+    const delayMs = Math.max(0, slot.startTime - this._clock.nowMs());
+    if (!this._marketOpenTimer) {
+      this._marketOpenTimer = this._clock.setTimeout(() => {
+        this._marketPriceHandle = this.apiQueue.queueMarketPrice(slot);
+      }, delayMs);
+    }
 
-    this._orderBook.subscribe(this._clobTokenIds);
+    // Start venue events
+    await this._venue.start();
+
+    if (!this._orderBook.isReady() || !this._userChannel.isReady()) {
+      return;
+    }
+
+    const readiness = this._checkRequiredFeedsReadiness();
+    if (!readiness.ready) {
+      const now = this._clock.nowMs();
+      if (!this._feedReadinessDeadlineMs) {
+        this._feedReadinessDeadlineMs = now + this._feedReadinessTimeoutMs;
+      }
+
+      if (now < this._feedReadinessDeadlineMs) {
+        return; // Wait for next tick
+      }
+
+      const reason = readiness.reasons.join("; ");
+      this._buyBlocked = true;
+      this._sellBlocked = true;
+      this._log(
+        `[${this.slug}] Required feeds not ready after ${this._feedReadinessTimeoutMs}ms: ${reason}. No-trading round.`,
+        "yellow",
+      );
+      this._marketLogger.log({
+        type: "info",
+        msg: "required feeds not ready; no-trading round",
+        reason,
+      });
+      this._setState("DONE");
+      return;
+    }
+
     this._userChannel.subscribe(this._conditionId!);
     this._marketLogger.setSnapshotProvider(() =>
       this._orderBook.getSnapshotData(),
@@ -310,7 +489,7 @@ export class MarketLifecycle {
     });
     this._marketLogger.startSlot(
       this.slug,
-      Date.now(),
+      this._clock.nowMs(),
       this.slotEndMs,
       this._strategyName,
     );
@@ -349,14 +528,26 @@ export class MarketLifecycle {
         const slot = slotFromSlug(this.slug);
         return this.apiQueue.marketResult.get(slot.startTime);
       },
+      resolution: this._resolution,
+      venue: this._venue,
+      predictive: {
+        binance: this._binance,
+        coinbase: this._coinbase,
+        aggregate: this._aggregator,
+        leadLag: this._leadLag,
+      },
+      clock: this._clock,
     };
-
-    await this._orderBook.waitForReady();
-    await this._userChannel.waitForReady();
 
     const cleanup = await this._strategy(ctx);
     if (cleanup) this._strategyCleanup = cleanup;
     this._setState("RUNNING");
+  }
+
+  private _checkRequiredFeedsReadiness(): { ready: true; reasons: [] } | { ready: false; reasons: string[] } {
+    const reasons = this._requiredFeedReadinessReasons(this._clock.nowMs());
+    if (reasons.length === 0) return { ready: true, reasons: [] };
+    return { ready: false, reasons };
   }
 
   /**
@@ -365,10 +556,10 @@ export class MarketLifecycle {
    * Transitions to STOPPING when the slot ends or all orders drain.
    */
   private async _handleRunning(): Promise<void> {
-    if (Date.now() >= this.slotEndMs) {
+    if (this._clock.nowMs() >= this.slotEndMs) {
       this._setState("STOPPING");
       this._log(
-        `[${this.slug}] Market closed — transitioning to STOPPING`,
+        `[${this.slug}] Market closed â€” transitioning to STOPPING`,
         "yellow",
       );
       return;
@@ -403,10 +594,10 @@ export class MarketLifecycle {
     const remaining = this.remainingSecs;
 
     if (remaining <= 0) {
-      // Slot expired — cancel whatever is left
+      // Slot expired â€” cancel whatever is left
       if (pendingSells.length > 0) {
         this._log(
-          `[${this.slug}] Slot expired with ${pendingSells.length} unfilled SELL order(s) — cancelling`,
+          `[${this.slug}] Slot expired with ${pendingSells.length} unfilled SELL order(s) â€” cancelling`,
           "yellow",
         );
         const response = await this._cancelOrders(
@@ -441,14 +632,14 @@ export class MarketLifecycle {
 
   /**
    * Cancel any orders that have passed their expireAtMs.
-   * Fills arrive via user channel callbacks — this only handles expiry.
+   * Fills arrive via user channel callbacks â€” this only handles expiry.
    */
   private async _checkExpiries(): Promise<void> {
-    const now = Date.now();
+    const now = this._clock.nowMs();
     for (const pending of this._pendingOrders) {
       if (now < pending.expireAtMs) continue;
       // Defer expiry for orders that have MATCHED but are awaiting MINED.
-      // Cancelling here would race against the in-flight settlement — the
+      // Cancelling here would race against the in-flight settlement â€” the
       // trade would be dropped and onFilled never fires.
       if (this._userChannel.isMatched(pending.orderId)) continue;
       // Read partial fill from channel BEFORE cancel (order still tracked here).
@@ -469,7 +660,7 @@ export class MarketLifecycle {
   // ---------------------------------------------------------------------------
 
   /**
-   * Fire-and-forget order placement. Returns immediately — do NOT await the
+   * Fire-and-forget order placement. Returns immediately â€” do NOT await the
    * result to know if an order was placed. Use `onFilled` to react to a fill
    * and `onExpired` to react to a cancellation or failed placement.
    * Buys retry up to BUY_MAX_RETRIES times on balance errors; sells retry until slot end.
@@ -492,7 +683,7 @@ export class MarketLifecycle {
   private async _cancelOrders(
     orderIds: string[],
   ): Promise<CancelOrderResponse> {
-    // Skip orders that have MATCHED but are awaiting MINED — cancelling them
+    // Skip orders that have MATCHED but are awaiting MINED â€” cancelling them
     // would unlock the wallet here while the pending settlement still fires
     // onFilled later, double-counting the tracker.
     const cancellable = orderIds.filter(
@@ -545,7 +736,7 @@ export class MarketLifecycle {
   private async _emergencySellLoop(sell: PendingOrder): Promise<void> {
     this._inFlight++;
     return (async () => {
-      while (Date.now() < this.slotEndMs) {
+      while (this._clock.nowMs() < this.slotEndMs) {
         const side = sell.tokenId === this._clobTokenIds![0] ? "UP" : "DOWN";
         const bestBid =
           this._orderBook.bestBidPrice(side as "UP" | "DOWN") ?? sell.price;
@@ -563,7 +754,7 @@ export class MarketLifecycle {
                 shares: sell.shares,
                 orderType: "GTC" as const,
               },
-              expireAtMs: Date.now() + 2000,
+              expireAtMs: this._clock.nowMs() + 2000,
               onFilled: (_filledShares) => {
                 filled = true;
                 resolve();
@@ -573,7 +764,7 @@ export class MarketLifecycle {
                 resolve();
               },
               onExpired: () => {
-                // GTC expired after 2s — retry with fresh bid
+                // GTC expired after 2s â€” retry with fresh bid
                 failed = true;
                 resolve();
               },
@@ -631,6 +822,21 @@ export class MarketLifecycle {
     this._marketLogger.log(
       this._createOrderEntry(pending, "filled", { shares }),
     );
+    
+    this._telemetry.push({
+      ts: this._clock.nowMs(),
+      type: "ORDER_LIFECYCLE",
+      payload: {
+          slug: this.slug,
+          orderId: pending.orderId,
+          status: "filled",
+          side: this._side(pending.tokenId),
+          action: pending.action,
+          price: pending.price,
+          shares
+      }
+    });
+
     if (pending.onFilled) pending.onFilled(shares);
   }
 
@@ -669,11 +875,44 @@ export class MarketLifecycle {
 
         // Pre-flight: drop orders past their expiry
         remaining = remaining.filter((item) => {
-          if (Date.now() >= item.expireAtMs) {
+          if (this._clock.nowMs() >= item.expireAtMs) {
             if (item.onFailed) item.onFailed("order expired before placement");
             return false;
           }
           return true;
+        });
+        if (remaining.length === 0) break;
+
+        remaining = remaining.filter((item) => {
+          const decision = this._riskGate.evaluate(
+            this._createOrderIntent(item),
+            this._createRiskSnapshot(),
+          );
+          
+          this._telemetry.push({
+            ts: this._clock.nowMs(),
+            type: "RISK_DECISION",
+            payload: {
+                slug: this.slug,
+                approved: decision.approved,
+                reasons: decision.reasons,
+                intent: this._createOrderIntent(item)
+            }
+          });
+
+          if (decision.approved) return true;
+
+          const reason = decision.reasons.join("; ");
+          const side = this._side(item.req.tokenId);
+          this._log(
+            `[${this.slug}] Risk gate blocked ${item.req.action.toUpperCase()} ${side} @ ${item.req.price}: ${reason}`,
+            "yellow",
+          );
+          this._marketLogger.log(
+            this._createOrderEntry(item.req, "failed", { reason }),
+          );
+          item.onFailed?.(reason);
+          return false;
         });
         if (remaining.length === 0) break;
 
@@ -704,7 +943,9 @@ export class MarketLifecycle {
             }
             break;
           }
-          await new Promise((r) => setTimeout(r, retryDelayMs));
+          await new Promise<void>((resolve) =>
+            this._clock.setTimeout(() => resolve(), retryDelayMs),
+          );
           continue;
         }
 
@@ -723,7 +964,7 @@ export class MarketLifecycle {
           if (!p || !p.orderId) {
             if (
               p?.errorMsg?.includes("not enough balance") &&
-              Date.now() < this.slotEndMs &&
+              this._clock.nowMs() < this.slotEndMs &&
               retryCount < maxRetries
             ) {
               // Parse actual balance from CLOB error and adjust shares
@@ -759,12 +1000,26 @@ export class MarketLifecycle {
             price: item.req.price,
             shares: item.req.shares,
             expireAtMs: item.expireAtMs,
-            placedAtMs: Date.now(),
+            placedAtMs: this._clock.nowMs(),
             onFilled: item.onFilled,
             onExpired: item.onExpired,
             onFailed: item.onFailed,
           });
           this._marketLogger.log(this._createOrderEntry(item.req, "placed"));
+          
+          this._telemetry.push({
+            ts: this._clock.nowMs(),
+            type: "ORDER_LIFECYCLE",
+            payload: {
+                slug: this.slug,
+                orderId: p.orderId,
+                status: "placed",
+                side: this._side(item.req.tokenId),
+                action: item.req.action,
+                price: item.req.price,
+                shares: item.req.shares
+            }
+          });
 
           // Wrap the OrderRequest with fill accounting and register with the user channel.
           // The channel calls wrapped.onFilled when the order is fully settled on-chain.
@@ -798,6 +1053,22 @@ export class MarketLifecycle {
               this._marketLogger.log(
                 this._createOrderEntry(pending, "failed", { reason }),
               );
+              
+              this._telemetry.push({
+                ts: this._clock.nowMs(),
+                type: "ORDER_LIFECYCLE",
+                payload: {
+                    slug: this.slug,
+                    orderId: orderId,
+                    status: "failed",
+                    side: this._side(pending.tokenId),
+                    action: pending.action,
+                    price: pending.price,
+                    shares: pending.shares,
+                    error: reason
+                }
+              });
+
               item.onFailed?.(reason);
             },
           };
@@ -820,11 +1091,13 @@ export class MarketLifecycle {
             .map((p) => p!.errorMsg)
             .join("; ");
           this._log(
-            `[${this.slug}] Balance not ready — retrying (attempt ${retryCount}): ${summary} | error: ${errors || "pre-flight rejected"}`,
+            `[${this.slug}] Balance not ready â€” retrying (attempt ${retryCount}): ${summary} | error: ${errors || "pre-flight rejected"}`,
             "yellow",
           );
         }
-        await new Promise((r) => setTimeout(r, retryDelayMs));
+        await new Promise<void>((resolve) =>
+          this._clock.setTimeout(() => resolve(), retryDelayMs),
+        );
       }
     })()
       .catch((e) =>
@@ -853,6 +1126,153 @@ export class MarketLifecycle {
 
   private _side(tokenId: string): "UP" | "DOWN" {
     return tokenId === this._clobTokenIds?.[0] ? "UP" : "DOWN";
+  }
+
+  private _roundWindow(): RoundWindow {
+    return {
+      slug: this.slug,
+      asset: Env.get("MARKET_ASSET"),
+      window: Env.get("MARKET_WINDOW"),
+      startTimeMs: this.slotStartMs,
+      endTimeMs: this.slotEndMs,
+    };
+  }
+
+  private _createOrderIntent(item: OrderRequest): StrategyIntent {
+    const now = this._clock.nowMs();
+    return {
+      id: `${this.slug}-${item.req.action}-${now}-${crypto.randomUUID()}`,
+      slug: this.slug,
+      strategyName: this._strategyName,
+      createdAtMs: now,
+      reason: "strategy requested order placement",
+      triggerEventIds: [],
+      round: this._roundWindow(),
+      action: item.req.action,
+      side: this._side(item.req.tokenId),
+      tokenId: item.req.tokenId,
+      price: item.req.price,
+      shares: item.req.shares,
+      orderType: item.req.orderType,
+      expireAtMs: item.expireAtMs,
+    };
+  }
+
+  private _createRiskSnapshot(): RiskSnapshot {
+    return {
+      nowMs: this._clock.nowMs(),
+      productionEnabled: Env.get("PROD"),
+      resolution: this._resolution?.latest() ?? null,
+      venue: this._venue.latest(),
+      predictiveFeeds: [
+        this._binance?.latest() ?? null,
+        this._coinbase?.latest() ?? null,
+      ].filter((event): event is NonNullable<typeof event> => event !== null),
+      predictiveAggregate: this._aggregator?.latest() ?? null,
+      leadLag: this._leadLag?.latest() ?? null,
+      openExposureUsd: this._openExposureUsd(),
+      sessionPnlUsd: this._pnl,
+      clobTokenIds: this._clobTokenIds ?? undefined,
+    };
+  }
+  private async _waitForRequiredFeeds(): Promise<
+    | { ready: true; reasons: [] }
+    | { ready: false; reasons: string[] }
+  > {
+    const timeoutMs = Math.max(0, this._feedReadinessTimeoutMs);
+    const pollMs = Math.max(1, this._feedReadinessPollMs);
+    const deadlineMs = this._clock.nowMs() + timeoutMs;
+
+    while (true) {
+      const reasons = this._requiredFeedReadinessReasons(this._clock.nowMs());
+      if (reasons.length === 0) return { ready: true, reasons: [] };
+      if (timeoutMs === 0 || this._clock.nowMs() >= deadlineMs) {
+        return { ready: false, reasons };
+      }
+
+      await new Promise<void>((resolve) =>
+        this._clock.setTimeout(
+          () => resolve(),
+          Math.min(pollMs, Math.max(1, deadlineMs - this._clock.nowMs())),
+        ),
+      );
+    }
+  }
+
+  private _requiredFeedReadinessReasons(nowMs: number): string[] {
+    const snapshot = this._createRiskSnapshot();
+    const reasons: string[] = [];
+    this._appendFeedReadinessReason(
+      "resolution",
+      snapshot.resolution,
+      nowMs,
+      reasons,
+    );
+    this._appendFeedReadinessReason("venue", snapshot.venue, nowMs, reasons);
+    return reasons;
+  }
+
+  private _appendFeedReadinessReason(
+    label: "resolution" | "venue",
+    event: BotFeedEvent | null,
+    nowMs: number,
+    reasons: string[],
+  ): void {
+    if (!event) {
+      reasons.push(`${label} feed is missing`);
+      return;
+    }
+    if (event.quality === "stale" || event.quality === "missing") {
+      reasons.push(`${label} feed quality is ${event.quality}`);
+    }
+    const maxFreshnessMs =
+      DEFAULT_SIMULATION_RISK_LIMITS.maxFeedFreshnessMs;
+    if (event.freshnessMs !== null && event.freshnessMs > maxFreshnessMs) {
+      reasons.push(`${label} feed is stale by freshness threshold`);
+    }
+    if (nowMs - event.clock.receivedAtMs > maxFreshnessMs) {
+      reasons.push(`${label} feed is stale by received age threshold`);
+    }
+  }
+
+  private _openExposureUsd(): number {
+    const pendingBuyExposure = this._pendingOrders
+      .filter((o) => o.action === "buy")
+      .reduce((sum, o) => sum + o.price * o.shares, 0);
+
+    const positions = new Map<
+      string,
+      { boughtShares: number; boughtCost: number; soldShares: number }
+    >();
+
+    for (const order of this._orderHistory) {
+      const current = positions.get(order.tokenId) ?? {
+        boughtShares: 0,
+        boughtCost: 0,
+        soldShares: 0,
+      };
+      if (order.action === "buy") {
+        current.boughtShares += order.shares;
+        current.boughtCost += order.price * order.shares;
+      } else {
+        current.soldShares += order.shares;
+      }
+      positions.set(order.tokenId, current);
+    }
+
+    let heldExposure = 0;
+    for (const position of positions.values()) {
+      if (position.boughtShares <= 0) continue;
+      const heldShares = Math.max(
+        0,
+        position.boughtShares - position.soldShares,
+      );
+      const averageEntryPrice =
+        position.boughtCost / position.boughtShares;
+      heldExposure += heldShares * averageEntryPrice;
+    }
+
+    return pendingBuyExposure + heldExposure;
   }
 
   private _createOrderEntry(
@@ -932,14 +1352,16 @@ export class MarketLifecycle {
   }
 
   private async _waitForResolution(): Promise<void> {
-    const slot = slotFromSlug(this.slug);
+    const slot = slotFromSlug(this.slug).startTime;
     if (!this._marketPriceHandle) {
-      this._marketPriceHandle = this.apiQueue.queueMarketPrice(slot);
+      this._marketPriceHandle = this.apiQueue.queueMarketPrice(slotFromSlug(this.slug));
     }
     while (true) {
-      const data = this.apiQueue.marketResult.get(slot.startTime);
+      const data = this.apiQueue.marketResult.get(slot);
       if (data?.closePrice) return;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise<void>((resolve) =>
+        this._clock.setTimeout(() => resolve(), 1000),
+      );
     }
   }
 
@@ -957,8 +1379,8 @@ export class MarketLifecycle {
       else held.set(o.tokenId, cur - o.shares);
     }
 
-    const slot = slotFromSlug(this.slug);
-    const data = this.apiQueue.marketResult.get(slot.startTime);
+    const slot = slotFromSlug(this.slug).startTime;
+    const data = this.apiQueue.marketResult.get(slot);
 
     if (data?.closePrice) {
       const resolvedUp = data.closePrice > data.openPrice;
@@ -998,5 +1420,11 @@ export class MarketLifecycle {
         this._pnl >= 0 ? "green" : "red",
       );
     }
+    
+    this._telemetry.push({
+      ts: this._clock.nowMs(),
+      type: "SESSION_PNL",
+      payload: { pnl: this._pnl, loss: 0 } // loss logic is in EarlyBird
+    });
   }
 }

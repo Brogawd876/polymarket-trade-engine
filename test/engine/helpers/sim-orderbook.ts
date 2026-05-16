@@ -14,9 +14,16 @@ type SideSnapshot = {
  * - Allows direct state injection via setSnapshot / setTickSize / setFeeRate
  */
 export class SimOrderBook extends OrderBook {
+  private readonly simListeners = new Set<() => void>();
+
   override subscribe(_clobTokenIds: string[]): void {
     // Store asset IDs so the inherited accessor methods work
     (this as any).assetIds = _clobTokenIds;
+  }
+
+  override onUpdate(handler: () => void): () => void {
+    this.simListeners.add(handler);
+    return () => this.simListeners.delete(handler);
   }
 
   override waitForReady(): Promise<void> {
@@ -40,6 +47,7 @@ export class SimOrderBook extends OrderBook {
 
     this.books.set(upTokenId, buildBook(up));
     this.books.set(downTokenId, buildBook(down));
+    this.notifyListeners();
   }
 
   setTickSize(tokenId: string, tickSize: string): void {
@@ -66,6 +74,13 @@ export class SimOrderBook extends OrderBook {
         bids: buildMap("desc", event.down.bids),
         asks: buildMap("asc", event.down.asks),
       });
+    }
+    this.notifyListeners();
+  }
+
+  private notifyListeners(): void {
+    for (const listener of this.simListeners) {
+      listener();
     }
   }
 }

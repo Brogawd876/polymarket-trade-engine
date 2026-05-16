@@ -154,7 +154,7 @@ describe("EarlyBird — rounds", () => {
       h = makeHarness({ rounds: 1 });
       await h.eb.start();
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._lifecycles.has(FIXTURE_SLUG)).toBe(true);
       expect((h.eb as any)._roundsCreated).toBe(1);
@@ -162,7 +162,7 @@ describe("EarlyBird — rounds", () => {
       const lc = (h.eb as any)._lifecycles.get(FIXTURE_SLUG)!;
       (lc as any)._state = "DONE";
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._shuttingDown).toBe(true);
       expect(h.exitStub.calledWith(0)).toBe(true);
@@ -177,14 +177,14 @@ describe("EarlyBird — rounds", () => {
       await h.eb.start();
 
       // Tick 1 at T_BASE → lc1 (FIXTURE_SLUG)
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._roundsCreated).toBe(1);
       expect((h.eb as any)._lifecycles.has(FIXTURE_SLUG)).toBe(true);
 
       // Force lc1 done; tick processes it (getSlug(1) still = FIXTURE_SLUG → no new lc)
       ((h.eb as any)._lifecycles.get(FIXTURE_SLUG) as any)._state = "DONE";
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._completedSlugs.has(FIXTURE_SLUG)).toBe(true);
       expect((h.eb as any)._lifecycles.size).toBe(0);
@@ -193,14 +193,14 @@ describe("EarlyBird — rounds", () => {
       h.clock.setSystemTime(T_BASE + 250_100);
 
       // Tick 3 → lc2 (NEXT_SLOT_SLUG)
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._lifecycles.has(NEXT_SLOT_SLUG)).toBe(true);
       expect((h.eb as any)._roundsCreated).toBe(2);
 
       // Force lc2 done; tick: rounds exhausted + no lifecycles → shutdown → exit(0)
       ((h.eb as any)._lifecycles.get(NEXT_SLOT_SLUG) as any)._state = "DONE";
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._shuttingDown).toBe(true);
       expect(h.exitStub.calledWith(0)).toBe(true);
@@ -220,7 +220,7 @@ describe("EarlyBird — slotOffset", () => {
       h = makeHarness({ slotOffset: 1 });
       await h.eb.start();
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._lifecycles.has(FIXTURE_SLUG)).toBe(true);
     },
@@ -233,7 +233,7 @@ describe("EarlyBird — slotOffset", () => {
       h = makeHarness({ slotOffset: 2 });
       await h.eb.start();
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._lifecycles.has(NEXT_SLOT_SLUG)).toBe(true);
       expect((h.eb as any)._lifecycles.has(FIXTURE_SLUG)).toBe(false);
@@ -254,7 +254,7 @@ describe("EarlyBird — multiple concurrent lifecycles", () => {
       await h.eb.start();
 
       // Tick at T_BASE: lc1 (FIXTURE_SLUG) created; leave it running
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._lifecycles.size).toBe(1);
       expect((h.eb as any)._lifecycles.has(FIXTURE_SLUG)).toBe(true);
@@ -263,7 +263,7 @@ describe("EarlyBird — multiple concurrent lifecycles", () => {
       h.clock.setSystemTime(T_BASE + 250_100);
 
       // Tick: lc2 (NEXT_SLOT_SLUG) created while lc1 still running
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._lifecycles.size).toBe(2);
       expect((h.eb as any)._lifecycles.has(FIXTURE_SLUG)).toBe(true);
@@ -284,13 +284,13 @@ describe("EarlyBird — session loss shutdown", () => {
       h = makeHarness({ rounds: null, maxSessionLoss: 1 });
       await h.eb.start();
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       const lc = (h.eb as any)._lifecycles.get(FIXTURE_SLUG)!;
       (lc as any)._state = "DONE";
       (lc as any)._pnl = -2.0;
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._shuttingDown).toBe(true);
       expect(h.exitStub.calledWith(0)).toBe(true);
@@ -304,13 +304,13 @@ describe("EarlyBird — session loss shutdown", () => {
       h = makeHarness({ rounds: null, maxSessionLoss: 5 });
       await h.eb.start();
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       const lc = (h.eb as any)._lifecycles.get(FIXTURE_SLUG)!;
       (lc as any)._state = "DONE";
       (lc as any)._pnl = -1.0;
 
-      (h.eb as any)._tick();
+      await (h.eb as any)._tick();
 
       expect((h.eb as any)._shuttingDown).toBe(false);
       expect(h.exitStub.called).toBe(false);

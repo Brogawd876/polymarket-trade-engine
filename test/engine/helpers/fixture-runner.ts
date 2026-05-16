@@ -17,12 +17,26 @@ import {
   DOWN_TOKEN,
 } from "./mock-api-queue.ts";
 import { SimUserChannel } from "../../../engine/user-channel.ts";
+import {
+  createEventClock,
+  type ResolutionPriceEvent,
+  type ResolutionSourceAdapter,
+  type RoundWindow,
+} from "../../../engine/bot-core/index.ts";
 
 export { UP_TOKEN, DOWN_TOKEN, FIXTURE_SLUG };
 
 export const SLOT_START_MS = 1777108200000;
 export const SLOT_END_MS = 1777108500000;
 const LOG_START_TS = 1777108047232;
+
+const ROUND: RoundWindow = {
+  slug: FIXTURE_SLUG,
+  asset: "btc",
+  window: "5m",
+  startTimeMs: SLOT_START_MS,
+  endTimeMs: SLOT_END_MS,
+};
 
 type LogEvent = {
   ts: number;
@@ -36,6 +50,45 @@ function loadFixtureEvents(): LogEvent[] {
     .split("\n")
     .filter((l) => l.trim());
   return lines.map((l) => JSON.parse(l) as LogEvent);
+}
+
+function makeResolutionAdapter(
+  ticker: SimTickerTracker,
+): ResolutionSourceAdapter {
+  const latest = (): ResolutionPriceEvent => {
+    const nowMs = Date.now();
+    const price = ticker.price ?? 100_000;
+    return {
+      id: `fixture-resolution-${nowMs}`,
+      role: "resolution",
+      source: "fixture-resolution",
+      asset: "btc",
+      kind: "live",
+      price,
+      priceToBeat: 100_000,
+      clock: createEventClock({
+        sourceTimestampMs: nowMs - 50,
+        receivedAtMs: nowMs,
+        processedAtMs: nowMs,
+      }),
+      quality: "live",
+      freshnessMs: 50,
+      lagMs: 0,
+      round: ROUND,
+    };
+  };
+
+  return {
+    role: "resolution",
+    source: "fixture-resolution",
+    start: async () => {},
+    stop: async () => {},
+    isReady: () => true,
+    latest,
+    subscribe: () => () => {},
+    priceToBeat: async () => latest(),
+    closePrice: async () => latest(),
+  };
 }
 
 /**
@@ -137,6 +190,7 @@ export class FixtureRunner {
       ticker: this.simTicker as any,
       orderBook: this.simBook,
       userChannel: this.simUserChannel,
+      resolution: makeResolutionAdapter(this.simTicker),
     });
 
     // Apply the first real snapshot (second line has non-null data at LOG_START_TS + 1001ms)

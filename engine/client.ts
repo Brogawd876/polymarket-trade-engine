@@ -22,6 +22,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 import { Env } from "../utils/config";
+import { type Clock, RealClock } from "./bot-core/data-sources.ts";
 
 const RELAYER_URL = "https://relayer-v2.polymarket.com";
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
@@ -44,10 +45,13 @@ const CTF_REDEEM_ABI = parseAbi([
   "function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets)",
 ]);
 
-function simulateDelay() {
+function simulateDelay(clock: Clock, fixedDelayMs?: number) {
   const ms = parseInt(process.env.SIM_DELAY_MS ?? "", 10);
   const delay = isNaN(ms) ? 150 + Math.random() * 10 : ms; // default 150–160ms
-  return new Promise((r) => setTimeout(r, delay));
+  if (fixedDelayMs !== undefined && fixedDelayMs <= 0) return Promise.resolve();
+  return new Promise<void>((resolve) =>
+    clock.setTimeout(() => resolve(), fixedDelayMs ?? delay),
+  );
 }
 
 export type MultiOrderRequest = {
@@ -128,10 +132,10 @@ export function isSimFilled(
 }
 
 /** How long after a buy fills before the sim allows sells on that token. */
-const SIM_BALANCE_DELAY_MS = parseInt(
-  process.env.SIM_BALANCE_DELAY_MS ?? "4000",
-  10,
-);
+function simBalanceDelayMs(): number {
+  const parsed = parseInt(process.env.SIM_BALANCE_DELAY_MS ?? "4000", 10);
+  return Number.isNaN(parsed) ? 4000 : parsed;
+}
 
 export class EarlyBirdSimClient implements EarlyBirdClient {
   private _orders = new Map<string, Order>();
@@ -140,19 +144,27 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
   /** orderId → callback invoked when the sim client cancels that order. Used by SimUserChannel
    *  to synthesize CANCELLATION events, letting tests verify untrackOrder suppresses onFailed. */
   readonly cancelCallbacks = new Map<string, () => void>();
+  private readonly _clock: Clock;
+  private readonly _fixedDelayMs?: number;
 
-  constructor(private getBook: (tokenId: string) => BookSnapshot) {}
+  constructor(
+    private getBook: (tokenId: string) => BookSnapshot,
+    opts: { clock?: Clock; fixedDelayMs?: number } = {},
+  ) {
+    this._clock = opts.clock ?? new RealClock();
+    this._fixedDelayMs = opts.fixedDelayMs;
+  }
 
   async init(): Promise<void> {}
 
   async postMultipleOrders(
     orders: MultiOrderRequest[],
   ): Promise<PlacedOrder[]> {
-    await simulateDelay();
+    await simulateDelay(this._clock, this._fixedDelayMs);
     return orders.map((req) => {
       if (req.action === "sell") {
         const readyAt = this._balanceReadyAt.get(req.tokenId) ?? 0;
-        if (Date.now() < readyAt) {
+        if (this._clock.nowMs() < readyAt) {
           return {
             orderId: "",
             status: "",
@@ -180,7 +192,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
           if (req.action === "buy") {
             this._balanceReadyAt.set(
               req.tokenId,
-              Date.now() + SIM_BALANCE_DELAY_MS,
+              this._clock.nowMs() + simBalanceDelayMs(),
             );
           }
           return { orderId, status: "matched", success: true, errorMsg: "" };
@@ -211,7 +223,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
   }
 
   async getOpenOrderIds(_conditionId: string): Promise<Set<string>> {
-    await simulateDelay();
+    await simulateDelay(this._clock, this._fixedDelayMs);
     const openIds = new Set<string>();
     for (const order of this._orders.values()) {
       if (order.status !== "live") continue;
@@ -224,7 +236,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
         if (order.action === "buy") {
           this._balanceReadyAt.set(
             order.tokenId,
-            Date.now() + SIM_BALANCE_DELAY_MS,
+            this._clock.nowMs() + simBalanceDelayMs(),
           );
         }
       } else {
@@ -235,7 +247,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
   }
 
   async getOrderById(orderId: string): Promise<Order | null> {
-    await simulateDelay();
+    await simulateDelay(this._clock, this._fixedDelayMs);
     const order = this._orders.get(orderId);
     if (!order) return null;
 
@@ -251,7 +263,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
         if (order.action === "buy") {
           this._balanceReadyAt.set(
             order.tokenId,
-            Date.now() + SIM_BALANCE_DELAY_MS,
+            this._clock.nowMs() + simBalanceDelayMs(),
           );
         }
         return updated;
@@ -266,12 +278,12 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
   }
 
   async cancelOrder(orderId: string): Promise<void> {
-    await simulateDelay();
+    await simulateDelay(this._clock, this._fixedDelayMs);
     this._orders.delete(orderId);
   }
 
   async cancelOrders(orderIds: string[]): Promise<CancelOrderResponse> {
-    await simulateDelay();
+    await simulateDelay(this._clock, this._fixedDelayMs);
     const canceled: string[] = [];
     const not_canceled: Record<string, string> = {};
     for (const id of orderIds) {
@@ -344,37 +356,66 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   private readonly _host = "https://clob.polymarket.com";
   private readonly _signer: Wallet;
   private readonly _funder: string | undefined;
-  private readonly _builderConfig: BuilderConfig;
+  private readonly _signatureType: number;
+  private readonly _builderConfig: BuilderConfig | null = null;
   private _creds: { key: string; secret: string; passphrase: string } | null =
     null;
 
   constructor() {
     const privateKey = Env.get("PRIVATE_KEY");
-    this._funder = Env.get("POLY_FUNDER_ADDRESS") || undefined;
-
     if (!privateKey?.startsWith("0x")) {
       throw new Error("PRIVATE_KEY env var must be set (0x-prefixed)");
+    }
+    this._signer = new Wallet(privateKey);
+
+    this._signatureType = Env.get("POLY_SIGNATURE_TYPE");
+    if (![0, 1, 2, 3].includes(this._signatureType)) {
+      throw new Error(
+        `POLY_SIGNATURE_TYPE is required for production and must be set to 0, 1, 2, or 3.\n` +
+          `0: EOA (standard wallet)\n` +
+          `1: POLY_PROXY (existing Magic/Email proxy)\n` +
+          `2: POLY_GNOSIS_SAFE (Safe wallet)\n` +
+          `3: POLY_1271 (deposit-wallet / new API flow)`,
+      );
+    }
+
+    const funderRaw = Env.get("POLY_FUNDER_ADDRESS");
+    if (this._signatureType === 0) {
+      this._funder = funderRaw || this._signer.address;
+    } else {
+      if (!funderRaw) {
+        throw new Error(
+          `POLY_FUNDER_ADDRESS is required for POLY_SIGNATURE_TYPE ${this._signatureType} (Proxy/Safe/1271).`,
+        );
+      }
+      this._funder = funderRaw;
     }
 
     const builderKey = Env.get("BUILDER_KEY");
     const builderSecret = Env.get("BUILDER_SECRET");
     const builderPassphrase = Env.get("BUILDER_PASSPHRASE");
 
-    if (!builderKey || !builderSecret || !builderPassphrase) {
+    const builderCount = [
+      builderKey,
+      builderSecret,
+      builderPassphrase,
+    ].filter(Boolean).length;
+
+    if (builderCount > 0 && builderCount < 3) {
       throw new Error(
-        "BUILDER_KEY, BUILDER_SECRET, BUILDER_PASSPHRASE env vars must be set",
+        "Partial BUILDER credentials detected. Set ALL three (BUILDER_KEY, BUILDER_SECRET, BUILDER_PASSPHRASE) or none.",
       );
     }
 
-    this._builderConfig = new BuilderConfig({
-      localBuilderCreds: {
-        key: builderKey,
-        secret: builderSecret,
-        passphrase: builderPassphrase,
-      },
-    });
-
-    this._signer = new Wallet(privateKey);
+    if (builderCount === 3) {
+      this._builderConfig = new BuilderConfig({
+        localBuilderCreds: {
+          key: builderKey,
+          secret: builderSecret,
+          passphrase: builderPassphrase,
+        },
+      });
+    }
   }
 
   async init(): Promise<void> {
@@ -389,7 +430,7 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       chain: Chain.POLYGON,
       signer: this._signer,
       creds,
-      signatureType: 1, // Magic/Email login
+      signatureType: this._signatureType as any,
       funderAddress: this._funder,
     });
   }
@@ -514,6 +555,11 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   }
 
   private _buildRelay(): RelayClient {
+    if (!this._builderConfig) {
+      throw new Error(
+        "Relay operations (wrap/unwrap/redeem) require BUILDER_KEY, BUILDER_SECRET, and BUILDER_PASSPHRASE to be set.",
+      );
+    }
     const account = privateKeyToAccount(
       this._signer.privateKey as `0x${string}`,
     );

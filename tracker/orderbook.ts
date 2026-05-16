@@ -1,6 +1,11 @@
 import { PriceLevelMap } from "../utils/price-level-map.ts";
 import { renderOrderBookTable } from "../utils/orderbook-table.ts";
 import { Env } from "../utils/config.ts";
+import { type Clock, RealClock } from "../engine/bot-core/data-sources.ts";
+import { 
+  createReconnectingWs, 
+  type ReconnectingWs 
+} from "../utils/reconnecting-ws.ts";
 
 const DEFAULT_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 
@@ -45,11 +50,18 @@ type AssetBook = {
 };
 
 export class OrderBook {
-  private ws?: WebSocket;
+  private ws?: ReconnectingWs;
+  protected _clock: Clock;
   protected assetIds: string[] = ["", ""];
   protected books = new Map<string, AssetBook>();
   protected tickSizes = new Map<string, string>(); // tokenId -> tickSize
   protected feeRates = new Map<string, number>(); // tokenId -> feeRateBps
+  private listeners = new Set<() => void>();
+  private _isTerminallyBroken = false;
+
+  constructor(clock?: Clock) {
+    this._clock = clock ?? new RealClock();
+  }
 
   subscribe(clobTokenIds: string[]) {
     this.destroy();
@@ -57,36 +69,48 @@ export class OrderBook {
     this.books.clear();
     this.tickSizes.clear();
     this.feeRates.clear();
+    this._isTerminallyBroken = false;
 
-    this.ws = new WebSocket(
-      process.env.ORDERBOOK_WS_URL ?? DEFAULT_WS_URL,
-    );
-
-    this.ws.onopen = () => this.sendSubscription();
-    this.ws.onmessage = (event) => this.handleMessage(event);
-    this.ws.onerror = (err) => console.error("OrderBook WS error:", err);
-    this.ws.onclose = () => {
-      if (this.assetIds.length > 0) {
-        setTimeout(() => this.subscribe(this.assetIds), 1000);
+    this.ws = createReconnectingWs({
+      url: process.env.ORDERBOOK_WS_URL ?? DEFAULT_WS_URL,
+      label: "OrderBook",
+      onopen: (ws) => {
+        ws.send(
+          JSON.stringify({
+            type: "market",
+            assets_ids: this.assetIds,
+          }),
+        );
+      },
+      onmessage: (event) => this.handleMessage(event),
+      isTerminal: (event) => {
+        // Code 1006 with no reason often happens on 403 Handshake rejection in some envs,
+        // but we'll look for explicit "Forbidden" or known Cloudflare/rejection signals if possible.
+        if (event.code === 4003 || event.reason.toLowerCase().includes("forbidden")) {
+          this._isTerminallyBroken = true;
+          return "Polymarket access appears to be blocked from this network or region (403 Forbidden).";
+        }
+        return null;
       }
-    };
+    });
   }
 
   destroy() {
     if (this.ws) {
-      this.ws.onclose = null;
-      this.ws.close();
+      this.ws.destroy();
       this.ws = undefined;
     }
   }
 
-  private sendSubscription() {
-    this.ws?.send(
-      JSON.stringify({
-        type: "market",
-        assets_ids: this.assetIds,
-      }),
-    );
+  onUpdate(handler: () => void): () => void {
+    this.listeners.add(handler);
+    return () => this.listeners.delete(handler);
+  }
+
+  protected notify() {
+    for (const listener of this.listeners) {
+      listener();
+    }
   }
 
   private handleMessage(event: MessageEvent) {
@@ -98,6 +122,7 @@ export class OrderBook {
       for (const book of data as BookMessage[]) {
         this.applyBookSnapshot(book);
       }
+      this.notify();
       return;
     }
 
@@ -112,6 +137,7 @@ export class OrderBook {
       const msg = data as LastTradePriceMessage;
       this.feeRates.set(msg.asset_id, parseFloat(msg.fee_rate_bps));
     }
+    this.notify();
   }
 
   private getOrCreateBook(assetId: string): AssetBook {
@@ -137,8 +163,9 @@ export class OrderBook {
       book.asks.set(parseFloat(level.price), parseFloat(level.size));
     }
     if (msg.tick_size) {
-      this.tickSizes.set(this.assetIds[0]!, msg.tick_size);
-      this.tickSizes.set(this.assetIds[1]!, msg.tick_size);
+      // If we have assetIds, assume first two are UP/DOWN for this market
+      if (this.assetIds[0]) this.tickSizes.set(this.assetIds[0], msg.tick_size);
+      if (this.assetIds[1]) this.tickSizes.set(this.assetIds[1], msg.tick_size);
     }
   }
 
@@ -206,31 +233,48 @@ export class OrderBook {
     return `${label}: $${r.profit.toFixed(2)}`;
   }
 
+  isReady(): boolean {
+    if (this._isTerminallyBroken) return false;
+    if (!this.assetIds[0] || !this.assetIds[1]) return false;
+    return (
+      this.books.has(this.assetIds[0]!) && this.books.has(this.assetIds[1]!)
+    );
+  }
+
   /** Resolves once both UP and DOWN books have received their initial snapshot. */
   waitForReady(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      if (
-        this.books.has(this.assetIds[0]!) &&
-        this.books.has(this.assetIds[1]!)
-      ) {
-        resolve();
-        return;
-      }
-      const interval = setInterval(() => {
-        if (
-          this.books.has(this.assetIds[0]!) &&
-          this.books.has(this.assetIds[1]!)
-        ) {
-          clearInterval(interval);
-          resolve();
+    return new Promise<void>((resolve, reject) => {
+      const check = () => {
+        if (this._isTerminallyBroken) {
+          reject(new Error("OrderBook connection terminally failed (likely geoblocked)."));
+          return true;
         }
-      }, 100);
+        if (this.isReady()) {
+          resolve();
+          return true;
+        }
+        return false;
+      };
+
+      if (check()) return;
+
+      const poll = () => {
+        this._clock.setTimeout(() => {
+          if (!check()) poll();
+        }, 100);
+      };
+      poll();
     });
   }
 
   bestBidPrice(side: "UP" | "DOWN"): number | null {
     const assetId = side === "UP" ? this.assetIds[0]! : this.assetIds[1]!;
     return this.books.get(assetId)?.bids.best ?? null;
+  }
+
+  bestAskPrice(side: "UP" | "DOWN"): number | null {
+    const assetId = side === "UP" ? this.assetIds[0]! : this.assetIds[1]!;
+    return this.books.get(assetId)?.asks.best ?? null;
   }
 
   /** Best bid price and USDC value at that level { price, liquidity } */
@@ -274,15 +318,18 @@ export class OrderBook {
   }
 
   /** Structured snapshot of both books for logging. */
-  getSnapshotData(): object {
+  getSnapshotData(): {
+    up: { bids: [number, number][]; asks: [number, number][] } | null;
+    down: { bids: [number, number][]; asks: [number, number][] } | null;
+  } {
+    const DEPTH = 5;
     const toEntries = (
       map: { top: (n: number) => [number, number][] },
       depth: number,
-    ) => map.top(depth).map(([price, size]) => [price, size]);
+    ): [number, number][] => map.top(depth).map(([p, s]) => [p, s]);
 
     const upBook = this.books.get(this.assetIds[0]!);
     const downBook = this.books.get(this.assetIds[1]!);
-    const DEPTH = 5;
     return {
       up: upBook
         ? {

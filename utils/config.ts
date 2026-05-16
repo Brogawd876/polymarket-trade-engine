@@ -6,8 +6,10 @@ export type Config = {
   MARKET_WINDOW: MarketWindow;
   MARKET_ASSET: MarketAsset;
   PROD: boolean;
+  BINANCE_US: boolean;
   PRIVATE_KEY: string;
   POLY_FUNDER_ADDRESS: string;
+  POLY_SIGNATURE_TYPE: number;
   BUILDER_KEY: string;
   BUILDER_SECRET: string;
   BUILDER_PASSPHRASE: string;
@@ -78,8 +80,10 @@ export class Env {
     MARKET_WINDOW: "5m",
     MARKET_ASSET: "btc",
     PROD: false,
+    BINANCE_US: false,
     PRIVATE_KEY: "",
     POLY_FUNDER_ADDRESS: "",
+    POLY_SIGNATURE_TYPE: -1, // Force explicit config
     BUILDER_KEY: "",
     BUILDER_SECRET: "",
     BUILDER_PASSPHRASE: "",
@@ -95,6 +99,10 @@ export class Env {
     // Infer type from default value
     if (typeof defaultVal === "boolean") {
       return (raw === "true") as Config[T];
+    }
+
+    if (typeof defaultVal === "number") {
+      return parseInt(raw, 10) as Config[T];
     }
 
     if (Array.isArray(defaultVal)) {

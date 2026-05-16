@@ -1,0 +1,26 @@
+import type { 
+  BotAsset, 
+  FeedQuality, 
+  PredictiveAggregateSnapshot, 
+  LeadLagSnapshot,
+  RoundWindow
+} from "../bot-core/data-sources.ts";
+
+export type TelemetryEvent = {
+  ts: number; // Engine's nowMs()
+} & (
+  | { type: "SYSTEM_BOOT"; payload: { version: string; mode: "live" | "sim" | "replay"; strategy: string } }
+  | { type: "FEED_STATUS"; payload: { feed: string; status: "connected" | "stale" | "error" | "forbidden"; quality: FeedQuality; message?: string } }
+  | { type: "LIFECYCLE_STATE"; payload: { slug: string; from: string; to: string } }
+  | { type: "MARKET_TICK"; payload: { slug: string; asset: BotAsset; price: number; bid: number | null; ask: number | null } }
+  | { type: "PREDICTIVE_AGGREGATE"; payload: PredictiveAggregateSnapshot }
+  | { type: "LEAD_LAG_UPDATE"; payload: LeadLagSnapshot }
+  | { type: "RISK_DECISION"; payload: { slug: string; approved: boolean; reasons: string[]; intent: any } }
+  | { type: "ORDER_LIFECYCLE"; payload: { slug: string; orderId: string; status: "placed" | "filled" | "canceled" | "expired" | "failed"; side: "UP" | "DOWN"; action: "buy" | "sell"; price: number; shares: number; error?: string } }
+  | { type: "SESSION_PNL"; payload: { pnl: number; loss: number } }
+  | { type: "REPLAY_PROGRESS"; payload: { totalEvents: number; processedEvents: number; isDone: boolean } }
+);
+
+export interface TelemetrySink {
+  push(event: TelemetryEvent): void;
+}

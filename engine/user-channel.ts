@@ -1,12 +1,19 @@
 import type { OrderRequest } from "./strategy/types.ts";
 import type { EarlyBirdClient, BookSnapshot } from "./client.ts";
 import { isSimFilled } from "./client.ts";
+import { type Clock, RealClock } from "./bot-core/data-sources.ts";
+import { 
+  createReconnectingWs, 
+  type ReconnectingWs 
+} from "../utils/reconnecting-ws.ts";
 
 export type ApiCreds = { key: string; secret: string; passphrase: string };
 
 export interface UserChannel {
   /** Start connecting (prod: opens WS + sends auth; sim: starts poll interval). */
   subscribe(conditionId: string): void;
+  /** True if the channel is authenticated and listening for events. */
+  isReady(): boolean;
   /** Resolves when the channel is ready to receive events (auth confirmed). */
   waitForReady(): Promise<void>;
   /** Track a placed order. Channel calls request.onFilled / request.onFailed. */
@@ -27,7 +34,7 @@ type Tracked = {
   request: OrderRequest;
   matched: boolean;
   associatedTrades: Set<string>;
-  minedAmounts: Map<string, number>; // tradeId → amount credited to this order
+  minedAmounts: Map<string, number>; // tradeId -> amount credited to this order
 };
 
 type OrderEvent = {
@@ -54,6 +61,11 @@ abstract class UserChannelBase implements UserChannel {
    *  event is the only signal that the order is filled. */
   private _pendingMatchedTrades = new Map<string, Set<string>>();
 
+  abstract subscribe(conditionId: string): void;
+  abstract isReady(): boolean;
+  abstract waitForReady(): Promise<void>;
+  abstract destroy(): void;
+
   trackOrder(orderId: string, request: OrderRequest): void {
     const bufferedMined = this._pendingTradeAmounts.get(orderId);
     const bufferedMatched = this._pendingMatchedTrades.get(orderId);
@@ -70,9 +82,6 @@ abstract class UserChannelBase implements UserChannel {
 
   untrackOrder(orderId: string): void {
     const t = this.tracked.get(orderId);
-    // Preserve matched orders so the in-flight MINED event can still fire onFilled.
-    // Without this guard, a lifecycle-initiated cancel that races against MATCHED
-    // would drop the trade and the order would never settle.
     if (t?.matched) return;
     this.tracked.delete(orderId);
     this._pendingTradeAmounts.delete(orderId);
@@ -97,25 +106,17 @@ abstract class UserChannelBase implements UserChannel {
 
     if (evt.type === "UPDATE" && evt.status === "MATCHED") {
       t.matched = true;
-      // Merge rather than replace — a TRADE MATCHED event may have already
-      // populated associatedTrades for this order before the order UPDATE arrived.
       for (const tradeId of evt.associate_trades ?? []) {
         t.associatedTrades.add(tradeId);
       }
       this._trySettle(evt.id);
     } else if (evt.type === "CANCELLATION") {
-      // CLOB-side cancellation not initiated by the lifecycle.
-      // Lifecycle-initiated cancels call untrackOrder first, so we never reach here for those.
       this.tracked.delete(evt.id);
       t.request.onFailed?.("cancelled");
     }
   }
 
   protected processTradeEvent(evt: TradeEvent): void {
-    // TRADE MATCHED is the only "matched" signal a taker order receives — the
-    // CLOB does not emit an order UPDATE MATCHED event for orders that fill
-    // immediately on placement. Handle it for makers too as a safety net in
-    // case the order event is delayed or missed.
     if (evt.status === "MATCHED") {
       if (evt.taker_order_id) this._markMatched(evt.taker_order_id, evt.id);
       for (const m of evt.maker_orders ?? []) {
@@ -126,10 +127,8 @@ abstract class UserChannelBase implements UserChannel {
 
     if (evt.status !== "MINED") return;
 
-    // orderId -> amount map
     const contributions: Array<[string, number]> = [];
 
-    // for TAKER orders
     if (
       evt.taker_order_id &&
       (this.tracked.has(evt.taker_order_id) ||
@@ -139,7 +138,6 @@ abstract class UserChannelBase implements UserChannel {
       contributions.push([evt.taker_order_id, parseFloat(evt.size)]);
     }
 
-    // for MAKER orders
     for (const m of evt.maker_orders ?? []) {
       if (
         this.tracked.has(m.order_id) ||
@@ -156,7 +154,6 @@ abstract class UserChannelBase implements UserChannel {
         t.minedAmounts.set(evt.id, amount);
         this._trySettle(orderId);
       } else {
-        // Trade arrived before trackOrder — buffer it
         let buf = this._pendingTradeAmounts.get(orderId);
         if (!buf) {
           buf = new Map();
@@ -167,8 +164,6 @@ abstract class UserChannelBase implements UserChannel {
     }
   }
 
-  /** Mark an order as matched and add the trade to its associated set.
-   *  Buffers state if the order isn't yet tracked (race with trackOrder). */
   private _markMatched(orderId: string, tradeId: string): void {
     const t = this.tracked.get(orderId);
     if (t) {
@@ -185,8 +180,6 @@ abstract class UserChannelBase implements UserChannel {
     buf.add(tradeId);
   }
 
-  // 1. if order event comes before trade event, then eg (0 < 2) return guard will trigger.
-  // 2. if trade event comes before order event, then t.matched return guard will trigger.
   private _trySettle(orderId: string): void {
     const t = this.tracked.get(orderId);
     if (!t || !t.matched) return;
@@ -196,35 +189,31 @@ abstract class UserChannelBase implements UserChannel {
     this.tracked.delete(orderId);
     t.request.onFilled?.(total);
   }
-
-  abstract subscribe(conditionId: string): void;
-  abstract waitForReady(): Promise<void>;
-  abstract destroy(): void;
 }
-
-// ---------------------------------------------------------------------------
-// Production WebSocket channel
-// ---------------------------------------------------------------------------
 
 const USER_WS_URL =
   "wss://ws-subscriptions-frontend-clob.polymarket.com/ws/user";
 
 export class PolymarketUserChannel extends UserChannelBase {
-  private _ws: WebSocket | null = null;
+  private _ws: ReconnectingWs | null = null;
   private _destroyed = false;
   private _conditionId: string | null = null;
-  private _pingInterval: ReturnType<typeof setInterval> | null = null;
+  private _pingInterval: any = null;
   private _readyResolve: (() => void) | null = null;
+  private _isReady = false;
+  private _isTerminallyBroken = false;
   private _ready = new Promise<void>((resolve) => {
     this._readyResolve = resolve;
   });
   private readonly _creds: ApiCreds;
   private readonly _client: EarlyBirdClient;
+  private readonly _clock: Clock;
 
-  constructor(opts: { creds: ApiCreds; client: EarlyBirdClient }) {
+  constructor(opts: { creds: ApiCreds; client: EarlyBirdClient; clock?: Clock }) {
     super();
     this._creds = opts.creds;
     this._client = opts.client;
+    this._clock = opts.clock ?? new RealClock();
   }
 
   subscribe(conditionId: string): void {
@@ -232,128 +221,109 @@ export class PolymarketUserChannel extends UserChannelBase {
     this._connect();
   }
 
+  isReady(): boolean {
+    return this._isReady;
+  }
+
   waitForReady(): Promise<void> {
+    if (this._isTerminallyBroken) {
+      return Promise.reject(new Error("UserChannel connection terminally failed (likely geoblocked)."));
+    }
     return this._ready;
   }
 
   private _connect(): void {
     if (this._destroyed) return;
-    const ws = new WebSocket(USER_WS_URL);
-    this._ws = ws;
 
-    ws.onopen = () => {
-      this._clearPing();
-      ws.send(
-        JSON.stringify({
-          auth: {
-            apiKey: this._creds.key,
-            secret: this._creds.secret,
-            passphrase: this._creds.passphrase,
-          },
-          markets: [this._conditionId!],
-          type: "user",
-        }),
-      );
-      this._pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send("PING");
-      }, 9_000);
-      this._readyResolve?.();
-      this._readyResolve = null;
-    };
-
-    ws.onmessage = (event) => {
-      const raw = event.data as string;
-      if (raw === "PONG") return;
-      try {
-        const msg = JSON.parse(raw);
-        if (msg.event_type === "order")
-          this.processOrderEvent(msg as OrderEvent);
-        else if (msg.event_type === "trade")
-          this.processTradeEvent(msg as TradeEvent);
-      } catch {}
-    };
-
-    ws.onerror = () => {};
-
-    ws.onclose = () => {
-      this._clearPing();
-      if (this._destroyed) return;
-      this._reconnect();
-    };
+    this._ws = createReconnectingWs({
+      url: USER_WS_URL,
+      label: "UserChannel",
+      onopen: (ws) => {
+        this._clearPing();
+        ws.send(
+          JSON.stringify({
+            auth: {
+              apiKey: this._creds.key,
+              secret: this._creds.secret,
+              passphrase: this._creds.passphrase,
+            },
+            markets: [this._conditionId!],
+            type: "user",
+          }),
+        );
+        this._pingInterval = this._clock.setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send("PING");
+        }, 9_000);
+        this._isReady = true;
+        this._readyResolve?.();
+        this._readyResolve = null;
+      },
+      onmessage: (event) => {
+        const raw = event.data as string;
+        if (raw === "PONG") return;
+        try {
+          const msg = JSON.parse(raw);
+          if (msg.event_type === "order")
+            this.processOrderEvent(msg as OrderEvent);
+          else if (msg.event_type === "trade")
+            this.processTradeEvent(msg as TradeEvent);
+        } catch {}
+      },
+      isTerminal: (event) => {
+        if (event.code === 4003 || event.reason.toLowerCase().includes("forbidden")) {
+          this._isTerminallyBroken = true;
+          this._isReady = false;
+          return "Polymarket access appears to be blocked from this network or region (403 Forbidden).";
+        }
+        return null;
+      },
+      onerror: () => {
+        this._isReady = false;
+      }
+    });
   }
 
   private _clearPing(): void {
     if (this._pingInterval) {
-      clearInterval(this._pingInterval);
+      this._clock.clearInterval(this._pingInterval);
       this._pingInterval = null;
     }
-  }
-
-  private _reconnect(): void {
-    if (this._destroyed) return;
-    this._connect();
-
-    const reconcile = async (orderIds: string[]) => {
-      for (const orderId of orderIds) {
-        if (!this.tracked.has(orderId)) continue; // already settled by WS
-        try {
-          const order = await this._client.getOrderById(orderId);
-          if (!order) continue;
-          const t = this.tracked.get(orderId);
-          if (!t) continue; // settled during this sweep
-          if (order.status === "filled") {
-            this.tracked.delete(orderId);
-            const gross =
-              order.actualShares > 0 ? order.actualShares : order.shares;
-            t.request.onFilled?.(gross);
-          } else if (order.status === "cancelled") {
-            this.tracked.delete(orderId);
-            t.request.onFailed?.("cancelled");
-          }
-        } catch {}
-      }
-    };
-
-    // One-shot REST reconciliation: catch any events missed during disconnect
-    const orderIds = [...this.tracked.keys()];
-    reconcile(orderIds);
   }
 
   destroy(): void {
     this._destroyed = true;
     this._clearPing();
     if (this._ws) {
-      this._ws.onclose = null;
-      this._ws.close();
+      this._ws.destroy();
       this._ws = null;
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Simulation channel (no network — polls the sim order book)
-// ---------------------------------------------------------------------------
-
 export class SimUserChannel extends UserChannelBase {
-  private _interval: ReturnType<typeof setInterval> | null = null;
+  private _interval: any = null;
   private readonly _getBook: (tokenId: string) => BookSnapshot;
   private readonly _cancelCallbacks: Map<string, () => void> | null;
+  private readonly _clock: Clock;
 
   constructor(opts: {
     getBook: (tokenId: string) => BookSnapshot;
-    /** Shared map from EarlyBirdSimClient.cancelCallbacks. When provided, the channel
-     *  registers a CANCELLATION-synthesizing callback per tracked order so that tests
-     *  can verify untrackOrder suppresses onFailed for lifecycle-initiated cancels. */
     cancelCallbacks?: Map<string, () => void>;
+    clock?: Clock;
   }) {
     super();
     this._getBook = opts.getBook;
     this._cancelCallbacks = opts.cancelCallbacks ?? null;
+    this._clock = opts.clock ?? new RealClock();
   }
 
   subscribe(_conditionId: string): void {
-    if (this._interval) clearInterval(this._interval);
-    this._interval = setInterval(() => this._check(), 100);
+    if (this._interval) this._clock.clearInterval(this._interval);
+    this._interval = this._clock.setInterval(() => this._check(), 100);
+  }
+
+  isReady(): boolean {
+    return true;
   }
 
   waitForReady(): Promise<void> {
@@ -372,8 +342,6 @@ export class SimUserChannel extends UserChannelBase {
   }
 
   override untrackOrder(orderId: string): void {
-    // If super skipped (matched-not-mined), keep the cancel callback too —
-    // the order is still tracked and a stray CANCELLATION must stay routable.
     const wasMatched = this.isMatched(orderId);
     super.untrackOrder(orderId);
     if (!wasMatched) this._cancelCallbacks?.delete(orderId);
@@ -381,12 +349,11 @@ export class SimUserChannel extends UserChannelBase {
 
   private _check(): void {
     for (const [orderId, t] of this.tracked) {
-      if (t.matched) continue; // already synthesized MATCHED, waiting for MINED
+      if (t.matched) continue;
       const { req } = t.request;
       const book = this._getBook(req.tokenId);
       if (!isSimFilled(req, book)) continue;
 
-      // Synthesize an order MATCHED event with one synthetic trade
       const tradeId = crypto.randomUUID();
       this.processOrderEvent({
         id: orderId,
@@ -395,10 +362,8 @@ export class SimUserChannel extends UserChannelBase {
         associate_trades: [tradeId],
       });
 
-      // Schedule trade MINED after the simulated on-chain settlement delay.
-      // Read at call time so tests can control it via process.env.SIM_BALANCE_DELAY_MS.
       const delay = parseInt(process.env.SIM_BALANCE_DELAY_MS ?? "4000", 10);
-      setTimeout(() => {
+      this._clock.setTimeout(() => {
         this.processTradeEvent({
           id: tradeId,
           status: "MINED",
@@ -414,7 +379,7 @@ export class SimUserChannel extends UserChannelBase {
 
   destroy(): void {
     if (this._interval) {
-      clearInterval(this._interval);
+      this._clock.clearInterval(this._interval);
       this._interval = null;
     }
   }

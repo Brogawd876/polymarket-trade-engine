@@ -1,0 +1,218 @@
+export interface Clock {
+  nowMs(): number;
+  setTimeout(handler: () => void, delayMs: number): any;
+  clearTimeout(handle: any): void;
+  setInterval(handler: () => void, intervalMs: number): any;
+  clearInterval(handle: any): void;
+}
+
+export class RealClock implements Clock {
+  nowMs(): number {
+    return Date.now();
+  }
+  setTimeout(handler: () => void, delayMs: number): any {
+    return setTimeout(handler, delayMs);
+  }
+  clearTimeout(handle: any): void {
+    clearTimeout(handle);
+  }
+  setInterval(handler: () => void, intervalMs: number): any {
+    return setInterval(handler, intervalMs);
+  }
+  clearInterval(handle: any): void {
+    clearInterval(handle);
+  }
+}
+
+export type BotAsset = "btc" | "eth" | "xrp" | "sol" | "doge";
+
+export type FeedRole = "resolution" | "venue" | "predictive";
+
+export type FeedQuality = "live" | "delayed" | "stale" | "missing";
+
+export type EventClock = {
+  /** Timestamp supplied by the upstream venue/feed, when available. */
+  sourceTimestampMs: number | null;
+  /** Local wall-clock timestamp captured as soon as the event is received. */
+  receivedAtMs: number;
+  /** Local wall-clock timestamp after parsing/normalization. */
+  processedAtMs: number;
+  /** Monotonic local timestamp for ordering within this process. */
+  monotonicReceivedNs: bigint;
+};
+
+export type RoundWindow = {
+  slug: string;
+  asset: BotAsset;
+  window: "5m" | "15m";
+  startTimeMs: number;
+  endTimeMs: number;
+};
+
+export type FeedEventBase = {
+  id: string;
+  role: FeedRole;
+  source: string;
+  asset: BotAsset;
+  clock: EventClock;
+  quality: FeedQuality;
+  freshnessMs: number | null;
+  lagMs: number | null;
+  round?: RoundWindow;
+};
+
+export type ResolutionPriceKind = "live" | "open" | "close";
+
+export type ResolutionPriceEvent = FeedEventBase & {
+  role: "resolution";
+  kind: ResolutionPriceKind;
+  price: number;
+  priceToBeat?: number;
+};
+
+export type VenueBookSide = {
+  bids: Array<[price: number, size: number]>;
+  asks: Array<[price: number, size: number]>;
+};
+
+export type VenueMetadata = {
+  conditionId: string;
+  clobTokenIds: [string, string];
+  feeRateBps: number;
+  closed: boolean;
+};
+
+export type VenueOrderBookEvent = FeedEventBase & {
+  role: "venue";
+  kind: "orderbook";
+  up: VenueBookSide | null;
+  down: VenueBookSide | null;
+  bestBidUp: number | null;
+  bestAskUp: number | null;
+  bestBidDown: number | null;
+  bestAskDown: number | null;
+  feeRateBps?: number;
+};
+
+export type PredictivePriceEvent = FeedEventBase & {
+  role: "predictive";
+  kind: "trade" | "ticker" | "mark";
+  price: number;
+  volume?: number;
+  exchange: string;
+};
+
+export type BotFeedEvent =
+  | ResolutionPriceEvent
+  | VenueOrderBookEvent
+  | PredictivePriceEvent;
+
+export interface BotDataAdapter<TEvent extends BotFeedEvent> {
+  readonly role: TEvent["role"];
+  readonly source: string;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  isReady(): boolean;
+  latest(): TEvent | null;
+  subscribe(handler: (event: TEvent) => void): () => void;
+}
+
+export interface ResolutionSourceAdapter
+  extends BotDataAdapter<ResolutionPriceEvent> {
+  priceToBeat(round: RoundWindow): Promise<ResolutionPriceEvent | null>;
+  closePrice(round: RoundWindow): Promise<ResolutionPriceEvent | null>;
+}
+
+export interface VenueDataAdapter extends BotDataAdapter<VenueOrderBookEvent> {
+  /**
+   * Fetches metadata for a round and returns normalized venue state.
+   * If metadata is already supplied (e.g. via recovery), it should be used
+   * to avoid redundant network calls.
+   */
+  initRound(
+    round: RoundWindow,
+    existingMetadata?: Partial<VenueMetadata>,
+  ): Promise<VenueMetadata | null>;
+}
+
+export interface PredictiveFeedAdapter
+  extends BotDataAdapter<PredictivePriceEvent> {}
+
+export type PredictiveAggregateSnapshot = {
+  asset: BotAsset;
+  timestampMs: number;
+  /** Combined/average reference price from all healthy feeds. */
+  price: number | null;
+  /** Feeds included in this aggregate. */
+  feeds: Record<string, {
+    price: number;
+    quality: FeedQuality;
+    /** Time since the latest event was locally received (ms). */
+    latestEventAgeMs: number;
+    /** Observed source-to-receive delay (ms), where available. */
+    arrivalDelayMs: number | null;
+  }>;
+  /** Absolute difference between highest and lowest feed prices. */
+  divergenceAbs: number | null;
+  /** Percentage difference (relative to average). */
+  divergencePct: number | null;
+  /** True if divergence exceeds threshold or NO healthy feeds remain. */
+  disagreement: boolean;
+};
+
+export interface PredictiveSignalAggregator {
+  latest(): PredictiveAggregateSnapshot;
+  subscribe(handler: (snapshot: PredictiveAggregateSnapshot) => void): () => void;
+}
+
+export type FeedTimingStats = {
+  feed: string;
+  sampleCount: number;
+  latestArrivalDelayMs: number | null;
+  trailingAverageArrivalDelayMs: number | null;
+};
+
+export type LeadLagSnapshot = {
+  asset: BotAsset;
+  timestampMs: number;
+  feeds: Record<string, FeedTimingStats>;
+  /** The feed with the lowest trailing average arrival delay. */
+  observedTimingLeader: string | null;
+  /** The feed with the second lowest trailing average arrival delay. */
+  observedTimingRunnerUp: string | null;
+  /** Difference in trailing average delays between leader and runner-up (ms). */
+  averageDelaySpreadMs: number | null;
+  /** Qualitative measure of how consistently one feed is arriving before the other. */
+  leadershipConfidence: "none" | "weak" | "moderate" | "strong";
+  /** True if we have enough samples for all configured feeds to make a determination. */
+  sufficientSamples: boolean;
+};
+
+export interface LeadLagMonitor {
+  latest(): LeadLagSnapshot;
+  subscribe(handler: (snapshot: LeadLagSnapshot) => void): () => void;
+}
+
+export function createEventClock(params: {
+  sourceTimestampMs?: number | null;
+  receivedAtMs?: number;
+  processedAtMs?: number;
+  monotonicReceivedNs?: bigint;
+} = {}): EventClock {
+  const receivedAtMs = params.receivedAtMs ?? Date.now();
+  return {
+    sourceTimestampMs: params.sourceTimestampMs ?? null,
+    receivedAtMs,
+    processedAtMs: params.processedAtMs ?? receivedAtMs,
+    monotonicReceivedNs: params.monotonicReceivedNs ?? process.hrtime.bigint(),
+  };
+}
+
+export function measureFreshness(clock: EventClock): number | null {
+  if (clock.sourceTimestampMs === null) return null;
+  return Math.max(0, clock.receivedAtMs - clock.sourceTimestampMs);
+}
+
+export function measureProcessingLag(clock: EventClock): number {
+  return Math.max(0, clock.processedAtMs - clock.receivedAtMs);
+}

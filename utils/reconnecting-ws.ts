@@ -7,6 +7,11 @@ export interface ReconnectingWsOptions {
   onopen?: (ws: WebSocket) => void;
   onmessage: (event: MessageEvent) => void;
   onerror?: (err: Event) => void;
+  /** 
+   * Optional hook to classify a closure as terminal. 
+   * Return a string message to stop retrying and surface a fatal error.
+   */
+  isTerminal?: (event: CloseEvent) => string | null;
 }
 
 export interface ReconnectingWs {
@@ -37,16 +42,27 @@ export function createReconnectingWs(
       opts.onerror?.(err);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       if (destroyed) return;
+
+      // Check for terminal conditions (e.g. geoblock)
+      const terminalMessage = opts.isTerminal?.(event);
+      if (terminalMessage) {
+        const label = opts.label ? `[${opts.label}]` : "[WS]";
+        console.error(`\n[fatal] ${label} Terminal Connection Failure: ${terminalMessage}\n`);
+        // We do NOT reschedule connect()
+        return;
+      }
+
       const delay = Math.min(
         BASE_DELAY_MS * Math.pow(2, attempt),
         MAX_DELAY_MS,
       );
       attempt++;
       const label = opts.label ? `[${opts.label}]` : "[WS]";
+      const reason = event.reason ? ` Reason: ${event.reason}` : "";
       console.warn(
-        `${label} Disconnected. Reconnecting in ${delay}ms (attempt ${attempt})...`,
+        `${label} Disconnected (Code: ${event.code}${reason}). Reconnecting in ${delay}ms (attempt ${attempt})...`,
       );
       retryTimer = setTimeout(connect, delay);
     };

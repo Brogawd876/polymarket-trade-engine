@@ -17,7 +17,7 @@ import { Env } from "../../utils/config.ts";
 // ---------------------------------------------------------------------------
 
 export const simulationStrategy: Strategy = async (ctx) => {
-  // ── Prod guard ────────────────────────────────────────────────────────────
+  // â”€â”€ Prod guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // This strategy is specially designed for simulation only. If you still
   // want to run it in production, remove this block and make the necessary
   // changes to the strategy logic as per your needs.
@@ -35,41 +35,27 @@ export const simulationStrategy: Strategy = async (ctx) => {
   // We trade the UP side throughout this example.
   const upTokenId = ctx.clobTokenIds[0];
 
-  // The strategy is invoked before the market window opens — we are always
+  // The strategy is invoked before the market window opens â€” we are always
   // running ahead of time (slot offset >= 1). The actual market window opens
   // at slotEndMs - 300_000 (i.e. 5 minutes before slot end).
   // Schedule a log for when that moment arrives.
   const marketOpenMs = ctx.slotEndMs - 300_000;
-  const msUntilOpen = marketOpenMs - Date.now();
+  const msUntilOpen = marketOpenMs - ctx.clock.nowMs();
 
-  // ── Cleanup ───────────────────────────────────────────────────────────────
-  //
-  // The Strategy type optionally returns a cleanup function, similar to the
-  // return value of React's useEffect. The lifecycle calls it when the market
-  // is destroyed — whether it resolved normally, was force-stopped, or the
-  // session exited early due to a loss limit.
-  //
-  // Use this to clear any timers or intervals your strategy created so they
-  // don't fire after the market is gone (stale ctx references, phantom logs).
-  //
+  // â”€â”€ Cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Collect timer handles here so the cleanup function can cancel them all.
-  const timers: NodeJS.Timeout[] = [];
+  const timers: any[] = [];
 
   timers.push(
-    setTimeout(() => {
+    ctx.clock.setTimeout(() => {
       ctx.log(
-        `[simulation] market window open — slot ends at ${new Date(ctx.slotEndMs).toISOString()}`,
+        `[simulation] market window open â€” slot ends at ${new Date(ctx.slotEndMs).toISOString()}`,
         "cyan",
       );
     }, msUntilOpen),
   );
 
-  // ── Step 1 — place a buy order immediately ───────────────────────────────
-  //
-  // postOrders() is fire-and-forget — it returns immediately.
-  // Never use its return value to confirm placement; use the callbacks below.
-  // Buys are silently dropped if the engine has blocked buys (e.g. too close
-  // to slot end), so always handle onExpired / onFailed defensively.
+  // â”€â”€ Step 1 â€” place a buy order immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   ctx.postOrders([
     {
       req: {
@@ -82,23 +68,14 @@ export const simulationStrategy: Strategy = async (ctx) => {
       // The order is automatically cancelled if it hasn't filled when 100s is remaining for market end.
       expireAtMs: ctx.slotEndMs - 100_000,
 
-      // ── Step 2 — buy filled: place a take-profit sell ──────────────────
-      //
-      // filledShares may differ from the requested amount when the order is
-      // partially filled, so always use the value provided here rather than
-      // the original shares constant.
+      // â”€â”€ Step 2 â€” buy filled: place a take-profit sell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       onFilled(filledShares) {
         ctx.log(
-          `[simulation] BUY filled — ${filledShares} shares @ 0.49`,
+          `[simulation] BUY filled â€” ${filledShares} shares @ 0.49`,
           "green",
         );
 
-        // ── Step 3 — place a take-profit sell, expiring 30 s before close ──
-        //
-        // Setting expireAtMs to slotEndMs - 30_000 means the engine will
-        // automatically cancel this order if it hasn't filled with 30 seconds
-        // still on the clock. That triggers onExpired while there is still
-        // time to exit cleanly via an emergency sell.
+        // â”€â”€ Step 3 â€” place a take-profit sell, expiring 30 s before close â”€â”€
         ctx.postOrders([
           {
             req: {
@@ -111,7 +88,7 @@ export const simulationStrategy: Strategy = async (ctx) => {
 
             onFilled() {
               ctx.log(
-                "[simulation] SELL filled @ 0.70 — trade complete",
+                "[simulation] SELL filled @ 0.70 â€” trade complete",
                 "green",
               );
             },
@@ -122,21 +99,18 @@ export const simulationStrategy: Strategy = async (ctx) => {
           },
         ]);
 
-        // Emergency sell 30s before slot end — the order is still pending
-        // at this point so emergencySells() can cancel-and-replace it.
-        const msUntilEmergency = ctx.slotEndMs - 30_000 - Date.now();
+        // Emergency sell 30s before slot end
+        const msUntilEmergency = ctx.slotEndMs - 30_000 - ctx.clock.nowMs();
         if (msUntilEmergency > 0) {
-          // Track this timer so cleanup can cancel it if the market is
-          // destroyed before it fires (e.g. session loss limit hit).
           timers.push(
-            setTimeout(() => {
+            ctx.clock.setTimeout(() => {
               const pendingSellIds = ctx.pendingOrders
                 .filter((o) => o.action === "sell")
                 .map((o) => o.orderId);
 
               if (pendingSellIds.length > 0) {
                 ctx.log(
-                  "[simulation] sell not filled — 30 s remaining, triggering emergency sell",
+                  "[simulation] sell not filled â€” 30 s remaining, triggering emergency sell",
                   "red",
                 );
                 ctx.emergencySells(pendingSellIds);
@@ -156,10 +130,8 @@ export const simulationStrategy: Strategy = async (ctx) => {
     },
   ]);
 
-  // Return the cleanup function. The lifecycle calls this on destroy(),
-  // cancelling any timers that haven't fired yet.
+  // Return the cleanup function.
   return () => {
-    for (const t of timers) clearTimeout(t);
+    for (const t of timers) ctx.clock.clearTimeout(t);
   };
 };
-

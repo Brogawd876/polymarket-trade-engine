@@ -1,3 +1,5 @@
+import { TerminalAccessError, isBlockedBody } from "./errors";
+
 const CURL =
   process.platform === "darwin"
     ? "/opt/homebrew/opt/curl/bin/curl"
@@ -73,10 +75,28 @@ export async function fetchWithRetry<T = Response>(
           _params.abort,
         )
       : await fetch(url, _params.options);
-    if (!res.ok) {
-      const obj = await res.text();
-      throw Error(obj);
+
+    if (res.status === 403) {
+      const body = await res.text();
+      throw new TerminalAccessError(
+        `Access Forbidden (403): Polymarket access appears to be blocked from this network or region.`,
+        403,
+        body,
+      );
     }
+
+    if (!res.ok) {
+      const body = await res.text();
+      if (isBlockedBody(body)) {
+        throw new TerminalAccessError(
+          `Access Blocked: The response body indicates region or access restrictions.`,
+          res.status,
+          body,
+        );
+      }
+      throw Error(body);
+    }
+
     if (params?.resolveWhen) {
       return await params.resolveWhen(res);
     } else {
@@ -86,6 +106,11 @@ export async function fetchWithRetry<T = Response>(
     // do not retry on abort
     if (e instanceof DOMException && e.name === "AbortError")
       return undefined as T;
+
+    // do not retry on terminal access errors
+    if (e instanceof TerminalAccessError) {
+      throw e;
+    }
 
     // caller-supplied error hook (may call process.exit or throw to stop retrying)
     if (params?.onError) params.onError(e);

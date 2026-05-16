@@ -143,8 +143,7 @@ class Indicators {
   private _peakAbsGap = 0;
   private _lastUpdate = 0;
 
-  tick(gap: number | null, btcPrice: number | undefined): void {
-    const now = Date.now();
+  tick(gap: number | null, btcPrice: number | undefined, now: number): void {
     if (now - this._lastUpdate < 1000) return;
     this._lastUpdate = now;
     if (gap !== null) {
@@ -440,16 +439,16 @@ export const lateEntry: Strategy = async (ctx) => {
   };
   const indicators = new Indicators();
 
-  const tickInterval = setInterval(() => {
-    const remaining = Math.floor((ctx.slotEndMs - Date.now()) / 1000);
+  const tickInterval = ctx.clock.setInterval(() => {
+    const remaining = Math.floor((ctx.slotEndMs - ctx.clock.nowMs()) / 1000);
 
     if (remaining <= 0) {
-      clearInterval(tickInterval);
+      ctx.clock.clearInterval(tickInterval);
       return;
     }
 
     if (remaining <= 5 && !state.position) {
-      clearInterval(tickInterval);
+      ctx.clock.clearInterval(tickInterval);
       releaseLock();
       return;
     }
@@ -460,7 +459,7 @@ export const lateEntry: Strategy = async (ctx) => {
     const btcPrice = ctx.ticker.price;
     const gap = btcPrice !== undefined ? btcPrice - priceToBeat : null;
 
-    indicators.tick(gap, btcPrice);
+    indicators.tick(gap, btcPrice, ctx.clock.nowMs());
 
     if (!state.hasEntered) {
       const up = ctx.orderBook.bestAskInfo("UP");
