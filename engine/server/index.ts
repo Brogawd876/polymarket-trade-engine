@@ -14,7 +14,7 @@ export type ControlServerOptions = {
  * Provides a WebSocket telemetry stream and REST control endpoints.
  */
 export class ControlServer {
-  private _server?: Server;
+  private _server?: Server<{ sessionId: string }>;
   private _telemetryBus: TelemetryBus;
   private _bot: EarlyBird;
   private _port: number;
@@ -56,12 +56,7 @@ export class ControlServer {
 
         // REST Endpoints
         if (url.pathname === "/api/status") {
-            return Response.json({
-                mode: (this._bot as any)._replayReader ? "replay" : ((this._bot as any)._prod ? "live" : "sim"),
-                activeLifecycles: this._bot.activeLifecycleCount,
-                isShuttingDown: this._bot.isShuttingDown,
-                summary: this._bot.replayStateSummary()
-            });
+            return Response.json(this._bot.getStatus());
         }
 
         if (url.pathname === "/api/health") {

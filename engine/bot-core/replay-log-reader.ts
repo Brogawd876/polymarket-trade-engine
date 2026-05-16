@@ -70,6 +70,10 @@ export class ReplayLogReader {
     return this.events.length;
   }
 
+  get processedEventCount(): number {
+    return this.cursor;
+  }
+
   advanceTo(newNowMs: number) {
     while (this.cursor < this.events.length && this.events[this.cursor]!.ts <= newNowMs) {
       const evt = this.events[this.cursor]!;

@@ -52,6 +52,16 @@ export type EarlyBirdRuntimeOptions = {
   telemetry?: TelemetrySink;
 };
 
+export type EngineStatus = {
+  mode: "live" | "sim" | "replay";
+  strategy: string;
+  activeLifecycles: number;
+  isShuttingDown: boolean;
+  sessionPnl: number;
+  sessionLoss: number;
+  summary: string;
+};
+
 export class EarlyBird {
   private _lifecycles = new Map<string, MarketLifecycle>();
   private _completedSlugs = new Set<string>();
@@ -121,9 +131,9 @@ export class EarlyBird {
       this._coinbase = new ReplayPredictiveAdapter("coinbase", this._replayReader);
     } else {
       this._ticker = new TickerTracker();
-      this._resolution = new PolymarketResolutionAdapter(this._clock);
-      this._binance = new BinancePredictiveAdapter(this._clock);
-      this._coinbase = new CoinbasePredictiveAdapter(this._clock);
+      this._resolution = new PolymarketResolutionAdapter(this._clock, this._telemetry);
+      this._binance = new BinancePredictiveAdapter(this._clock, this._telemetry);
+      this._coinbase = new CoinbasePredictiveAdapter(this._clock, this._telemetry);
     }
 
     this._aggregator = new DefaultPredictiveAggregator({
@@ -340,6 +350,18 @@ export class EarlyBird {
 
   get isShuttingDown(): boolean {
     return this._shuttingDown;
+  }
+
+  getStatus(): EngineStatus {
+      return {
+          mode: this._replayReader ? "replay" : (this._prod ? "live" : "sim"),
+          strategy: this._strategyName,
+          activeLifecycles: this._lifecycles.size,
+          isShuttingDown: this._shuttingDown,
+          sessionPnl: this._sessionPnl,
+          sessionLoss: this._sessionLoss,
+          summary: this.replayStateSummary()
+      };
   }
 
   replayStateSummary(): string {

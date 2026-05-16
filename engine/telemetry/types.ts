@@ -17,8 +17,9 @@ export type TelemetryEvent = {
   | { type: "LEAD_LAG_UPDATE"; payload: LeadLagSnapshot }
   | { type: "RISK_DECISION"; payload: { slug: string; approved: boolean; reasons: string[]; intent: any } }
   | { type: "ORDER_LIFECYCLE"; payload: { slug: string; orderId: string; status: "placed" | "filled" | "canceled" | "expired" | "failed"; side: "UP" | "DOWN"; action: "buy" | "sell"; price: number; shares: number; error?: string } }
+  | { type: "ROUND_PNL"; payload: { slug: string; pnl: number } }
   | { type: "SESSION_PNL"; payload: { pnl: number; loss: number } }
-  | { type: "REPLAY_PROGRESS"; payload: { totalEvents: number; processedEvents: number; isDone: boolean } }
+  | { type: "REPLAY_PROGRESS"; payload: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } }
 );
 
 export interface TelemetrySink {

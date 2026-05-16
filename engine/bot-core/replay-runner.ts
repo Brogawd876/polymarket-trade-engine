@@ -1,5 +1,6 @@
 import type { ReplayLogReader } from "./replay-log-reader.ts";
 import type { Clock } from "./data-sources.ts";
+import { type TelemetrySink, NullTelemetrySink } from "../telemetry/index.ts";
 
 export type ReplayBot = {
   start(): Promise<void>;
@@ -26,11 +27,11 @@ export class VirtualClock implements Clock {
   setNowMs(ms: number) {
     if (ms < this._nowMs) return;
     this._nowMs = ms;
-    
+
     let triggered: number;
     do {
       triggered = 0;
-      // Convert entries to array to avoid "Map changed during iteration" if handlers set new timers
+      // Convert entries to array to avoid "Map changed during iteration" if handlers set new timers  
       const entries = Array.from(this._timers.entries())
         .sort((a, b) => a[1].targetMs - b[1].targetMs || a[1].order - b[1].order);
       for (const [id, timer] of entries) {
@@ -93,28 +94,30 @@ export class ReplayRunner {
   private reader: ReplayLogReader;
   private bot: ReplayBot;
   private clock: VirtualClock;
+  private telemetry: TelemetrySink;
 
-  constructor(reader: ReplayLogReader, bot: ReplayBot, clock: VirtualClock) {
+  constructor(reader: ReplayLogReader, bot: ReplayBot, clock: VirtualClock, telemetry?: TelemetrySink) {
     this.reader = reader;
     this.bot = bot;
     this.clock = clock;
+    this.telemetry = telemetry ?? new NullTelemetrySink();
   }
 
   async run(): Promise<{ ticks: number; completed: true; finalTimeMs: number }> {
     console.log("[ReplayRunner] Priming data...");
-    
+
     // Process events until the bot's orderbook and ticker are truly ready
     let primedCount = 0;
     while (!this.reader.isDone()) {
       const nextTs = this.reader.peekNextTs();
       if (nextTs === null) break;
-      
+
       this.clock.setNowMs(nextTs);
-      
+
       let hasData = false;
       const unsubscribe = this.reader.subscribe((evt) => {
           if (evt.type === "orderbook_snapshot" && evt.up && evt.down) {
-              console.log(`[ReplayRunner] Found non-null orderbook snapshot at ts=${evt.ts}`);
+              console.log(`[ReplayRunner] Found non-null orderbook snapshot at ts=${evt.ts}`);        
               hasData = true;
           }
       });
@@ -124,7 +127,7 @@ export class ReplayRunner {
 
       if (hasData) break;
     }
-    console.log(`[ReplayRunner] Primed ${primedCount} events. isDone=${this.reader.isDone()}`);
+    console.log(`[ReplayRunner] Primed ${primedCount} events. isDone=${this.reader.isDone()}`);       
 
     console.log("[ReplayRunner] Starting engine...");
     await this.bot.start();
@@ -134,7 +137,7 @@ export class ReplayRunner {
     let lastStateHash = "";
     let lastProgressMs = this.clock.nowMs();
     let tickCount = 0;
-    
+
     while (!this.reader.isDone() || this.bot.activeLifecycleCount > 0) {
       const nextEventTs = this.reader.peekNextTs();
       const nextTickTargetMs = this.clock.nowMs() + TICK_INTERVAL_MS;
@@ -155,11 +158,22 @@ export class ReplayRunner {
 
           const isShuttingDown = this.bot.isShuttingDown;
 
+          this.telemetry.push({
+            ts: this.clock.nowMs(),
+            type: "REPLAY_PROGRESS",
+            payload: {
+                totalEvents: this.reader.eventCount,
+                processedEvents: this.reader.processedEventCount,
+                isDone: this.reader.isDone(),
+                virtualTimeMs: this.clock.nowMs()
+            }
+          });
+
           // Progress logging every 100 ticks (10s virtual time)
           if (tickCount % 100 === 0) {
              const states = this.bot.replayStateSummary();
              console.log(`[ReplayRunner] tick=${tickCount} time=${new Date(this.clock.nowMs()).toISOString()} active=${this.bot.activeLifecycleCount} states=[${states}]`);
-             
+
              // Stall detection
              const currentStateHash = states + this.reader.isDone() + isShuttingDown;
              if (currentStateHash !== lastStateHash) {
@@ -188,18 +202,18 @@ export class ReplayRunner {
       if (this.reader.isDone() && this.bot.activeLifecycleCount === 0) {
           break;
       }
-      
+
       await new Promise(r => setImmediate(r));
     }
 
     console.log("[ReplayRunner] Replay complete. Shutting down...");
     this.bot.startShutdown("Replay complete.");
-    
+
     while (this.bot.activeLifecycleCount > 0) {
        this.clock.setNowMs(this.clock.nowMs() + TICK_INTERVAL_MS);
        await this.bot.tickOnce();
     }
-    
+
     console.log("[ReplayRunner] Finished.");
     return { ticks: tickCount, completed: true, finalTimeMs: this.clock.nowMs() };
   }

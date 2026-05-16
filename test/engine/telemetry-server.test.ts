@@ -1,0 +1,99 @@
+import { describe, expect, test, afterAll, beforeAll } from "bun:test";
+import { 
+    TelemetryBus, 
+    ControlServer, 
+    VirtualClock,
+    ReplayLogReader,
+    ReplayRunner
+} from "../../engine/bot-core/index.ts";
+import { EarlyBird } from "../../engine/early-bird.ts";
+import { join } from "path";
+
+describe("Telemetry & Control Plane Hardening", () => {
+  test("TelemetryBus dispatches events to multiple subscribers", () => {
+    const bus = new TelemetryBus();
+    let count1 = 0;
+    let count2 = 0;
+
+    bus.subscribe(() => count1++);
+    const unsub2 = bus.subscribe(() => count2++);
+
+    bus.push({ ts: 100, type: "MARKET_TICK", payload: { slug: "test", asset: "btc", price: 100, bid: 99, ask: 101 } });
+    
+    expect(count1).toBe(1);
+    expect(count2).toBe(1);
+
+    unsub2();
+    bus.push({ ts: 101, type: "MARKET_TICK", payload: { slug: "test", asset: "btc", price: 102, bid: 101, ask: 103 } });
+
+    expect(count1).toBe(2);
+    expect(count2).toBe(1);
+  });
+
+  test("ControlServer REST endpoints (health/status)", async () => {
+    const bus = new TelemetryBus();
+    const bot = new EarlyBird("simulation", 1, false, 1, false);
+    const server = new ControlServer({ port: 3005, telemetryBus: bus, bot });
+    server.start();
+
+    try {
+      const health = await fetch("http://127.0.0.1:3005/api/health");
+      expect(health.status).toBe(200);
+      expect(await health.text()).toBe("OK");
+
+      const status = await fetch("http://127.0.0.1:3005/api/status");
+      expect(status.status).toBe(200);
+      const data = await status.json() as any;
+      expect(data.mode).toBe("sim");
+      expect(data.strategy).toBe("simulation");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("ControlServer WebSocket telemetry stream", async () => {
+    const bus = new TelemetryBus();
+    const bot = new EarlyBird("simulation", 1, false, 1, false);
+    const server = new ControlServer({ port: 3006, telemetryBus: bus, bot });
+    server.start();
+
+    try {
+      const ws = new WebSocket("ws://127.0.0.1:3006/telemetry");
+      let received: any[] = [];
+      ws.onmessage = (e) => received.push(JSON.parse(e.data));
+
+      await new Promise(r => setTimeout(r, 100)); // wait for connect
+      
+      const evt: any = { ts: 200, type: "SYSTEM_BOOT", payload: { version: "1.0", mode: "sim", strategy: "test" } };
+      bus.push(evt);
+
+      await new Promise(r => setTimeout(r, 100)); // wait for dispatch
+      
+      expect(received.length).toBe(1);
+      expect(received[0].type).toBe("SYSTEM_BOOT");
+      ws.close();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("Replay telemetry integration", async () => {
+    const logPath = join(import.meta.dir, "..", "fixtures", "replay", "expired-order.log");
+    const clock = new VirtualClock();
+    const telemetryBus = new TelemetryBus();
+    
+    let events: string[] = [];
+    telemetryBus.subscribe(e => events.push(e.type));
+
+    const bot = new EarlyBird("simulation", 1, false, 1, true, logPath, { clock, persistState: false, telemetry: telemetryBus });
+    const reader = bot.replayReader!;
+    const runner = new ReplayRunner(reader, bot, clock, telemetryBus);
+
+    await runner.run();
+
+    expect(events).toContain("SYSTEM_BOOT");
+    expect(events).toContain("REPLAY_PROGRESS");
+    expect(events).toContain("LIFECYCLE_STATE");
+    expect(events).toContain("SESSION_PNL");
+  });
+});

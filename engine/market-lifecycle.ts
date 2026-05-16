@@ -336,7 +336,7 @@ export class MarketLifecycle {
           payload: {
             slug: this.slug,
             asset: Env.get("MARKET_ASSET"),
-            price: this._ticker.price,
+            price: this._ticker.price ?? 0,
             bid: this._orderBook.bestBidPrice("UP"), // Simplification for telemetry HUD
             ask: this._orderBook.bestAskPrice("UP")
           }
@@ -1423,8 +1423,8 @@ export class MarketLifecycle {
     
     this._telemetry.push({
       ts: this._clock.nowMs(),
-      type: "SESSION_PNL",
-      payload: { pnl: this._pnl, loss: 0 } // loss logic is in EarlyBird
+      type: "ROUND_PNL",
+      payload: { slug: this.slug, pnl: this._pnl }
     });
   }
 }

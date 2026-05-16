@@ -143,8 +143,8 @@ if (opts.server) {
 
 if (opts.replay && clock instanceof VirtualClock) {
   const reader = bot.replayReader;
-  if (!reader) throw new Error("Replay mode requested but no replay reader was initialized.");        
-  const runner = new ReplayRunner(reader, bot, clock);
+  if (!reader) throw new Error("Replay mode requested but no replay reader was initialized.");
+  const runner = new ReplayRunner(reader, bot, clock, telemetryBus);
   await runner.run();
   if (controlServer) controlServer.stop();
   process.exit(0);
