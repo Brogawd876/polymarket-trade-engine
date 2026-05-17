@@ -4,11 +4,14 @@ import type { TelemetryEvent } from '../types/telemetry';
 
 const WEBSOCKET_URL = "ws://127.0.0.1:3000/telemetry";
 const REST_STATUS_URL = "http://127.0.0.1:3000/api/operator/status";
+const STATUS_POLL_INTERVAL_MS = 2000;
 
 export function useTelemetry() {
-    const { processEvent, setConnected, setOperatorStatus, isConnected } = useStore();
+    const { processEvent, setConnected, setOperatorStatus, isConnected, clearAllTelemetry } = useStore();
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const lastSessionState = useRef<string | null>(null);
 
     useEffect(() => {
         let isMounted = true;
@@ -18,7 +21,15 @@ export function useTelemetry() {
                 const res = await fetch(REST_STATUS_URL);
                 if (res.ok) {
                     const status = await res.json();
-                    if (isMounted) setOperatorStatus(status);
+                    if (isMounted) {
+                        // Detect transition to idle and clear telemetry
+                        if (lastSessionState.current && lastSessionState.current !== 'idle' && status.sessionState === 'idle') {
+                            console.log("[Telemetry] Session ended, clearing telemetry state.");
+                            clearAllTelemetry();
+                        }
+                        lastSessionState.current = status.sessionState;
+                        setOperatorStatus(status);
+                    }
                 }
             } catch (err) {
                 console.error("Failed to fetch operator status:", err);
@@ -69,15 +80,19 @@ export function useTelemetry() {
 
         connect();
 
+        // Status Polling
+        statusPollRef.current = setInterval(fetchStatus, STATUS_POLL_INTERVAL_MS);
+
         return () => {
             isMounted = false;
             if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+            if (statusPollRef.current) clearInterval(statusPollRef.current);
             if (wsRef.current) {
                 wsRef.current.close();
                 wsRef.current = null;
             }
         };
-    }, [processEvent, setConnected, setOperatorStatus]);
+    }, [processEvent, setConnected, setOperatorStatus, clearAllTelemetry]);
 
     return { isConnected };
 }

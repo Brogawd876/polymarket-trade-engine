@@ -105,17 +105,18 @@ export interface AppState {
     // Actions
     processEvent: (event: TelemetryEvent) => void;
     clearEvents: () => void;
-}
+    clearAllTelemetry: () => void;
+    }
 
-const MAX_TIMELINE_EVENTS = 100;
-const MAX_CHART_POINTS = 1000;
-const MAX_EXECUTION_ROWS = 200;
+    const MAX_TIMELINE_EVENTS = 100;
+    const MAX_CHART_POINTS = 1000;
+    const MAX_EXECUTION_ROWS = 200;
 
-function pushExecutionRow(rows: ExecutionRow[], row: ExecutionRow) {
+    function pushExecutionRow(rows: ExecutionRow[], row: ExecutionRow) {
     return [row, ...rows].slice(0, MAX_EXECUTION_ROWS);
-}
+    }
 
-export const useStore = create<AppState>((set) => ({
+    export const useStore = create<AppState>((set) => ({
     isConnected: false,
     setConnected: (isConnected) => set({ isConnected }),
 
@@ -138,6 +139,23 @@ export const useStore = create<AppState>((set) => ({
     priceHistory: {},
 
     clearEvents: () => set({ eventTimeline: [], executionRows: [], priceHistory: {} }),
+
+    clearAllTelemetry: () => set({
+        bootInfo: null,
+        feeds: {},
+        markets: {},
+        lifecycleStates: {},
+        predictiveAggregate: null,
+        leadLag: null,
+        latestRiskDecisions: [],
+        executionRows: [],
+        eventTimeline: [],
+        sessionPnl: null,
+        roundPnl: {},
+        roundResolutions: {},
+        replayProgress: null,
+        priceHistory: {},
+    }),
 
     processEvent: (event) => set((state) => {
         const nextState = { ...state };

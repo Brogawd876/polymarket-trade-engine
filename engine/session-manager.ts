@@ -165,6 +165,13 @@ export class SessionManager {
       if (bot.isShuttingDown && bot.activeLifecycleCount === 0) {
          clearInterval(interval);
          this._sessionState = "completed";
+         // Transition to idle after a short delay so UI can see "completed"
+         setTimeout(() => {
+            if (this._sessionState === "completed") {
+                this._sessionState = "idle";
+                this._bot = null;
+            }
+         }, 3000);
       }
     }, 500);
   }

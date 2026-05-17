@@ -7,6 +7,7 @@ export function AppLayout() {
     useTelemetry(); // Start telemetry connection on layout mount
     const isConnected = useStore((state) => state.isConnected);
     const bootInfo = useStore((state) => state.bootInfo);
+    const operatorStatus = useStore((state) => state.operatorStatus);
 
     const navItems = [
         { path: '/', label: 'Live Monitor', icon: Activity },
@@ -17,15 +18,17 @@ export function AppLayout() {
         { path: '/settings', label: 'Settings', icon: Settings },
     ];
 
+    const displayMode = bootInfo?.mode || operatorStatus?.engineStatus?.mode || (operatorStatus?.engineMode === 'idle' ? 'IDLE' : 'UNKNOWN');
+
     return (
         <div className="flex h-screen w-full bg-slate-900 text-slate-100 overflow-hidden">
             {/* Sidebar */}
             <aside className="w-64 bg-slate-800 border-r border-slate-700 flex flex-col">
                 <div className="p-4 border-b border-slate-700">
-                    <h1 className="text-xl font-bold text-emerald-500 tracking-tight">Operator Deck</h1>
+                    <h1 className="text-xl font-bold text-emerald-500 tracking-tight">Operator Deck</h1>        
                     <div className="flex items-center mt-2 space-x-2 text-xs">
                         <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`} />
-                        <span className="text-slate-400">{isConnected ? 'Connected' : 'Disconnected'}</span>
+                        <span className="text-slate-400">{isConnected ? 'Connected' : 'Disconnected'}</span>    
                     </div>
                 </div>
                 <nav className="flex-1 p-4 space-y-1">
@@ -35,8 +38,8 @@ export function AppLayout() {
                             to={item.path}
                             className={({ isActive }) =>
                                 `flex items-center space-x-3 px-3 py-2 rounded-md transition-colors ${
-                                    isActive 
-                                        ? 'bg-emerald-500/10 text-emerald-400' 
+                                    isActive
+                                        ? 'bg-emerald-500/10 text-emerald-400'
                                         : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
                                 }`
                             }
@@ -47,17 +50,16 @@ export function AppLayout() {
                     ))}
                 </nav>
                 <div className="p-4 border-t border-slate-700 text-xs text-slate-500">
-                    {bootInfo ? (
+                    {operatorStatus ? (
                         <>
-                            <div>Mode: <span className="text-slate-300 uppercase">{bootInfo.mode}</span></div>
-                            <div>Engine: <span className="text-slate-300">{bootInfo.version}</span></div>
+                            <div>Mode: <span className="text-slate-300 uppercase">{displayMode}</span></div>  
+                            <div>Engine: <span className="text-slate-300">{bootInfo?.version || '0.0.1'}</span></div>
                         </>
                     ) : (
                         <div>Engine not identified</div>
                     )}
                 </div>
             </aside>
-
             {/* Main Content */}
             <main className="flex-1 overflow-auto bg-slate-900">
                 <Outlet />

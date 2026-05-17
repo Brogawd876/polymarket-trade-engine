@@ -143,7 +143,9 @@ export function OperatorControlPanel() {
                 <div className="space-y-3 p-3 bg-slate-900/50 rounded border border-slate-700/50">
                     <h3 className="font-medium text-slate-300">Paper Simulation</h3>
                     <div className="flex space-x-2">
-                        <select 
+                        <select
+                            id="strategy-select"
+                            name="strategy"
                             className="bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 flex-1"
                             value={strategy}
                             onChange={e => setStrategy(e.target.value)}
@@ -152,8 +154,10 @@ export function OperatorControlPanel() {
                             <option value="simulation">simulation</option>
                             <option value="late-entry">late-entry</option>
                         </select>
-                        <input 
-                            type="number" 
+                        <input
+                            id="sim-rounds-input"
+                            name="simRounds"
+                            type="number"
                             className="bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 w-24"
                             placeholder="Rounds (0=all)"
                             value={simRounds}
@@ -162,7 +166,8 @@ export function OperatorControlPanel() {
                             min="0"
                         />
                     </div>
-                    <button 
+                    <button
+                        id="start-sim-button"
                         onClick={handleStartSim}
                         disabled={isRunning}
                         className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded font-medium transition-colors flex items-center justify-center"
@@ -175,7 +180,9 @@ export function OperatorControlPanel() {
                 {/* Replay Controls */}
                 <div className="space-y-3 p-3 bg-slate-900/50 rounded border border-slate-700/50">
                     <h3 className="font-medium text-slate-300">Historical Replay</h3>
-                    <select 
+                    <select
+                        id="replay-file-select"
+                        name="replayFile"
                         className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200"
                         value={selectedReplay}
                         onChange={e => setSelectedReplay(e.target.value)}
@@ -185,7 +192,8 @@ export function OperatorControlPanel() {
                             <option key={f} value={f}>{f}</option>
                         ))}
                     </select>
-                    <button 
+                    <button
+                        id="start-replay-button"
                         onClick={handleStartReplay}
                         disabled={isRunning || !selectedReplay}
                         className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded font-medium transition-colors flex items-center justify-center"
@@ -193,8 +201,7 @@ export function OperatorControlPanel() {
                         <Play className="w-4 h-4 mr-2" />
                         Start Replay
                     </button>
-                </div>
-            </div>
+                </div>            </div>
 
             {/* Active Session Controls */}
             {isRunning && (
