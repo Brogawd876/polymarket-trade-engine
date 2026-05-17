@@ -1,19 +1,23 @@
 import { useEffect, useRef, useMemo } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi, LineData, Time, LineSeries } from 'lightweight-charts';
+import { createChart, ColorType, LineSeries, LineStyle } from 'lightweight-charts';
+import type { IChartApi, IPriceLine, ISeriesApi, LineData, Time } from 'lightweight-charts';
 import { useStore } from '../../store';
 
 export function PriceChartPanel() {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const targetLineRef = useRef<IPriceLine | null>(null);
     
     const priceHistory = useStore(state => state.priceHistory);
+    const markets = useStore(state => state.markets);
     // Find the market with the most history to display by default
     const primarySlug = useMemo(() => {
         const slugs = Object.keys(priceHistory);
         if (slugs.length === 0) return null;
         return slugs.reduce((a, b) => priceHistory[a].length > priceHistory[b].length ? a : b);
     }, [priceHistory]);
+    const targetPrice = primarySlug ? markets[primarySlug]?.priceToBeat ?? null : null;
 
     useEffect(() => {
         if (!chartContainerRef.current) return;
@@ -57,6 +61,10 @@ export function PriceChartPanel() {
 
         return () => {
             window.removeEventListener('resize', handleResize);
+            if (targetLineRef.current) {
+                lineSeries.removePriceLine(targetLineRef.current);
+                targetLineRef.current = null;
+            }
             chart.remove();
         };
     }, []);
@@ -76,17 +84,44 @@ export function PriceChartPanel() {
         }
     }, [priceHistory, primarySlug]);
 
+    useEffect(() => {
+        if (!seriesRef.current) return;
+
+        if (targetLineRef.current) {
+            seriesRef.current.removePriceLine(targetLineRef.current);
+            targetLineRef.current = null;
+        }
+
+        if (targetPrice != null) {
+            targetLineRef.current = seriesRef.current.createPriceLine({
+                price: targetPrice,
+                color: '#f59e0b',
+                lineWidth: 2,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: 'Target',
+            });
+        }
+    }, [targetPrice]);
+
     return (
         <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col h-80 relative">
             <div className="flex justify-between items-center mb-4 shrink-0">
                 <h2 className="text-lg font-semibold text-slate-200">
                     Live Price Chart
                 </h2>
-                {primarySlug && (
-                    <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded font-mono">
-                        {primarySlug}
-                    </span>
-                )}
+                <div className="flex items-center gap-2">
+                    {targetPrice != null && (
+                        <span data-testid="chart-target-label" className="text-xs bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-1 rounded font-mono">
+                            Target ${targetPrice.toFixed(2)}
+                        </span>
+                    )}
+                    {primarySlug && (
+                        <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded font-mono">
+                            {primarySlug}
+                        </span>
+                    )}
+                </div>
             </div>
             
             <div className="flex-1 w-full relative" ref={chartContainerRef}>
