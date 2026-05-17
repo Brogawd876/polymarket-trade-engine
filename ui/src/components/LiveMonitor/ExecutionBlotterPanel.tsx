@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useStore, type ExecutionRow, type ExecutionRowStatus } from '../../store';
 
 type Filter = 'all' | 'open' | 'filled' | 'blocked' | 'problem';
@@ -28,9 +29,9 @@ function statusLabel(status: ExecutionRowStatus) {
 }
 
 function statusClass(status: ExecutionRowStatus) {
-    if (status === 'blocked' || status === 'failed') return 'bg-red-500/15 text-red-300 border-red-500/30';
+    if (status === 'blocked' || status === 'failed') return 'bg-red-500/15 text-red-300 border-red-500/30';     
     if (status === 'filled' || status === 'partial_filled' || status === 'resolved') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
-    if (status === 'placed' || status === 'allowed') return 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+    if (status === 'placed' || status === 'allowed') return 'bg-blue-500/15 text-blue-300 border-blue-500/30';  
     if (status === 'expired' || status === 'canceled') return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
     return 'bg-slate-700/70 text-slate-300 border-slate-600';
 }
@@ -52,6 +53,7 @@ export function matchesExecutionFilter(row: ExecutionRow, filter: Filter) {
 
 export function ExecutionBlotterPanel() {
     const executionRows = useStore(state => state.executionRows);
+    const clearEvents = useStore(state => state.clearEvents);
     const [filter, setFilter] = useState<Filter>('all');
     const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -63,7 +65,16 @@ export function ExecutionBlotterPanel() {
     return (
         <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col min-h-80">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-                <h2 className="text-lg font-semibold text-slate-200">Execution Blotter</h2>
+                <div className="flex items-center gap-4">
+                    <h2 className="text-lg font-semibold text-slate-200">Execution Blotter</h2>
+                    <button
+                        onClick={clearEvents}
+                        title="Clear blotter"
+                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-all"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
                 <div className="flex flex-wrap gap-2">
                     {FILTERS.map(item => (
                         <button
@@ -78,8 +89,7 @@ export function ExecutionBlotterPanel() {
                 </div>
             </div>
 
-            {visibleRows.length > 0 ? (
-                <div className="overflow-x-auto">
+            {visibleRows.length > 0 ? (                <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                         <thead className="text-slate-500 uppercase">
                             <tr className="border-b border-slate-700">

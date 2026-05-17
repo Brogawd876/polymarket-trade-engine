@@ -41,8 +41,14 @@ export default function ControlCenter() {
     const [simRounds, setSimRounds] = useState<number>(0);
     const [strategy, setStrategy] = useState<string>('simulation');
     const [isResetting, setIsResetting] = useState(false);
+    const [engineConfig, setEngineConfig] = useState<any>(null);
 
     useEffect(() => {
+        fetch(`${API_BASE}/config`)
+            .then(res => res.json())
+            .then(data => setEngineConfig(data))
+            .catch(err => console.error("Failed to fetch engine config", err));
+
         fetch(`${API_BASE}/replay-fixtures`)
             .then(res => res.json())
             .then(data => {
@@ -192,6 +198,46 @@ export default function ControlCenter() {
                     </div>
                 </div>
             </header>
+
+            {/* Safety Awareness & Risk Limits */}
+            {engineConfig && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className={`p-4 rounded-xl border flex flex-col justify-between ${engineConfig.FORCE_PROD ? 'bg-red-500/5 border-red-500/20' : 'bg-emerald-500/5 border-emerald-500/20'}`}>
+                        <div className="flex items-center justify-between mb-2">
+                             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Trading Mode</div>
+                             <Shield className={`w-4 h-4 ${engineConfig.FORCE_PROD ? 'text-red-400' : 'text-emerald-400'}`} />
+                        </div>
+                        <div className={`text-lg font-black ${engineConfig.FORCE_PROD ? 'text-red-400' : 'text-emerald-400'}`}>
+                            {engineConfig.FORCE_PROD ? 'PRODUCTION' : 'SIMULATION'}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-1 italic">
+                            {engineConfig.FORCE_PROD ? 'Real funds active' : 'Safe/Virtual balance'}
+                        </div>
+                    </div>
+                    
+                    <div className="p-4 rounded-xl border bg-slate-800/30 border-slate-700/50 flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-2">
+                             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Risk Guard (Session)</div>
+                             <Zap className="w-4 h-4 text-indigo-400" />
+                        </div>
+                        <div className="text-lg font-black text-slate-200">
+                            $3.00 <span className="text-xs text-slate-500 font-medium">MAX LOSS</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-1 uppercase tracking-tighter">Automatic Kill-Switch active</div>
+                    </div>
+
+                    <div className="p-4 rounded-xl border bg-slate-800/30 border-slate-700/50 flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-2">
+                             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Order Limits</div>
+                             <Lock className="w-4 h-4 text-slate-400" />
+                        </div>
+                        <div className="text-lg font-black text-slate-200">
+                            $10.00 <span className="text-xs text-slate-500 font-medium">NOTIONAL</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-1 uppercase tracking-tighter">Per-order execution cap</div>
+                    </div>
+                </div>
+            )}
 
             {isBlocked && (
                 <div className="p-4 bg-red-900/30 border border-red-500/50 rounded-xl flex items-center justify-between">

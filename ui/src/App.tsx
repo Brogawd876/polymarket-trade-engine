@@ -5,14 +5,18 @@ import ControlCenter from './pages/ControlCenter';
 import ReplayLab from './pages/ReplayLab';
 import StrategyLab from './pages/StrategyLab';
 
+import Analytics from './pages/Analytics';
+import Settings from './pages/Settings';
+import Logs from './pages/Logs';
+
 // Placeholders for other routes
 const Placeholder = ({ title }: { title: string }) => (
-    <div className="p-8 flex items-center justify-center h-full text-slate-500 text-lg">
+    <div className="p-8 flex items-center justify-center h-full text-slate-500 text-lg font-medium">
         {title} (Coming Soon)
     </div>
 );
 
-function App() {
+export function App() {
     return (
         <BrowserRouter>
             <Routes>
@@ -21,9 +25,9 @@ function App() {
                     <Route path="controls" element={<ControlCenter />} />
                     <Route path="replay" element={<ReplayLab />} />
                     <Route path="strategy" element={<StrategyLab />} />
-                    <Route path="analytics" element={<Placeholder title="Historical Analytics" />} />
-                    <Route path="logs" element={<Placeholder title="Diagnostics / Logs" />} />
-                    <Route path="settings" element={<Placeholder title="Settings / Credentials" />} />
+                    <Route path="analytics" element={<Analytics />} />     
+                    <Route path="logs" element={<Logs />} />
+                    <Route path="settings" element={<Settings />} />    
                 </Route>
             </Routes>
         </BrowserRouter>

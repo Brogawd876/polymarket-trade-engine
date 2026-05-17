@@ -1,14 +1,13 @@
 import { useEffect, useRef, useMemo } from 'react';
-import { createChart, ColorType, LineSeries, LineStyle } from 'lightweight-charts';
-import type { IChartApi, IPriceLine, ISeriesApi, LineData, Time } from 'lightweight-charts';
+import * as LWC from 'lightweight-charts';
 import { useStore } from '../../store';
 
 export function PriceChartPanel() {
     const chartContainerRef = useRef<HTMLDivElement>(null);
-    const chartRef = useRef<IChartApi | null>(null);
-    const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-    const targetLineRef = useRef<IPriceLine | null>(null);
-    
+    const chartRef = useRef<LWC.IChartApi | null>(null);
+    const seriesRef = useRef<LWC.ISeriesApi<"Line"> | null>(null);
+    const targetLineRef = useRef<LWC.IPriceLine | null>(null);
+
     const priceHistory = useStore(state => state.priceHistory);
     const markets = useStore(state => state.markets);
     // Find the market with the most history to display by default
@@ -22,9 +21,9 @@ export function PriceChartPanel() {
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        const chart = createChart(chartContainerRef.current, {
+        const chart = LWC.createChart(chartContainerRef.current, {
             layout: {
-                background: { type: ColorType.Solid, color: 'transparent' },
+                background: { type: LWC.ColorType.Solid, color: 'transparent' },
                 textColor: '#94a3b8',
             },
             grid: {
@@ -38,16 +37,15 @@ export function PriceChartPanel() {
                 secondsVisible: false,
             }
         });
-        
-        const lineSeries = chart.addSeries(LineSeries, { 
-            color: '#10b981', 
+
+        const lineSeries = chart.addSeries(LWC.LineSeries, {
+            color: '#10b981',
             lineWidth: 2,
             crosshairMarkerVisible: true,
             crosshairMarkerRadius: 4,
             crosshairMarkerBorderColor: '#10b981',
             crosshairMarkerBackgroundColor: '#0f172a',
-        });
-        
+        });        
         chartRef.current = chart;
         seriesRef.current = lineSeries;
 
@@ -97,7 +95,7 @@ export function PriceChartPanel() {
                 price: targetPrice,
                 color: '#f59e0b',
                 lineWidth: 2,
-                lineStyle: LineStyle.Dashed,
+                lineStyle: LWC.LineStyle.Dashed,
                 axisLabelVisible: true,
                 title: 'Target',
             });

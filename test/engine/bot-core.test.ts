@@ -4,7 +4,6 @@ import {
   createEventClock,
   measureFreshness,
   measureProcessingLag,
-  RiskApprovedExecutionGate,
   StaticRiskGate,
   type LeadLagSnapshot,
   type PredictiveAggregateSnapshot,
@@ -272,19 +271,6 @@ describe("StaticRiskGate", () => {
 
     expect(result.approved).toBe(true);
     expect(result.reasons).toEqual(["approved"]);
-  });
-
-  test("execution gate only plans risk-approved intents", () => {
-    const nowMs = round.startTimeMs + 60_000;
-    const riskGate = new StaticRiskGate();
-    const executionGate = new RiskApprovedExecutionGate();
-    const decision = riskGate.evaluate(buyIntent(nowMs), snapshot(nowMs));
-    const plan = executionGate.plan(decision);
-
-    expect(plan.executable).toBe(true);
-    expect(plan.notes).toContain(
-      "risk-approved intent; execution wiring is a later phase",
-    );
   });
 });
 

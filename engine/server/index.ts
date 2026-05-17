@@ -5,6 +5,7 @@ import { readdir } from "fs/promises";
 import * as path from "path";
 import { validateReplayFixture } from "./helpers/replay-fixtures.ts";
 import { StrategyLabBatchManager } from "../strategy-lab.ts";
+import { Env } from "../../utils/config.ts";
 
 export type ControlServerOptions = {
   port?: number;
@@ -176,6 +177,47 @@ export class ControlServer {
                 return Response.json({ success: false, error: "Strategy Lab batch not found" }, { status: 404, headers: responseHeaders });
             }
             return Response.json({ success: true, batch }, { headers: responseHeaders });
+        }
+
+        if (url.pathname === "/api/operator/config") {
+            const redact = (val: string) => (val && val.length > 8) ? `${val.slice(0, 4)}...${val.slice(-4)}` : (val ? "****" : "MISSING");
+            const config = {
+                TICKER: Env.get("TICKER"),
+                MARKET_WINDOW: Env.get("MARKET_WINDOW"),
+                MARKET_ASSET: Env.get("MARKET_ASSET"),
+                PROD: Env.get("PROD"),
+                FORCE_PROD: process.env.FORCE_PROD === "true",
+                BINANCE_US: Env.get("BINANCE_US"),
+                PRIVATE_KEY: redact(Env.get("PRIVATE_KEY")),
+                POLY_FUNDER_ADDRESS: Env.get("POLY_FUNDER_ADDRESS"),
+                POLY_SIGNATURE_TYPE: Env.get("POLY_SIGNATURE_TYPE"),
+                BUILDER_KEY: redact(Env.get("BUILDER_KEY")),
+                BUILDER_SECRET: redact(Env.get("BUILDER_SECRET")),
+                BUILDER_PASSPHRASE: redact(Env.get("BUILDER_PASSPHRASE")),
+            };
+            return Response.json(config, { headers: responseHeaders });
+        }
+
+        if (url.pathname === "/api/operator/logs") {
+            try {
+                const files = await readdir("logs");
+                const logFiles = files.filter(f => f.endsWith(".log")).sort().reverse();
+                return Response.json({ files: logFiles }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ error: e.message }, { status: 500, headers: responseHeaders });
+            }
+        }
+
+        const logFileMatch = url.pathname.match(/^\/api\/operator\/logs\/([^/]+)$/);
+        if (logFileMatch && req.method === "GET") {
+            try {
+                const fileName = logFileMatch[1]!;
+                const filePath = path.join("logs", fileName);
+                const content = await Bun.file(filePath).text();
+                return new Response(content, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ error: e.message }, { status: 404, headers: responseHeaders });
+            }
         }
 
         if (url.pathname === "/api/health") {
