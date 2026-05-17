@@ -1,4 +1,5 @@
 import { describe, expect, test, afterAll, beforeAll } from "bun:test";
+import { join } from "path";
 import { 
     TelemetryBus, 
     VirtualClock,
@@ -115,4 +116,27 @@ describe("Session Lifecycle Integration", () => {
     
     expect(sessionManager.getStatus().blockReason).toBeNull();
   });
+
+  test("Replay session completes a one-round fixture without stalling", async () => {
+    const bus = new TelemetryBus();
+    const sessionManager = new SessionManager(bus);
+    const fixture = join(import.meta.dir, "..", "fixtures", "replay", "filled-order.log");
+
+    await sessionManager.startReplay(fixture);
+
+    let attempts = 0;
+    while (attempts < 100) {
+      const status = sessionManager.getStatus();
+      if (status.sessionState === "completed" || status.sessionState === "idle" || status.sessionState === "failed") {
+        break;
+      }
+      await new Promise(r => setTimeout(r, 50));
+      attempts++;
+    }
+
+    const finalStatus = sessionManager.getStatus();
+    expect(finalStatus.sessionState).not.toBe("failed");
+    expect(finalStatus.blockReason).toBeNull();
+    expect(["completed", "idle"]).toContain(finalStatus.sessionState);
+  }, 10000);
 });

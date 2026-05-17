@@ -158,16 +158,18 @@ export class ReplayRunner {
 
           const isShuttingDown = this.bot.isShuttingDown;
 
-          this.telemetry.push({
-            ts: this.clock.nowMs(),
-            type: "REPLAY_PROGRESS",
-            payload: {
-                totalEvents: this.reader.eventCount,
-                processedEvents: this.reader.processedEventCount,
-                isDone: this.reader.isDone(),
-                virtualTimeMs: this.clock.nowMs()
-            }
-          });
+          if (tickCount % 10 === 0) {
+            this.telemetry.push({
+              ts: this.clock.nowMs(),
+              type: "REPLAY_PROGRESS",
+              payload: {
+                  totalEvents: this.reader.eventCount,
+                  processedEvents: this.reader.processedEventCount,
+                  isDone: this.reader.isDone(),
+                  virtualTimeMs: this.clock.nowMs()
+              }
+            });
+          }
 
           // Progress logging every 100 ticks (10s virtual time)
           if (tickCount % 100 === 0) {
@@ -215,6 +217,16 @@ export class ReplayRunner {
     }
 
     console.log("[ReplayRunner] Finished.");
+    this.telemetry.push({
+      ts: this.clock.nowMs(),
+      type: "REPLAY_PROGRESS",
+      payload: {
+        totalEvents: this.reader.eventCount,
+        processedEvents: this.reader.eventCount,
+        isDone: true,
+        virtualTimeMs: this.clock.nowMs()
+      }
+    });
     return { ticks: tickCount, completed: true, finalTimeMs: this.clock.nowMs() };
   }
 }

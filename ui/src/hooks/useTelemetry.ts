@@ -12,6 +12,7 @@ export function useTelemetry() {
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const lastSessionState = useRef<string | null>(null);
+    const lastEngineMode = useRef<string | null>(null);
 
     useEffect(() => {
         let isMounted = true;
@@ -23,11 +24,17 @@ export function useTelemetry() {
                     const status = await res.json();
                     if (isMounted) {
                         // Detect transition to idle and clear telemetry
-                        if (lastSessionState.current && lastSessionState.current !== 'idle' && status.sessionState === 'idle') {
+                        if (
+                            lastSessionState.current &&
+                            lastSessionState.current !== 'idle' &&
+                            status.sessionState === 'idle' &&
+                            lastEngineMode.current !== 'replay'
+                        ) {
                             console.log("[Telemetry] Session ended, clearing telemetry state.");
                             clearAllTelemetry();
                         }
                         lastSessionState.current = status.sessionState;
+                        lastEngineMode.current = status.engineMode;
                         setOperatorStatus(status);
                     }
                 }

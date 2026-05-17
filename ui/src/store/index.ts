@@ -111,6 +111,7 @@ export interface AppState {
     const MAX_TIMELINE_EVENTS = 100;
     const MAX_CHART_POINTS = 1000;
     const MAX_EXECUTION_ROWS = 200;
+    const REPLAY_MARKET_RENDER_INTERVAL_MS = 1_000;
 
     function pushExecutionRow(rows: ExecutionRow[], row: ExecutionRow) {
     return [row, ...rows].slice(0, MAX_EXECUTION_ROWS);
@@ -158,6 +159,29 @@ export interface AppState {
     }),
 
     processEvent: (event) => set((state) => {
+        if (state.bootInfo?.mode === 'replay') {
+            if (event.type === 'MARKET_TICK') {
+                const lastMarket = state.markets[event.payload.slug];
+                if (lastMarket && event.ts - lastMarket.lastUpdated < REPLAY_MARKET_RENDER_INTERVAL_MS) {
+                    return state;
+                }
+            }
+            if (
+                event.type === 'PREDICTIVE_AGGREGATE' &&
+                state.predictiveAggregate &&
+                event.ts - state.predictiveAggregate.timestampMs < REPLAY_MARKET_RENDER_INTERVAL_MS
+            ) {
+                return state;
+            }
+            if (
+                event.type === 'LEAD_LAG_UPDATE' &&
+                state.leadLag &&
+                event.ts - state.leadLag.timestampMs < REPLAY_MARKET_RENDER_INTERVAL_MS
+            ) {
+                return state;
+            }
+        }
+
         const nextState = { ...state };
         
         // Add to timeline

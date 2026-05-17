@@ -95,7 +95,7 @@ export class SessionManager {
         undefined, // strategy (defaults)
         1,
         false,
-        null,
+        1,
         false,
         file,
         {
@@ -114,6 +114,14 @@ export class SessionManager {
       
       this._runner.run().then(() => {
         this._sessionState = "completed";
+        setTimeout(() => {
+          if (this._sessionState === "completed") {
+            this._sessionState = "idle";
+            this._bot = null;
+            this._runner = null;
+            this._activeReplayFile = null;
+          }
+        }, 3000);
       }).catch((e) => {
         this._sessionState = "failed";
         this._blockReason = e.message;
@@ -141,6 +149,8 @@ export class SessionManager {
         if (this._sessionState === "completed") {
             this._sessionState = "idle";
             this._bot = null;
+            this._runner = null;
+            this._activeReplayFile = null;
         }
       }, 2000);
     } catch (e: any) {

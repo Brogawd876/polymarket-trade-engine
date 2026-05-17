@@ -4,6 +4,7 @@ import type { SessionManager } from "../session-manager.ts";
 import { readdir } from "fs/promises";
 import * as path from "path";
 import { validateReplayFixture } from "./helpers/replay-fixtures.ts";
+import { StrategyLabBatchManager } from "../strategy-lab.ts";
 
 export type ControlServerOptions = {
   port?: number;
@@ -20,6 +21,7 @@ export class ControlServer {
   private _server?: Server<{ sessionId: string }>;
   private _telemetryBus: TelemetryBus;
   private _sessionManager: SessionManager;
+  private _strategyLab: StrategyLabBatchManager;
   private _port: number;
   private _allowedOrigins: Set<string>;
 
@@ -27,6 +29,7 @@ export class ControlServer {
     this._port = opts.port ?? 3000;
     this._telemetryBus = opts.telemetryBus;
     this._sessionManager = opts.sessionManager;
+    this._strategyLab = new StrategyLabBatchManager();
     this._allowedOrigins = new Set(opts.allowedOrigins ?? [
       "http://localhost:3000",
       "http://127.0.0.1:3000",
@@ -141,6 +144,38 @@ export class ControlServer {
             } catch (e: any) {
                 return Response.json({ error: e.message }, { status: 500, headers: responseHeaders });
             }
+        }
+
+        if (url.pathname === "/api/operator/strategy-lab/strategies") {
+            return Response.json({ strategies: this._strategyLab.listStrategies() }, { headers: responseHeaders });
+        }
+
+        if (url.pathname === "/api/operator/strategy-lab/batches" && req.method === "POST") {
+            try {
+                const config = await req.json() as any;
+                const batch = await this._strategyLab.createBatch(config);
+                return Response.json({ success: true, batchId: batch.id, batch }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        const strategyBatchMatch = url.pathname.match(/^\/api\/operator\/strategy-lab\/batches\/([^/]+)$/);
+        if (strategyBatchMatch && req.method === "GET") {
+            const batch = this._strategyLab.getBatch(strategyBatchMatch[1]!);
+            if (!batch) {
+                return Response.json({ success: false, error: "Strategy Lab batch not found" }, { status: 404, headers: responseHeaders });
+            }
+            return Response.json({ success: true, batch }, { headers: responseHeaders });
+        }
+
+        const strategyBatchCancelMatch = url.pathname.match(/^\/api\/operator\/strategy-lab\/batches\/([^/]+)\/cancel$/);
+        if (strategyBatchCancelMatch && req.method === "POST") {
+            const batch = this._strategyLab.cancelBatch(strategyBatchCancelMatch[1]!);
+            if (!batch) {
+                return Response.json({ success: false, error: "Strategy Lab batch not found" }, { status: 404, headers: responseHeaders });
+            }
+            return Response.json({ success: true, batch }, { headers: responseHeaders });
         }
 
         if (url.pathname === "/api/health") {

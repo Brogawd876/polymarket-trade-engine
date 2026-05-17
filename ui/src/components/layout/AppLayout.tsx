@@ -19,7 +19,9 @@ export function AppLayout() {
         { path: '/settings', label: 'Settings', icon: Settings },
     ];
 
-    const displayMode = bootInfo?.mode || operatorStatus?.engineStatus?.mode || (operatorStatus?.engineMode === 'idle' ? 'IDLE' : 'UNKNOWN');
+    const displayMode = operatorStatus?.engineMode === 'idle'
+        ? 'IDLE'
+        : bootInfo?.mode || operatorStatus?.engineStatus?.mode || 'UNKNOWN';
 
     return (
         <div className="flex h-screen w-full bg-slate-900 text-slate-100 overflow-hidden">
