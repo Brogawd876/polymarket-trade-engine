@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { LiveMonitor } from './components/LiveMonitor/LiveMonitor';
+import ControlCenter from './pages/ControlCenter';
 
 // Placeholders for other routes
 const Placeholder = ({ title }: { title: string }) => (
@@ -15,6 +16,7 @@ function App() {
             <Routes>
                 <Route path="/" element={<AppLayout />}>
                     <Route index element={<LiveMonitor />} />
+                    <Route path="controls" element={<ControlCenter />} />
                     <Route path="replay" element={<Placeholder title="Replay Lab" />} />
                     <Route path="strategy" element={<Placeholder title="Strategy Lab" />} />
                     <Route path="analytics" element={<Placeholder title="Historical Analytics" />} />

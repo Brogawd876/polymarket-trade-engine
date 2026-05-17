@@ -2,6 +2,8 @@ import { type Server, type ServerWebSocket } from "bun";
 import { TelemetryBus, type TelemetryEvent } from "../telemetry/index.ts";
 import type { SessionManager } from "../session-manager.ts";
 import { readdir } from "fs/promises";
+import * as path from "path";
+import { validateReplayFixture } from "./helpers/replay-fixtures.ts";
 
 export type ControlServerOptions = {
   port?: number;
@@ -125,8 +127,11 @@ export class ControlServer {
         if (url.pathname === "/api/operator/replay-fixtures") {
             try {
                 const files = await readdir("logs");
-                const logs = files.filter(f => f.endsWith(".log"));
-                return Response.json(logs, { headers: responseHeaders });
+                const logFiles = files.filter(f => f.endsWith(".log"));
+                const fixtures = await Promise.all(
+                    logFiles.map(f => validateReplayFixture(path.join("logs", f)))
+                );
+                return Response.json({ files: fixtures }, { headers: responseHeaders });
             } catch (e: any) {
                 return Response.json({ error: e.message }, { status: 500, headers: responseHeaders });
             }

@@ -94,6 +94,7 @@ export class EarlyBird {
   private _clock: Clock;
   private _persistState = true;
   private _telemetry: TelemetrySink;
+  private _tickInterval: any = null;
 
   constructor(
     strategyName: string | undefined,
@@ -320,7 +321,7 @@ export class EarlyBird {
       process.on("SIGTERM", () => onSignal("SIGTERM"));
 
       if (!this._replayReader) {
-        this._clock.setInterval(() => {
+        this._tickInterval = this._clock.setInterval(() => {
           this._tick().catch((e) => {
             if (e instanceof TerminalAccessError) {
               console.error(`\n[fatal] ${e.message}\n`);
@@ -391,6 +392,23 @@ export class EarlyBird {
 
   startShutdown(reason: string): void {
     this._startShutdown(reason);
+  }
+
+  async stop(): Promise<void> {
+    this._startShutdown("Explicit stop requested");
+    // Wait for lifecycles to settle
+    let attempts = 0;
+    while (this._lifecycles.size > 0 && attempts < 20) {
+      await new Promise((r) => setTimeout(r, 500));
+      attempts++;
+    }
+
+    if (this._tickInterval) this._clock.clearInterval(this._tickInterval);
+    this._ticker.destroy();
+    this._resolution.stop();
+    this._binance.stop();
+    this._coinbase.stop();
+    log.write("[early-bird] Stopped all adapters", "dim");
   }
 
   private async _tick(): Promise<void> {

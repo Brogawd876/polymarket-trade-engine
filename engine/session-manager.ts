@@ -133,10 +133,16 @@ export class SessionManager {
     if (this._sessionState !== "running") return;
     this._sessionState = "stopping";
     try {
-      if (this._bot && !this._bot.isShuttingDown) {
-         this._bot.startShutdown("Operator requested stop");
+      if (this._bot) {
+         await this._bot.stop();
       }
-      // ReplayRunner checks bot.isShuttingDown in its loop
+      this._sessionState = "completed";
+      setTimeout(() => {
+        if (this._sessionState === "completed") {
+            this._sessionState = "idle";
+            this._bot = null;
+        }
+      }, 2000);
     } catch (e: any) {
       this._sessionState = "failed";
       this._blockReason = e.message;

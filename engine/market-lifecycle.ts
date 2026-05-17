@@ -1435,9 +1435,19 @@ export class MarketLifecycle {
     if (!this._marketPriceHandle) {
       this._marketPriceHandle = this.apiQueue.queueMarketPrice(slotFromSlug(this.slug));
     }
+
+    const timeoutMs = 15000; // 15s timeout
+    const startMs = this._clock.nowMs();
+
     while (true) {
       const data = this.apiQueue.marketResult.get(slot);
       if (data?.closePrice) return;
+
+      if (this._clock.nowMs() - startMs > timeoutMs) {
+        this._log(`[${this.slug}] Timed out waiting for resolution after ${timeoutMs}ms.`, "yellow");
+        return;
+      }
+
       await new Promise<void>((resolve) =>
         this._clock.setTimeout(() => resolve(), 1000),
       );

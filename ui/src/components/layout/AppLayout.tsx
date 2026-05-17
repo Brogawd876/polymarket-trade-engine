@@ -11,6 +11,7 @@ export function AppLayout() {
 
     const navItems = [
         { path: '/', label: 'Live Monitor', icon: Activity },
+        { path: '/controls', label: 'Control Center', icon: Settings },
         { path: '/replay', label: 'Replay Lab', icon: PlayCircle },
         { path: '/strategy', label: 'Strategy Lab', icon: BarChart2 },
         { path: '/analytics', label: 'Analytics', icon: BarChart2 },
