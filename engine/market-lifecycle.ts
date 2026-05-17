@@ -1447,6 +1447,16 @@ export class MarketLifecycle {
         payout,
         pnl: this._pnl,
       });
+      this._telemetry.push({
+        ts: this._clock.nowMs(),
+        type: "ROUND_RESOLUTION",
+        payload: {
+          slug: this.slug,
+          openPrice: data.openPrice,
+          closePrice: data.closePrice,
+          direction: resolvedUp ? "UP" : "DOWN",
+        },
+      });
     } else {
       this._pnl = parseFloat(pnl.toFixed(4));
       this._log(

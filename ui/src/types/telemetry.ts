@@ -59,6 +59,7 @@ export type TelemetryEvent = {
     | { type: "RISK_DECISION"; payload: { slug: string; approved: boolean; reasons: string[]; intent: any } }
     | { type: "ORDER_LIFECYCLE"; payload: { slug: string; orderId: string; status: "placed" | "filled" | "canceled" | "expired" | "failed"; side: "UP" | "DOWN"; action: "buy" | "sell"; price: number; shares: number; error?: string } }
     | { type: "ROUND_PNL"; payload: { slug: string; pnl: number } }
+    | { type: "ROUND_RESOLUTION"; payload: { slug: string; openPrice: number; closePrice: number; direction: "UP" | "DOWN" } }
     | { type: "SESSION_PNL"; payload: { pnl: number; loss: number } }
     | { type: "REPLAY_PROGRESS"; payload: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } }
 );

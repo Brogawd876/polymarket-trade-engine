@@ -14,6 +14,8 @@ function formatCountdown(ms: number) {
 
 export function RoundDecisionPanel() {
     const markets = useStore(state => state.markets);
+    const lifecycleStates = useStore(state => state.lifecycleStates);
+    const roundResolutions = useStore(state => state.roundResolutions);
     const [nowMs, setNowMs] = useState(Date.now());
 
     useEffect(() => {
@@ -31,15 +33,35 @@ export function RoundDecisionPanel() {
 
     const slug = current?.[0] ?? null;
     const market = current?.[1] ?? null;
+    const lifecycleState = slug ? lifecycleStates[slug] : null;
+    const resolution = slug ? roundResolutions[slug] : null;
     const remainingMs = market?.slotEndMs ? market.slotEndMs - nowMs : 0;
     const marketOpenMs = market?.slotEndMs ? market.slotEndMs - 300_000 : null;
     const msUntilOpen = marketOpenMs ? marketOpenMs - nowMs : 0;
     const isPreOpen = msUntilOpen > 0;
+    const isEnded = !!market?.slotEndMs && remainingMs <= 0;
     const direction = market?.direction ?? null;
+    const displayedResult = resolution?.direction ?? (market?.priceToBeat == null ? null : direction);
     const directionClass =
-        direction === 'UP' ? 'text-emerald-400' :
-        direction === 'DOWN' ? 'text-red-400' :
+        displayedResult === 'UP' ? 'text-emerald-400' :
+        displayedResult === 'DOWN' ? 'text-red-400' :
         'text-slate-400';
+    const roundState =
+        resolution ? `RESOLVED ${resolution.direction}` :
+        lifecycleState === 'STOPPING' ? 'CLOSING' :
+        isEnded ? 'ENDED / AWAITING RESOLUTION' :
+        market?.priceToBeat == null ? 'WAITING FOR OPEN' :
+        'LIVE';
+    const countdownLabel =
+        resolution ? 'Resolved' :
+        isEnded ? 'Ended' :
+        isPreOpen ? 'Market Opens In' :
+        'Closes In';
+    const countdownValue =
+        resolution ? 'FINAL' :
+        market?.slotEndMs ? formatCountdown(isPreOpen ? msUntilOpen : remainingMs) : '---';
+    const resultLabel = resolution ? 'Final Result' : 'Current Result';
+    const resultText = displayedResult ?? (market?.priceToBeat == null ? 'WAITING' : '---');
 
     return (
         <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
@@ -50,19 +72,23 @@ export function RoundDecisionPanel() {
 
             {market ? (
                 <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="p-3 bg-slate-900/50 rounded border border-slate-700/50">
-                            <div className="text-xs text-slate-400 mb-1">
-                                {isPreOpen ? 'Market Opens In' : 'Closes In'}
-                            </div>
-                            <div className="text-2xl font-bold text-slate-100 font-mono">
-                                {market.slotEndMs ? formatCountdown(isPreOpen ? msUntilOpen : remainingMs) : '---'}
+                            <div className="text-xs text-slate-400 mb-1">Round State</div>
+                            <div className={`text-lg font-bold ${resolution ? directionClass : 'text-slate-100'}`}>
+                                {roundState}
                             </div>
                         </div>
                         <div className="p-3 bg-slate-900/50 rounded border border-slate-700/50">
-                            <div className="text-xs text-slate-400 mb-1">Current Result</div>
+                            <div className="text-xs text-slate-400 mb-1">{countdownLabel}</div>
+                            <div className="text-2xl font-bold text-slate-100 font-mono">
+                                {countdownValue}
+                            </div>
+                        </div>
+                        <div className="p-3 bg-slate-900/50 rounded border border-slate-700/50">
+                            <div className="text-xs text-slate-400 mb-1">{resultLabel}</div>
                             <div className={`text-2xl font-bold ${directionClass}`}>
-                                {market.priceToBeat == null ? 'WAITING' : direction ?? '---'}
+                                {resultText}
                             </div>
                         </div>
                     </div>

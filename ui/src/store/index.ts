@@ -32,6 +32,12 @@ interface RiskDecision {
     intent: any;
 }
 
+interface RoundResolution {
+    openPrice: number;
+    closePrice: number;
+    direction: "UP" | "DOWN";
+}
+
 interface ChartDataPoint {
     time: number; // Unix timestamp in seconds
     value: number;
@@ -57,6 +63,7 @@ export interface AppState {
     eventTimeline: TelemetryEvent[];
     sessionPnl: { pnl: number; loss: number } | null;
     roundPnl: Record<string, number>;
+    roundResolutions: Record<string, RoundResolution>;
     replayProgress: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } | null;
     
     // Chart Series (derived from events)
@@ -87,6 +94,7 @@ export const useStore = create<AppState>((set) => ({
     eventTimeline: [],
     sessionPnl: null,
     roundPnl: {},
+    roundResolutions: {},
     replayProgress: null,
     priceHistory: {},
 
@@ -186,6 +194,16 @@ export const useStore = create<AppState>((set) => ({
                 nextState.roundPnl = {
                     ...state.roundPnl,
                     [event.payload.slug]: event.payload.pnl
+                };
+                break;
+            case "ROUND_RESOLUTION":
+                nextState.roundResolutions = {
+                    ...state.roundResolutions,
+                    [event.payload.slug]: {
+                        openPrice: event.payload.openPrice,
+                        closePrice: event.payload.closePrice,
+                        direction: event.payload.direction
+                    }
                 };
                 break;
             case "SESSION_PNL":

@@ -17,6 +17,7 @@ describe('Telemetry Store', () => {
             eventTimeline: [],
             sessionPnl: null,
             roundPnl: {},
+            roundResolutions: {},
             replayProgress: null,
             priceHistory: {},
         });
@@ -151,6 +152,27 @@ describe('Telemetry Store', () => {
         store.processEvent(event);
         const updated = useStore.getState();
         expect(updated.feeds['binance'].quality).toBe('live');
+    });
+
+    it('processes ROUND_RESOLUTION event', () => {
+        const store = useStore.getState();
+        store.processEvent({
+            ts: 3000,
+            type: 'ROUND_RESOLUTION',
+            payload: {
+                slug: 'btc-updown-5m-1778978400',
+                openPrice: 78166.35,
+                closePrice: 78170.42,
+                direction: 'UP'
+            }
+        });
+
+        const updated = useStore.getState();
+        expect(updated.roundResolutions['btc-updown-5m-1778978400']).toEqual({
+            openPrice: 78166.35,
+            closePrice: 78170.42,
+            direction: 'UP'
+        });
     });
 });
 
