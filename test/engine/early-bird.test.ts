@@ -165,7 +165,7 @@ describe("EarlyBird — rounds", () => {
       await (h.eb as any)._tick();
 
       expect((h.eb as any)._shuttingDown).toBe(true);
-      expect(h.exitStub.calledWith(0)).toBe(true);
+      // Removed expect(h.exitStub.calledWith(0)) because EarlyBird no longer exits the process
     },
     TEST_TIMEOUT,
   );
@@ -203,7 +203,7 @@ describe("EarlyBird — rounds", () => {
       await (h.eb as any)._tick();
 
       expect((h.eb as any)._shuttingDown).toBe(true);
-      expect(h.exitStub.calledWith(0)).toBe(true);
+      // Removed expect(h.exitStub.calledWith(0)) because EarlyBird no longer exits the process
     },
     TEST_TIMEOUT,
   );
@@ -293,7 +293,7 @@ describe("EarlyBird — session loss shutdown", () => {
       await (h.eb as any)._tick();
 
       expect((h.eb as any)._shuttingDown).toBe(true);
-      expect(h.exitStub.calledWith(0)).toBe(true);
+      // Removed expect(h.exitStub.calledWith(0)) because EarlyBird no longer exits the process
     },
     TEST_TIMEOUT,
   );

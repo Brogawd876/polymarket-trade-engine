@@ -1,7 +1,8 @@
 import { useStore } from '../../store';
 
 export function SystemStatusPanel() {
-    const systemStatus = useStore(state => state.systemStatus);
+    const operatorStatus = useStore(state => state.operatorStatus);
+    const systemStatus = operatorStatus?.engineStatus;
     const bootInfo = useStore(state => state.bootInfo);
 
     return (

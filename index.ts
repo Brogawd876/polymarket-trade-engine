@@ -1,16 +1,12 @@
 import { Command } from "commander";
 import * as readline from "readline";
-import { EarlyBird } from "./engine/early-bird.ts";
 import { strategies, DEFAULT_STRATEGY } from "./engine/strategy/index.ts";
 import { acquireProcessLock } from "./utils/process-lock.ts";
 import { 
-    ReplayRunner,
-    VirtualClock,
-    RealClock,
-    type Clock,
     TelemetryBus,
     ControlServer
 } from "./engine/bot-core/index.ts";
+import { SessionManager } from "./engine/session-manager.ts";
 
 const program = new Command()
   .description(
@@ -64,6 +60,10 @@ const program = new Command()
     "--no-server",
     "Disable the control plane server"
   )
+  .option(
+    "--idle",
+    "Start the control plane server in idle mode and wait for UI commands"
+  )
   .parse();
 
 const opts = program.opts<{
@@ -75,17 +75,18 @@ const opts = program.opts<{
   replay?: string;
   port: number;
   server: boolean;
+  idle?: boolean;
 }>();
 
 acquireProcessLock("early-bird");
 
-if (!strategies[opts.strategy]) {
+if (!strategies[opts.strategy] && !opts.idle && !opts.replay) {
   console.error(`Unknown strategy: "${opts.strategy}"`);
   console.error(`Available: ${Object.keys(strategies).join(", ")}`);
   process.exit(1);
 }
 
-if (opts.prod && process.env.FORCE_PROD !== "true") {
+if (opts.prod && process.env.FORCE_PROD !== "true" && !opts.idle) {
   const answer = await new Promise<string>((resolve) => {
     const rl = readline.createInterface({
       input: process.stdin,
@@ -108,27 +109,9 @@ if (opts.prod && process.env.FORCE_PROD !== "true") {
   process.env.PROD = "true";
 }
 
-const rounds = opts.rounds !== undefined ? opts.rounds : null;
-
 // Telemetry & Control Plane
 const telemetryBus = new TelemetryBus();
-
-// Clock must be created before EarlyBird so it can be passed to the constructor
-const clock: Clock = opts.replay ? new VirtualClock() : new RealClock();
-
-const bot = new EarlyBird(
-  opts.strategy,
-  opts.slotOffset,
-  opts.prod ?? false,
-  rounds,
-  opts.alwaysLog ?? false,
-  opts.replay,
-  { 
-      clock, 
-      persistState: !opts.replay,
-      telemetry: telemetryBus
-  },
-);
+const sessionManager = new SessionManager(telemetryBus);
 
 // Start Control Plane Server
 let controlServer: ControlServer | undefined;
@@ -136,18 +119,41 @@ if (opts.server) {
     controlServer = new ControlServer({
         port: opts.port,
         telemetryBus,
-        bot
+        sessionManager
     });
     controlServer.start();
 }
 
-if (opts.replay && clock instanceof VirtualClock) {
-  const reader = bot.replayReader;
-  if (!reader) throw new Error("Replay mode requested but no replay reader was initialized.");
-  const runner = new ReplayRunner(reader, bot, clock, telemetryBus);
-  await runner.run();
-  if (controlServer) controlServer.stop();
-  process.exit(0);
+if (opts.idle) {
+  console.log("Engine running in idle mode. Waiting for control plane commands.");
 } else {
-  await bot.start();
+  if (opts.replay) {
+    await sessionManager.startReplay(opts.replay);
+    // When started from CLI without idle, we exit when completed
+    setInterval(() => {
+        if (sessionManager.getStatus().sessionState === "completed" || sessionManager.getStatus().sessionState === "failed") {
+            if (controlServer) controlServer.stop();
+            process.exit(sessionManager.getStatus().sessionState === "failed" ? 1 : 0);
+        }
+    }, 1000);
+  } else {
+    try {
+      await sessionManager.startSimulation({
+        strategy: opts.strategy,
+        rounds: opts.rounds,
+        alwaysLog: opts.alwaysLog
+      });
+      // Monitor for completion
+      setInterval(() => {
+          if (sessionManager.getStatus().sessionState === "completed" || sessionManager.getStatus().sessionState === "failed") {
+              if (controlServer) controlServer.stop();
+              process.exit(sessionManager.getStatus().sessionState === "failed" ? 1 : 0);
+          }
+      }, 1000);
+    } catch (e: any) {
+      console.error(e.message);
+      if (controlServer) controlServer.stop();
+      process.exit(1);
+    }
+  }
 }

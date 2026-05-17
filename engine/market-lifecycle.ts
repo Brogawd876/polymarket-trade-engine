@@ -804,7 +804,14 @@ export class MarketLifecycle {
         });
 
         if (filled) break;
-        if (!failed) break; // unexpected stop (e.g. sell blocked)
+
+        // If blocked by risk gate synchronously, we must yield the event loop
+        // to prevent an infinite microtask spin before we hit the delay below
+        if (failed) {
+          await new Promise<void>((resolve) => this._clock.setTimeout(resolve, 500));
+        }
+
+        if (!failed) break; // unexpected stop (e.g. sell blocked but no failure callback)
 
         const remainingMs = this.slotEndMs - this._clock.nowMs();
         if (remainingMs <= 0) break;

@@ -333,8 +333,7 @@ export class EarlyBird {
       }
     } catch (e) {
       if (e instanceof TerminalAccessError) {
-        console.error(`\n[fatal] ${e.message}\n`);
-        process.exit(1);
+        throw new Error(`Terminal Access Error: ${e.message}`);
       }
       throw e;
     }
@@ -506,11 +505,11 @@ export class EarlyBird {
       if (!this._replayReader) {
         log.write("[shutdown] All settled. Exiting.", "dim");
         if (this._persistState) this._saveState();
+        if (this._tickInterval) this._clock.clearInterval(this._tickInterval);
         this._ticker.destroy();
         this._resolution.stop();
         this._binance.stop();
         this._coinbase.stop();
-        process.exit(0);
       }
     }
   }

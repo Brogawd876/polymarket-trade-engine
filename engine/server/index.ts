@@ -1,11 +1,12 @@
 import { type Server, type ServerWebSocket } from "bun";
 import { TelemetryBus, type TelemetryEvent } from "../telemetry/index.ts";
-import type { EarlyBird } from "../early-bird.ts";
+import type { SessionManager } from "../session-manager.ts";
+import { readdir } from "fs/promises";
 
 export type ControlServerOptions = {
   port?: number;
   telemetryBus: TelemetryBus;
-  bot: EarlyBird;
+  sessionManager: SessionManager;
   allowedOrigins?: string[];
 };
 
@@ -16,14 +17,14 @@ export type ControlServerOptions = {
 export class ControlServer {
   private _server?: Server<{ sessionId: string }>;
   private _telemetryBus: TelemetryBus;
-  private _bot: EarlyBird;
+  private _sessionManager: SessionManager;
   private _port: number;
   private _allowedOrigins: Set<string>;
 
   constructor(opts: ControlServerOptions) {
     this._port = opts.port ?? 3000;
     this._telemetryBus = opts.telemetryBus;
-    this._bot = opts.bot;
+    this._sessionManager = opts.sessionManager;
     this._allowedOrigins = new Set(opts.allowedOrigins ?? [
       "http://localhost:3000",
       "http://127.0.0.1:3000",
@@ -48,6 +49,9 @@ export class ControlServer {
           responseHeaders.set("Access-Control-Allow-Origin", origin);
           responseHeaders.set("Vary", "Origin");
         }
+        
+        responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type");
 
         // Security: Origin validation
         if (origin && !allowedOrigins.has(origin)) {
@@ -55,8 +59,6 @@ export class ControlServer {
         }
 
         if (req.method === "OPTIONS") {
-          responseHeaders.set("Access-Control-Allow-Methods", "GET, OPTIONS");
-          responseHeaders.set("Access-Control-Allow-Headers", "Content-Type");
           return new Response(null, { status: 204, headers: responseHeaders });
         }
 
@@ -71,8 +73,63 @@ export class ControlServer {
         }
 
         // REST Endpoints
+        if (url.pathname === "/api/operator/status") {
+            return Response.json(this._sessionManager.getStatus(), { headers: responseHeaders });
+        }
+
+        // Keep legacy /api/status for backwards compatibility with UI before update
         if (url.pathname === "/api/status") {
-            return Response.json(this._bot.getStatus(), { headers: responseHeaders });
+            const status = this._sessionManager.getStatus().engineStatus;
+            return Response.json(status || { status: "offline" }, { headers: responseHeaders });
+        }
+
+        if (url.pathname === "/api/operator/simulation/start" && req.method === "POST") {
+            try {
+                const config = await req.json() as any;
+                await this._sessionManager.startSimulation(config);
+                return Response.json({ success: true }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if (url.pathname === "/api/operator/replay/start" && req.method === "POST") {
+            try {
+                const config = await req.json() as any;
+                if (!config.file) throw new Error("Replay file required");
+                await this._sessionManager.startReplay(config.file);
+                return Response.json({ success: true }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if (url.pathname === "/api/operator/session/stop" && req.method === "POST") {
+            try {
+                await this._sessionManager.stopSession();
+                return Response.json({ success: true }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if (url.pathname === "/api/operator/simulation/reset-state" && req.method === "POST") {
+            try {
+                await this._sessionManager.resetState();
+                return Response.json({ success: true }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if (url.pathname === "/api/operator/replay-fixtures") {
+            try {
+                const files = await readdir("logs");
+                const logs = files.filter(f => f.endsWith(".log"));
+                return Response.json(logs, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ error: e.message }, { status: 500, headers: responseHeaders });
+            }
         }
 
         if (url.pathname === "/api/health") {

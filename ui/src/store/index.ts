@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TelemetryEvent, SystemStatus, FeedQuality, PredictiveAggregateSnapshot, LeadLagSnapshot, OrderIntentSnapshot } from '../types/telemetry';
+import type { TelemetryEvent, FeedQuality, PredictiveAggregateSnapshot, LeadLagSnapshot, OrderIntentSnapshot } from '../types/telemetry';
 
 interface FeedState {
     status: "connected" | "stale" | "error" | "forbidden";
@@ -81,8 +81,8 @@ export interface AppState {
     setConnected: (status: boolean) => void;
 
     // Backend System Status (from REST /api/status)
-    systemStatus: SystemStatus | null;
-    setSystemStatus: (status: SystemStatus) => void;
+    operatorStatus: import('../types/telemetry').OperatorStatus | null;
+    setOperatorStatus: (status: import('../types/telemetry').OperatorStatus) => void;
 
     // Latest Telemetry State
     bootInfo: { version: string; mode: string; strategy: string } | null;
@@ -119,8 +119,8 @@ export const useStore = create<AppState>((set) => ({
     isConnected: false,
     setConnected: (isConnected) => set({ isConnected }),
 
-    systemStatus: null,
-    setSystemStatus: (status) => set({ systemStatus: status }),
+    operatorStatus: null,
+    setOperatorStatus: (status) => set({ operatorStatus: status }),
 
     bootInfo: null,
     feeds: {},

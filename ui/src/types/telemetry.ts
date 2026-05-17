@@ -101,3 +101,15 @@ export type EngineStatus = {
 
 // Map backend API status to SystemStatus alias
 export type SystemStatus = EngineStatus;
+
+export type SessionState = "idle" | "starting" | "running" | "stopping" | "completed" | "failed";
+
+export type OperatorStatus = {
+  backend: "reachable";
+  telemetry: "connected" | "disconnected";
+  sessionState: SessionState;
+  engineMode: "idle" | "live" | "sim" | "replay";
+  engineStatus: EngineStatus | null;
+  blockReason: string | null;
+  activeReplayFile: string | null;
+};

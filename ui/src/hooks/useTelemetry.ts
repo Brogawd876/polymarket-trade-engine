@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import type { TelemetryEvent, SystemStatus } from '../types/telemetry';
+import type { TelemetryEvent } from '../types/telemetry';
 
 const WEBSOCKET_URL = "ws://127.0.0.1:3000/telemetry";
-const REST_STATUS_URL = "http://127.0.0.1:3000/api/status";
+const REST_STATUS_URL = "http://127.0.0.1:3000/api/operator/status";
 
 export function useTelemetry() {
-    const { processEvent, setConnected, setSystemStatus, isConnected } = useStore();
+    const { processEvent, setConnected, setOperatorStatus, isConnected } = useStore();
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -17,11 +17,11 @@ export function useTelemetry() {
             try {
                 const res = await fetch(REST_STATUS_URL);
                 if (res.ok) {
-                    const status = await res.json() as SystemStatus;
-                    if (isMounted) setSystemStatus(status);
+                    const status = await res.json();
+                    if (isMounted) setOperatorStatus(status);
                 }
             } catch (err) {
-                console.error("Failed to fetch system status:", err);
+                console.error("Failed to fetch operator status:", err);
             }
         };
 
@@ -77,7 +77,7 @@ export function useTelemetry() {
                 wsRef.current = null;
             }
         };
-    }, [processEvent, setConnected, setSystemStatus]);
+    }, [processEvent, setConnected, setOperatorStatus]);
 
     return { isConnected };
 }

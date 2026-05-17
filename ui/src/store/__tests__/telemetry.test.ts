@@ -6,7 +6,7 @@ describe('Telemetry Store', () => {
     beforeEach(() => {
         useStore.setState({
             isConnected: false,
-            systemStatus: null,
+            operatorStatus: null,
             bootInfo: null,
             feeds: {},
             markets: {},

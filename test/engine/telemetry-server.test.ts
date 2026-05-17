@@ -7,6 +7,7 @@ import {
     ReplayRunner
 } from "../../engine/bot-core/index.ts";
 import { EarlyBird } from "../../engine/early-bird.ts";
+import { SessionManager } from "../../engine/session-manager.ts";
 import { join } from "path";
 
 describe("Telemetry & Control Plane Hardening", () => {
@@ -32,8 +33,11 @@ describe("Telemetry & Control Plane Hardening", () => {
 
   test("ControlServer REST endpoints (health/status)", async () => {
     const bus = new TelemetryBus();
-    const bot = new EarlyBird("simulation", 1, false, 1, false);
-    const server = new ControlServer({ port: 3005, telemetryBus: bus, bot });
+    const sessionManager = new SessionManager(bus);
+    // Mock the session manager's bot status
+    (sessionManager as any)._bot = new EarlyBird("simulation", 1, false, 1, false);
+
+    const server = new ControlServer({ port: 3005, telemetryBus: bus, sessionManager });
     server.start();
 
     try {
@@ -53,8 +57,8 @@ describe("Telemetry & Control Plane Hardening", () => {
 
   test("ControlServer WebSocket telemetry stream", async () => {
     const bus = new TelemetryBus();
-    const bot = new EarlyBird("simulation", 1, false, 1, false);
-    const server = new ControlServer({ port: 3006, telemetryBus: bus, bot });
+    const sessionManager = new SessionManager(bus);
+    const server = new ControlServer({ port: 3006, telemetryBus: bus, sessionManager });
     server.start();
 
     try {
@@ -106,8 +110,12 @@ describe("Telemetry & Control Plane Hardening", () => {
       persistState: false,
       telemetry: telemetryBus,
     });
-    const server = new ControlServer({ port: 3007, telemetryBus, bot });
-    const runner = new ReplayRunner(bot.replayReader!, bot, clock, telemetryBus);
+    const sessionManager = new SessionManager(telemetryBus);
+    (sessionManager as any)._bot = bot;
+    (sessionManager as any)._runner = new ReplayRunner(bot.replayReader!, bot, clock, telemetryBus);
+
+    const server = new ControlServer({ port: 3007, telemetryBus, sessionManager });
+    const runner = (sessionManager as any)._runner;
 
     server.start();
     try {

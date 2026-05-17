@@ -25,7 +25,7 @@ describe("Engine-Level Geoblock Shutdown", () => {
         await bot.start();
         expect(false).toBe(true);
     } catch (e: any) {
-        expect(e.message).toBe("process.exit(1)");
+        expect(e.message).toContain("Terminal Access Error");
     }
     mockExit.mockRestore();
   });
