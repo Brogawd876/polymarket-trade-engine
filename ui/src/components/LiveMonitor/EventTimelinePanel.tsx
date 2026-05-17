@@ -1,5 +1,5 @@
 import { useStore } from '../../store';
-import { TelemetryEvent } from '../../types/telemetry';
+import type { TelemetryEvent } from '../../types/telemetry';
 
 export function EventTimelinePanel() {
     const eventTimeline = useStore(state => state.eventTimeline);

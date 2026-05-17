@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { TelemetryEvent, SystemStatus, FeedQuality, PredictiveAggregateSnapshot, LeadLagSnapshot } from '../types/telemetry';
+import type { TelemetryEvent, SystemStatus, FeedQuality, PredictiveAggregateSnapshot, LeadLagSnapshot, OrderIntentSnapshot } from '../types/telemetry';
 
 interface FeedState {
     status: "connected" | "stale" | "error" | "forbidden";
@@ -29,7 +29,39 @@ interface RiskDecision {
     slug: string;
     approved: boolean;
     reasons: string[];
-    intent: any;
+    intent: OrderIntentSnapshot;
+}
+
+export type ExecutionRowKind = 'intent' | 'risk' | 'order' | 'settlement' | 'resolution';
+export type ExecutionRowStatus =
+    | 'attempted'
+    | 'allowed'
+    | 'blocked'
+    | 'placed'
+    | 'filled'
+    | 'partial_filled'
+    | 'canceled'
+    | 'expired'
+    | 'failed'
+    | 'settled'
+    | 'resolved';
+
+export interface ExecutionRow {
+    id: string;
+    ts: number;
+    kind: ExecutionRowKind;
+    status: ExecutionRowStatus;
+    slug: string;
+    side?: "UP" | "DOWN";
+    action?: "buy" | "sell" | "cancel" | "hold";
+    orderId?: string;
+    intentId?: string;
+    price?: number;
+    shares?: number;
+    pnl?: number;
+    reason?: string;
+    reasons?: string[];
+    sourceEvent: TelemetryEvent['type'];
 }
 
 interface RoundResolution {
@@ -60,6 +92,7 @@ export interface AppState {
     predictiveAggregate: PredictiveAggregateSnapshot | null;
     leadLag: LeadLagSnapshot | null;
     latestRiskDecisions: RiskDecision[];
+    executionRows: ExecutionRow[];
     eventTimeline: TelemetryEvent[];
     sessionPnl: { pnl: number; loss: number } | null;
     roundPnl: Record<string, number>;
@@ -76,6 +109,11 @@ export interface AppState {
 
 const MAX_TIMELINE_EVENTS = 100;
 const MAX_CHART_POINTS = 1000;
+const MAX_EXECUTION_ROWS = 200;
+
+function pushExecutionRow(rows: ExecutionRow[], row: ExecutionRow) {
+    return [row, ...rows].slice(0, MAX_EXECUTION_ROWS);
+}
 
 export const useStore = create<AppState>((set) => ({
     isConnected: false,
@@ -91,6 +129,7 @@ export const useStore = create<AppState>((set) => ({
     predictiveAggregate: null,
     leadLag: null,
     latestRiskDecisions: [],
+    executionRows: [],
     eventTimeline: [],
     sessionPnl: null,
     roundPnl: {},
@@ -98,7 +137,7 @@ export const useStore = create<AppState>((set) => ({
     replayProgress: null,
     priceHistory: {},
 
-    clearEvents: () => set({ eventTimeline: [], priceHistory: {} }),
+    clearEvents: () => set({ eventTimeline: [], executionRows: [], priceHistory: {} }),
 
     processEvent: (event) => set((state) => {
         const nextState = { ...state };
@@ -189,12 +228,69 @@ export const useStore = create<AppState>((set) => ({
                     { ts: event.ts, ...event.payload },
                     ...state.latestRiskDecisions
                 ].slice(0, 10);
+                nextState.executionRows = pushExecutionRow(nextState.executionRows, {
+                    id: `risk-${event.ts}-${event.payload.intent.id}`,
+                    ts: event.ts,
+                    kind: 'risk',
+                    status: event.payload.approved ? 'allowed' : 'blocked',
+                    slug: event.payload.slug,
+                    side: event.payload.intent.side,
+                    action: event.payload.intent.action,
+                    intentId: event.payload.intent.id,
+                    price: event.payload.intent.price,
+                    shares: event.payload.intent.shares,
+                    reason: event.payload.reasons.join('; '),
+                    reasons: event.payload.reasons,
+                    sourceEvent: event.type
+                });
+                break;
+            case "ORDER_INTENT":
+                nextState.executionRows = pushExecutionRow(nextState.executionRows, {
+                    id: `intent-${event.ts}-${event.payload.intent.id}`,
+                    ts: event.ts,
+                    kind: 'intent',
+                    status: 'attempted',
+                    slug: event.payload.slug,
+                    side: event.payload.intent.side,
+                    action: event.payload.intent.action,
+                    intentId: event.payload.intent.id,
+                    price: event.payload.intent.price,
+                    shares: event.payload.intent.shares,
+                    reason: event.payload.intent.reason,
+                    sourceEvent: event.type
+                });
+                break;
+            case "ORDER_LIFECYCLE":
+                nextState.executionRows = pushExecutionRow(nextState.executionRows, {
+                    id: `order-${event.ts}-${event.payload.orderId ?? event.payload.intentId ?? `${event.payload.action}-${event.payload.side}`}-${event.payload.status}`,
+                    ts: event.ts,
+                    kind: 'order',
+                    status: event.payload.status,
+                    slug: event.payload.slug,
+                    side: event.payload.side,
+                    action: event.payload.action,
+                    orderId: event.payload.orderId,
+                    intentId: event.payload.intentId,
+                    price: event.payload.price,
+                    shares: event.payload.shares,
+                    reason: event.payload.error,
+                    sourceEvent: event.type
+                });
                 break;
             case "ROUND_PNL":
                 nextState.roundPnl = {
                     ...state.roundPnl,
                     [event.payload.slug]: event.payload.pnl
                 };
+                nextState.executionRows = pushExecutionRow(nextState.executionRows, {
+                    id: `pnl-${event.ts}-${event.payload.slug}`,
+                    ts: event.ts,
+                    kind: 'settlement',
+                    status: 'settled',
+                    slug: event.payload.slug,
+                    pnl: event.payload.pnl,
+                    sourceEvent: event.type
+                });
                 break;
             case "ROUND_RESOLUTION":
                 nextState.roundResolutions = {
@@ -205,6 +301,17 @@ export const useStore = create<AppState>((set) => ({
                         direction: event.payload.direction
                     }
                 };
+                nextState.executionRows = pushExecutionRow(nextState.executionRows, {
+                    id: `resolution-${event.ts}-${event.payload.slug}`,
+                    ts: event.ts,
+                    kind: 'resolution',
+                    status: 'resolved',
+                    slug: event.payload.slug,
+                    side: event.payload.direction,
+                    price: event.payload.closePrice,
+                    reason: `Open $${event.payload.openPrice.toFixed(2)} -> close $${event.payload.closePrice.toFixed(2)}`,
+                    sourceEvent: event.type
+                });
                 break;
             case "SESSION_PNL":
                 nextState.sessionPnl = event.payload;

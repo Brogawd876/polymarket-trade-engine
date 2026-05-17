@@ -47,6 +47,30 @@ export interface LeadLagSnapshot {
   sufficientSamples: boolean;
 }
 
+export interface OrderIntentSnapshot {
+  id: string;
+  slug: string;
+  strategyName: string;
+  createdAtMs: number;
+  reason: string;
+  triggerEventIds: string[];
+  round: {
+    slug: string;
+    asset: BotAsset;
+    window: string;
+    startTimeMs: number;
+    endTimeMs: number;
+  };
+  action: "buy" | "sell" | "cancel" | "hold";
+  side?: "UP" | "DOWN";
+  tokenId?: string;
+  price?: number;
+  shares?: number;
+  orderType?: "GTC" | "FOK";
+  expireAtMs?: number;
+  orderIds?: string[];
+}
+
 export type TelemetryEvent = {
     ts: number;
 } & (
@@ -56,8 +80,9 @@ export type TelemetryEvent = {
     | { type: "MARKET_TICK"; payload: { slug: string; asset: BotAsset; price: number; bid: number | null; ask: number | null; slotStartMs?: number; slotEndMs?: number; priceToBeat?: number | null; gap?: number | null; direction?: "UP" | "DOWN" | "TIE" | null; upBid?: number | null; upAsk?: number | null; downBid?: number | null; downAsk?: number | null } }
     | { type: "PREDICTIVE_AGGREGATE"; payload: PredictiveAggregateSnapshot }
     | { type: "LEAD_LAG_UPDATE"; payload: LeadLagSnapshot }
-    | { type: "RISK_DECISION"; payload: { slug: string; approved: boolean; reasons: string[]; intent: any } }
-    | { type: "ORDER_LIFECYCLE"; payload: { slug: string; orderId: string; status: "placed" | "filled" | "canceled" | "expired" | "failed"; side: "UP" | "DOWN"; action: "buy" | "sell"; price: number; shares: number; error?: string } }
+    | { type: "ORDER_INTENT"; payload: { slug: string; intent: OrderIntentSnapshot } }
+    | { type: "RISK_DECISION"; payload: { slug: string; approved: boolean; reasons: string[]; intent: OrderIntentSnapshot } }
+    | { type: "ORDER_LIFECYCLE"; payload: { slug: string; orderId?: string; intentId?: string; status: "placed" | "filled" | "partial_filled" | "canceled" | "expired" | "failed"; side: "UP" | "DOWN"; action: "buy" | "sell"; price: number; shares: number; error?: string } }
     | { type: "ROUND_PNL"; payload: { slug: string; pnl: number } }
     | { type: "ROUND_RESOLUTION"; payload: { slug: string; openPrice: number; closePrice: number; direction: "UP" | "DOWN" } }
     | { type: "SESSION_PNL"; payload: { pnl: number; loss: number } }

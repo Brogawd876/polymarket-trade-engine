@@ -8,7 +8,10 @@ import {
   SLOT_START_MS,
 } from "./helpers/fixture-runner.ts";
 import { waitForAsk } from "../../engine/strategy/utils.ts";
-import type { RiskGate } from "../../engine/bot-core/index.ts";
+import type { RiskGate, StrategyIntent } from "../../engine/bot-core/index.ts";
+import type { TelemetryEvent } from "../../engine/telemetry/index.ts";
+
+type OrderLifecycleEvent = Extract<TelemetryEvent, { type: "ORDER_LIFECYCLE" }>;
 
 // Timestamps derived from the fixture log
 const LOG_START_TS = 1777108047232;
@@ -800,9 +803,10 @@ describe("Test 14: rejected emergencySells yields between retries", () => {
   let emergencyResolved = false;
   let rejectCount = 0;
   const logs: string[] = [];
+  const telemetryEvents: TelemetryEvent[] = [];
 
   const emergencyRejectingRiskGate: RiskGate = {
-    evaluate: (intent: any, snapshot) => {
+    evaluate: (intent: StrategyIntent, snapshot) => {
       const shouldRejectEmergencySell =
         intent.action === "sell" && intent.price < 0.9;
 
@@ -830,9 +834,13 @@ describe("Test 14: rejected emergencySells yields between retries", () => {
     emergencyResolved = false;
     rejectCount = 0;
     logs.length = 0;
+    telemetryEvents.length = 0;
     runner = new FixtureRunner(Infinity, {
       riskGate: emergencyRejectingRiskGate,
       log: (msg) => logs.push(msg),
+      telemetry: {
+        push: (event) => telemetryEvents.push(event),
+      },
     });
 
     await runner.setup(async (ctx) => {
@@ -894,7 +902,73 @@ describe("Test 14: rejected emergencySells yields between retries", () => {
           ),
         ),
       ).toBe(true);
+      expect(
+        telemetryEvents.some((event) => event.type === "ORDER_INTENT"),
+      ).toBe(true);
+      expect(
+        telemetryEvents.some(
+          (event) =>
+            event.type === "RISK_DECISION" &&
+            !event.payload.approved &&
+            event.payload.reasons.includes("best bid or ask is missing from venue"),
+        ),
+      ).toBe(true);
     },
     TEST_TIMEOUT,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Test 15: execution telemetry links intent, risk, placement, and fill
+// ---------------------------------------------------------------------------
+
+describe("Test 15: execution telemetry stages", () => {
+  let runner: FixtureRunner;
+  const events: TelemetryEvent[] = [];
+
+  beforeEach(async () => {
+    events.length = 0;
+    runner = new FixtureRunner(Infinity, {
+      telemetry: {
+        push: (event) => events.push(event),
+      },
+    });
+
+    await runner.setup(async (ctx) => {
+      ctx.postOrders([
+        {
+          req: { tokenId: DOWN_TOKEN, action: "buy", price: 0.5, shares: 6 },
+          expireAtMs: SLOT_END_MS,
+        },
+      ]);
+    });
+  });
+
+  afterEach(() => runner.teardown());
+
+  test("approved order emits intent, risk, placed, and filled rows with correlation", async () => {
+    await runner.advanceTo(TS_268S_REMAINING);
+
+    const intent = events.find((event) => event.type === "ORDER_INTENT");
+    const risk = events.find((event) => event.type === "RISK_DECISION");
+    const placed = events.find(
+      (event) =>
+        event.type === "ORDER_LIFECYCLE" &&
+        event.payload.status === "placed",
+    ) as OrderLifecycleEvent | undefined;
+    const filled = events.find(
+      (event) =>
+        event.type === "ORDER_LIFECYCLE" &&
+        event.payload.status === "filled",
+    ) as OrderLifecycleEvent | undefined;
+
+    expect(intent?.type).toBe("ORDER_INTENT");
+    expect(risk?.type).toBe("RISK_DECISION");
+    expect(risk?.payload.approved).toBe(true);
+    expect(placed?.type).toBe("ORDER_LIFECYCLE");
+    expect(filled?.type).toBe("ORDER_LIFECYCLE");
+    expect(placed?.payload.intentId).toBe(intent?.payload.intent.id);
+    expect(filled?.payload.intentId).toBe(intent?.payload.intent.id);
+    expect(filled?.payload.orderId).toBe(placed?.payload.orderId);
+  });
 });

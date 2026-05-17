@@ -52,6 +52,7 @@ export type PendingOrder = {
   tokenId: string;
   action: "buy" | "sell";
   orderType?: "GTC" | "FOK";
+  intentId?: string;
   price: number;
   shares: number;
   expireAtMs: number;
@@ -670,9 +671,9 @@ export class MarketLifecycle {
       // Read partial fill from channel BEFORE cancel (order still tracked here).
       const partialShares = this._userChannel.getMatchedSoFar(pending.orderId);
       // _cancelOrders untracks from channel BEFORE the API call (race-safe).
-      await this._cancelOrders([pending.orderId]);
+      await this._cancelOrders([pending.orderId], "expired");
       if (partialShares > 0) {
-        this._commitFill(pending, partialShares, 0);
+        this._commitFill(pending, partialShares, 0, "partial_filled");
       } else if (pending.onExpired) {
         this._marketLogger.log(this._createOrderEntry(pending, "expired"));
         void pending.onExpired();
@@ -707,6 +708,7 @@ export class MarketLifecycle {
 
   private async _cancelOrders(
     orderIds: string[],
+    status: "canceled" | "expired" = "canceled",
   ): Promise<CancelOrderResponse> {
     // Skip orders that have MATCHED but are awaiting MINED â€” cancelling them
     // would unlock the wallet here while the pending settlement still fires
@@ -722,7 +724,11 @@ export class MarketLifecycle {
       const pending = this._pendingOrders.find((o) => o.orderId === id);
       if (pending) {
         this._trackerUnlock(pending);
-        this._marketLogger.log(this._createOrderEntry(pending, "canceled"));
+        this._marketLogger.log(this._createOrderEntry(pending, status));
+        this._emitOrderLifecycle(pending, status, {
+          orderId: id,
+          intentId: pending.intentId,
+        });
       }
       this._removePendingOrder(id);
     }
@@ -829,6 +835,7 @@ export class MarketLifecycle {
     pending: PendingOrder,
     shares: number,
     fee: number,
+    status: "filled" | "partial_filled" = "filled",
   ): void {
     if (pending.action === "buy") {
       this._tracker.onBuyFilled(
@@ -857,18 +864,10 @@ export class MarketLifecycle {
       this._createOrderEntry(pending, "filled", { shares }),
     );
     
-    this._telemetry.push({
-      ts: this._clock.nowMs(),
-      type: "ORDER_LIFECYCLE",
-      payload: {
-          slug: this.slug,
-          orderId: pending.orderId,
-          status: "filled",
-          side: this._side(pending.tokenId),
-          action: pending.action,
-          price: pending.price,
-          shares
-      }
+    this._emitOrderLifecycle(pending, status, {
+      orderId: pending.orderId,
+      intentId: pending.intentId,
+      shares,
     });
 
     if (pending.onFilled) pending.onFilled(shares);
@@ -888,6 +887,7 @@ export class MarketLifecycle {
       let remaining = [...items];
       let retryCount = 0;
       while (remaining.length > 0) {
+        const intents = new Map<OrderRequest, StrategyIntent>();
         // Stop retrying if the relevant block flag was set after this loop started
         const beforeBlock = remaining.length;
         remaining = remaining.filter((item) => {
@@ -910,6 +910,9 @@ export class MarketLifecycle {
         // Pre-flight: drop orders past their expiry
         remaining = remaining.filter((item) => {
           if (this._clock.nowMs() >= item.expireAtMs) {
+            this._emitOrderLifecycle(item.req, "expired", {
+              error: "order expired before placement",
+            });
             if (item.onFailed) item.onFailed("order expired before placement");
             return false;
           }
@@ -918,10 +921,19 @@ export class MarketLifecycle {
         if (remaining.length === 0) break;
 
         remaining = remaining.filter((item) => {
-          const decision = this._riskGate.evaluate(
-            this._createOrderIntent(item),
-            this._createRiskSnapshot(),
-          );
+          const intent = this._createOrderIntent(item);
+          intents.set(item, intent);
+
+          this._telemetry.push({
+            ts: this._clock.nowMs(),
+            type: "ORDER_INTENT",
+            payload: {
+              slug: this.slug,
+              intent,
+            },
+          });
+
+          const decision = this._riskGate.evaluate(intent, this._createRiskSnapshot());
           
           this._telemetry.push({
             ts: this._clock.nowMs(),
@@ -930,7 +942,7 @@ export class MarketLifecycle {
                 slug: this.slug,
                 approved: decision.approved,
                 reasons: decision.reasons,
-                intent: this._createOrderIntent(item)
+                intent
             }
           });
 
@@ -1015,12 +1027,17 @@ export class MarketLifecycle {
               retryNext.push(item);
             } else {
               const reason = p?.errorMsg ?? "unknown";
+              const intent = intents.get(item);
               const side =
                 item.req.tokenId === this._clobTokenIds?.[0] ? "UP" : "DOWN";
               this._log(
                 `[${this.slug}] Order placement failed (${item.req.action.toUpperCase()} ${side} @ ${item.req.price}): ${reason}`,
                 "red",
               );
+              this._emitOrderLifecycle(item.req, "failed", {
+                intentId: intent?.id,
+                error: reason,
+              });
               if (item.onFailed) item.onFailed(reason);
             }
             continue;
@@ -1031,6 +1048,7 @@ export class MarketLifecycle {
             tokenId: item.req.tokenId,
             action: item.req.action,
             orderType: item.req.orderType,
+            intentId: intents.get(item)?.id,
             price: item.req.price,
             shares: item.req.shares,
             expireAtMs: item.expireAtMs,
@@ -1041,18 +1059,9 @@ export class MarketLifecycle {
           });
           this._marketLogger.log(this._createOrderEntry(item.req, "placed"));
           
-          this._telemetry.push({
-            ts: this._clock.nowMs(),
-            type: "ORDER_LIFECYCLE",
-            payload: {
-                slug: this.slug,
-                orderId: p.orderId,
-                status: "placed",
-                side: this._side(item.req.tokenId),
-                action: item.req.action,
-                price: item.req.price,
-                shares: item.req.shares
-            }
+          this._emitOrderLifecycle(item.req, "placed", {
+            orderId: p.orderId,
+            intentId: intents.get(item)?.id,
           });
 
           // Wrap the OrderRequest with fill accounting and register with the user channel.
@@ -1088,19 +1097,10 @@ export class MarketLifecycle {
                 this._createOrderEntry(pending, "failed", { reason }),
               );
               
-              this._telemetry.push({
-                ts: this._clock.nowMs(),
-                type: "ORDER_LIFECYCLE",
-                payload: {
-                    slug: this.slug,
-                    orderId: orderId,
-                    status: "failed",
-                    side: this._side(pending.tokenId),
-                    action: pending.action,
-                    price: pending.price,
-                    shares: pending.shares,
-                    error: reason
-                }
+              this._emitOrderLifecycle(pending, "failed", {
+                orderId,
+                intentId: pending.intentId,
+                error: reason,
               });
 
               item.onFailed?.(reason);
@@ -1160,6 +1160,44 @@ export class MarketLifecycle {
 
   private _side(tokenId: string): "UP" | "DOWN" {
     return tokenId === this._clobTokenIds?.[0] ? "UP" : "DOWN";
+  }
+
+  private _emitOrderLifecycle(
+    order: {
+      action: "buy" | "sell";
+      tokenId: string;
+      price: number;
+      shares: number;
+    },
+    status:
+      | "placed"
+      | "filled"
+      | "partial_filled"
+      | "canceled"
+      | "expired"
+      | "failed",
+    opts: {
+      orderId?: string;
+      intentId?: string;
+      shares?: number;
+      error?: string;
+    } = {},
+  ): void {
+    this._telemetry.push({
+      ts: this._clock.nowMs(),
+      type: "ORDER_LIFECYCLE",
+      payload: {
+        slug: this.slug,
+        orderId: opts.orderId,
+        intentId: opts.intentId,
+        status,
+        side: this._side(order.tokenId),
+        action: order.action,
+        price: order.price,
+        shares: opts.shares ?? order.shares,
+        error: opts.error,
+      },
+    });
   }
 
   private _roundWindow(): RoundWindow {

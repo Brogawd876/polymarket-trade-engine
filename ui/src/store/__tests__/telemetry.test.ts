@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from '../index';
-import { TelemetryEvent } from '../../types/telemetry';
+import type { TelemetryEvent } from '../../types/telemetry';
 
 describe('Telemetry Store', () => {
     beforeEach(() => {
@@ -14,6 +14,7 @@ describe('Telemetry Store', () => {
             predictiveAggregate: null,
             leadLag: null,
             latestRiskDecisions: [],
+            executionRows: [],
             eventTimeline: [],
             sessionPnl: null,
             roundPnl: {},
@@ -173,6 +174,81 @@ describe('Telemetry Store', () => {
             closePrice: 78170.42,
             direction: 'UP'
         });
+        expect(updated.executionRows[0]).toEqual(expect.objectContaining({
+            kind: 'resolution',
+            status: 'resolved',
+            slug: 'btc-updown-5m-1778978400',
+            side: 'UP'
+        }));
+    });
+
+    it('builds execution blotter rows from intent, risk, order, and PnL telemetry', () => {
+        const store = useStore.getState();
+        const intent = {
+            id: 'intent-1',
+            slug: 'btc-updown-5m-1778978400',
+            strategyName: 'simulation',
+            createdAtMs: 1000,
+            reason: 'strategy requested order placement',
+            triggerEventIds: [],
+            round: {
+                slug: 'btc-updown-5m-1778978400',
+                asset: 'btc' as const,
+                window: '5m',
+                startTimeMs: 1778978400000,
+                endTimeMs: 1778978700000
+            },
+            action: 'buy' as const,
+            side: 'UP' as const,
+            tokenId: 'up-token',
+            price: 0.49,
+            shares: 5,
+            orderType: 'GTC' as const,
+            expireAtMs: 1778978700000
+        };
+
+        store.processEvent({
+            ts: 1000,
+            type: 'ORDER_INTENT',
+            payload: { slug: intent.slug, intent }
+        });
+        store.processEvent({
+            ts: 1001,
+            type: 'RISK_DECISION',
+            payload: {
+                slug: intent.slug,
+                approved: false,
+                reasons: ['predictive disagreement'],
+                intent
+            }
+        });
+        store.processEvent({
+            ts: 1002,
+            type: 'ORDER_LIFECYCLE',
+            payload: {
+                slug: intent.slug,
+                orderId: 'order-1',
+                intentId: intent.id,
+                status: 'failed',
+                side: 'UP',
+                action: 'buy',
+                price: 0.49,
+                shares: 5,
+                error: 'rejected by venue'
+            }
+        });
+        store.processEvent({
+            ts: 1003,
+            type: 'ROUND_PNL',
+            payload: { slug: intent.slug, pnl: -1.2 }
+        });
+
+        const rows = useStore.getState().executionRows;
+        expect(rows).toHaveLength(4);
+        expect(rows[3]).toEqual(expect.objectContaining({ kind: 'intent', status: 'attempted', intentId: 'intent-1' }));
+        expect(rows[2]).toEqual(expect.objectContaining({ kind: 'risk', status: 'blocked', reason: 'predictive disagreement' }));
+        expect(rows[1]).toEqual(expect.objectContaining({ kind: 'order', status: 'failed', orderId: 'order-1', intentId: 'intent-1' }));
+        expect(rows[0]).toEqual(expect.objectContaining({ kind: 'settlement', status: 'settled', pnl: -1.2 }));
     });
 });
 

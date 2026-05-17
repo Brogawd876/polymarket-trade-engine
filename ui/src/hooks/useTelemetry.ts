@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import { TelemetryEvent, SystemStatus } from '../types/telemetry';
+import type { TelemetryEvent, SystemStatus } from '../types/telemetry';
 
 const WEBSOCKET_URL = "ws://127.0.0.1:3000/telemetry";
 const REST_STATUS_URL = "http://127.0.0.1:3000/api/status";

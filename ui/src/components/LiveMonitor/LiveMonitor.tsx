@@ -7,6 +7,7 @@ import { SessionSummaryPanel } from './SessionSummaryPanel';
 import { PriceChartPanel } from './PriceChartPanel';
 import { RoundDecisionPanel } from './RoundDecisionPanel';
 import { MarketBookPanel } from './MarketBookPanel';
+import { ExecutionBlotterPanel } from './ExecutionBlotterPanel';
 
 export function LiveMonitor() {
     return (
@@ -36,6 +37,9 @@ export function LiveMonitor() {
                 </div>
 
                 {/* Bottom Row - Logs */}
+                <div className="col-span-12">
+                    <ExecutionBlotterPanel />
+                </div>
                 <div className="col-span-12">
                     <EventTimelinePanel />
                 </div>
