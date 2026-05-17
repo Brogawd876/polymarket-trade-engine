@@ -1,5 +1,9 @@
 export type Tz = "local" | "ET" | "UTC";
 
+export type DataSource =
+  | { kind: "default" }
+  | { kind: "custom"; name: string; files: File[] };
+
 const TZ_NAME: Record<Tz, string | undefined> = {
   local: undefined, // browser local
   ET: "America/New_York",

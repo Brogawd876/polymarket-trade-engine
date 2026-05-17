@@ -1,12 +1,13 @@
 import { useEffect, useRef, useMemo } from 'react';
-import * as LWC from 'lightweight-charts';
+import { createChart, ColorType, LineStyle } from 'lightweight-charts';
+import type { IChartApi, IPriceLine, ISeriesApi, LineData, Time } from 'lightweight-charts';
 import { useStore } from '../../store';
 
 export function PriceChartPanel() {
     const chartContainerRef = useRef<HTMLDivElement>(null);
-    const chartRef = useRef<LWC.IChartApi | null>(null);
-    const seriesRef = useRef<LWC.ISeriesApi<"Line"> | null>(null);
-    const targetLineRef = useRef<LWC.IPriceLine | null>(null);
+    const chartRef = useRef<IChartApi | null>(null);
+    const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const targetLineRef = useRef<IPriceLine | null>(null);
 
     const priceHistory = useStore(state => state.priceHistory);
     const markets = useStore(state => state.markets);
@@ -21,9 +22,9 @@ export function PriceChartPanel() {
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        const chart = LWC.createChart(chartContainerRef.current, {
+        const chart = createChart(chartContainerRef.current, {
             layout: {
-                background: { type: LWC.ColorType.Solid, color: 'transparent' },
+                background: { type: ColorType.Solid, color: 'transparent' },
                 textColor: '#94a3b8',
             },
             grid: {
@@ -38,7 +39,7 @@ export function PriceChartPanel() {
             }
         });
 
-        const lineSeries = chart.addSeries(LWC.LineSeries, {
+        const lineSeries = chart.addLineSeries({
             color: '#10b981',
             lineWidth: 2,
             crosshairMarkerVisible: true,
@@ -95,7 +96,7 @@ export function PriceChartPanel() {
                 price: targetPrice,
                 color: '#f59e0b',
                 lineWidth: 2,
-                lineStyle: LWC.LineStyle.Dashed,
+                lineStyle: LineStyle.Dashed,
                 axisLabelVisible: true,
                 title: 'Target',
             });

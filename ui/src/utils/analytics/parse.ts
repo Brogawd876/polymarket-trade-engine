@@ -1,5 +1,8 @@
 import type { LogEntry, ParsedRun, Resolution, Outcome, SlugInfo } from "../../types/analytics";
 
+export type Asset = "BTC" | "ETH" | "XRP" | "SOL" | "DOGE";
+export type Duration = "5m" | "15m";
+
 // Slug shape: `<asset>-updown-<duration>-<unixSec>` (e.g. `btc-updown-5m-1777699500`).
 // Returns nulls for slugs that don't match this convention.
 export function parseSlugInfo(slug: string): SlugInfo {

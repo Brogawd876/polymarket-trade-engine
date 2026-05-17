@@ -2,14 +2,6 @@ import { create } from 'zustand';
 import type { Tz, DataSource } from '../utils/analytics/time';
 import type { Asset, Duration } from '../utils/analytics/parse';
 
-// Since I haven't ported Asset/Duration types properly yet, I'll define them here
-export type Asset = "BTC" | "ETH" | "XRP" | "SOL" | "DOGE";
-export type Duration = "5m" | "15m";
-
-export type DataSource =
-  | { kind: "default" }
-  | { kind: "custom"; name: string; files: File[] };
-
 interface AnalyticsState {
   tz: Tz;
   asset: Asset;

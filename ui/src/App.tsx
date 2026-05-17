@@ -9,13 +9,6 @@ import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import Logs from './pages/Logs';
 
-// Placeholders for other routes
-const Placeholder = ({ title }: { title: string }) => (
-    <div className="p-8 flex items-center justify-center h-full text-slate-500 text-lg font-medium">
-        {title} (Coming Soon)
-    </div>
-);
-
 export function App() {
     return (
         <BrowserRouter>

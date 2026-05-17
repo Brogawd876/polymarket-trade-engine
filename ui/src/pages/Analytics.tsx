@@ -1,16 +1,14 @@
 import { useMemo, useState } from 'react';
-import { BarChart3, Filter, Settings, FileText, Search } from 'lucide-react';
+import { BarChart3, Filter, FileText, Search } from 'lucide-react';
 import { useLogs } from '../hooks/useLogs';
 import { useAnalyticsStore } from '../store/analytics';
 import { uniqueStrategies } from '../utils/analytics/aggregate';
 import { parseSlugInfo } from '../utils/analytics/parse';
-import type { Rate } from '../types/analytics';
 
 export default function Analytics() {
     const allRuns = useLogs();
     const { asset, duration, strategy, setAsset, setDuration, setStrategy } = useAnalyticsStore();
     
-    const [topRate, setTopRate] = useState<Rate>("day");
     const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
 
     const runs = useMemo(

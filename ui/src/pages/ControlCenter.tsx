@@ -7,13 +7,14 @@ import {
     AlertTriangle, 
     Play, 
     Settings, 
-    Database, 
+    Database,
     Zap,
     Clock,
     RefreshCw,
-    Trash2
+    Trash2,
+    Shield,
+    Lock as LockIcon
 } from 'lucide-react';
-
 const API_BASE = "http://127.0.0.1:3000/api/operator";
 
 type ReplayFixture = {
@@ -229,7 +230,7 @@ export default function ControlCenter() {
                     <div className="p-4 rounded-xl border bg-slate-800/30 border-slate-700/50 flex flex-col justify-between">
                         <div className="flex items-center justify-between mb-2">
                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Order Limits</div>
-                             <Lock className="w-4 h-4 text-slate-400" />
+                             <LockIcon className="w-4 h-4 text-slate-400" />
                         </div>
                         <div className="text-lg font-black text-slate-200">
                             $10.00 <span className="text-xs text-slate-500 font-medium">NOTIONAL</span>
