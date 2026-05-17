@@ -12,7 +12,7 @@ export type TelemetryEvent = {
   | { type: "SYSTEM_BOOT"; payload: { version: string; mode: "live" | "sim" | "replay"; strategy: string } }
   | { type: "FEED_STATUS"; payload: { feed: string; status: "connected" | "stale" | "error" | "forbidden"; quality: FeedQuality; message?: string } }
   | { type: "LIFECYCLE_STATE"; payload: { slug: string; from: string; to: string } }
-  | { type: "MARKET_TICK"; payload: { slug: string; asset: BotAsset; price: number; bid: number | null; ask: number | null } }
+  | { type: "MARKET_TICK"; payload: { slug: string; asset: BotAsset; price: number; bid: number | null; ask: number | null; slotStartMs?: number; slotEndMs?: number; priceToBeat?: number | null; gap?: number | null; direction?: "UP" | "DOWN" | "TIE" | null; upBid?: number | null; upAsk?: number | null; downBid?: number | null; downAsk?: number | null } }
   | { type: "PREDICTIVE_AGGREGATE"; payload: PredictiveAggregateSnapshot }
   | { type: "LEAD_LAG_UPDATE"; payload: LeadLagSnapshot }
   | { type: "RISK_DECISION"; payload: { slug: string; approved: boolean; reasons: string[]; intent: any } }

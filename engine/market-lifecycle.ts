@@ -331,15 +331,39 @@ export class MarketLifecycle {
       
       // Heartbeat market tick
       if (this._state === "RUNNING" || this._state === "INIT") {
+        const slotStartMs = this.slotStartMs;
+        const marketResult = this.apiQueue.marketResult.get(slotStartMs);
+        const priceToBeat = marketResult?.openPrice ?? null;
+        const currentPrice = this._ticker.price ?? 0;
+        const gap =
+          priceToBeat !== null && currentPrice
+            ? parseFloat((currentPrice - priceToBeat).toFixed(2))
+            : null;
+        const direction =
+          gap === null ? null : gap > 0 ? "UP" : gap < 0 ? "DOWN" : "TIE";
+        const upBid = this._orderBook.bestBidPrice("UP");
+        const upAsk = this._orderBook.bestAskPrice("UP");
+        const downBid = this._orderBook.bestBidPrice("DOWN");
+        const downAsk = this._orderBook.bestAskPrice("DOWN");
+
         this._telemetry.push({
           ts: this._clock.nowMs(),
           type: "MARKET_TICK",
           payload: {
             slug: this.slug,
             asset: Env.get("MARKET_ASSET"),
-            price: this._ticker.price ?? 0,
-            bid: this._orderBook.bestBidPrice("UP"), // Simplification for telemetry HUD
-            ask: this._orderBook.bestAskPrice("UP")
+            price: currentPrice,
+            bid: upBid,
+            ask: upAsk,
+            slotStartMs,
+            slotEndMs: this.slotEndMs,
+            priceToBeat,
+            gap,
+            direction,
+            upBid,
+            upAsk,
+            downBid,
+            downAsk,
           }
         });
         

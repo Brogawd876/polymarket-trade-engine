@@ -12,6 +12,15 @@ interface MarketState {
     price: number;
     bid: number | null;
     ask: number | null;
+    slotStartMs?: number;
+    slotEndMs?: number;
+    priceToBeat?: number | null;
+    gap?: number | null;
+    direction?: "UP" | "DOWN" | "TIE" | null;
+    upBid?: number | null;
+    upAsk?: number | null;
+    downBid?: number | null;
+    downAsk?: number | null;
     lastUpdated: number;
 }
 
@@ -111,10 +120,38 @@ export const useStore = create<AppState>((set) => ({
                 };
                 break;
             case "MARKET_TICK": {
-                const { slug, price, bid, ask } = event.payload;
+                const {
+                    slug,
+                    price,
+                    bid,
+                    ask,
+                    slotStartMs,
+                    slotEndMs,
+                    priceToBeat,
+                    gap,
+                    direction,
+                    upBid,
+                    upAsk,
+                    downBid,
+                    downAsk
+                } = event.payload;
                 nextState.markets = {
                     ...state.markets,
-                    [slug]: { price, bid, ask, lastUpdated: event.ts }
+                    [slug]: {
+                        price,
+                        bid,
+                        ask,
+                        slotStartMs,
+                        slotEndMs,
+                        priceToBeat,
+                        gap,
+                        direction,
+                        upBid,
+                        upAsk,
+                        downBid,
+                        downAsk,
+                        lastUpdated: event.ts
+                    }
                 };
                 // Update chart history
                 const currentHistory = state.priceHistory[slug] || [];

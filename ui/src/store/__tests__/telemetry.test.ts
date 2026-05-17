@@ -41,11 +41,30 @@ describe('Telemetry Store', () => {
         store.processEvent({
             ts: 1000,
             type: 'MARKET_TICK',
-            payload: { slug: 'BTC-5M', asset: 'btc', price: 65000, bid: 64990, ask: 65010 }
+            payload: {
+                slug: 'BTC-5M',
+                asset: 'btc',
+                price: 65000,
+                bid: 0.52,
+                ask: 0.53,
+                slotStartMs: 1778977500000,
+                slotEndMs: 1778977800000,
+                priceToBeat: 64950,
+                gap: 50,
+                direction: 'UP',
+                upBid: 0.52,
+                upAsk: 0.53,
+                downBid: 0.47,
+                downAsk: 0.48
+            }
         });
 
         let updated = useStore.getState();
         expect(updated.markets['BTC-5M'].price).toBe(65000);
+        expect(updated.markets['BTC-5M'].priceToBeat).toBe(64950);
+        expect(updated.markets['BTC-5M'].direction).toBe('UP');
+        expect(updated.markets['BTC-5M'].upBid).toBe(0.52);
+        expect(updated.markets['BTC-5M'].downAsk).toBe(0.48);
         expect(updated.priceHistory['BTC-5M']).toHaveLength(1);
         expect(updated.priceHistory['BTC-5M'][0]).toEqual({ time: 1, value: 65000 });
 

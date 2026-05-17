@@ -5,6 +5,8 @@ import { RiskPanel } from './RiskPanel';
 import { EventTimelinePanel } from './EventTimelinePanel';
 import { SessionSummaryPanel } from './SessionSummaryPanel';
 import { PriceChartPanel } from './PriceChartPanel';
+import { RoundDecisionPanel } from './RoundDecisionPanel';
+import { MarketBookPanel } from './MarketBookPanel';
 
 export function LiveMonitor() {
     return (
@@ -18,6 +20,8 @@ export function LiveMonitor() {
                 {/* Top Row - Status & Key metrics */}
                 <div className="col-span-12 lg:col-span-4 space-y-6">
                     <SystemStatusPanel />
+                    <RoundDecisionPanel />
+                    <MarketBookPanel />
                     <FeedHealthPanel />
                     <SessionSummaryPanel />
                 </div>
