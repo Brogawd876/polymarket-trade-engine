@@ -293,7 +293,7 @@ export class MarketLifecycle {
       this._buyBlocked = true;
       this._setState("STOPPING");
     }
-    // STOPPING already â€” no-op
+    // STOPPING already — no-op
   }
 
   destroy(): void {
@@ -315,7 +315,7 @@ export class MarketLifecycle {
   private _setState(next: LifecycleState): void {
     if (this._state === next) return;
     const from = this._state;
-    this._log(`[${this.slug}] state: ${from} â†’ ${next}`, "dim");
+    this._log(`[${this.slug}] state: ${from} → ${next}`, "dim");
     this._state = next;
     this._telemetry.push({
       ts: this._clock.nowMs(),
@@ -585,7 +585,7 @@ export class MarketLifecycle {
     if (this._clock.nowMs() >= this.slotEndMs) {
       this._setState("STOPPING");
       this._log(
-        `[${this.slug}] Market closed â€” transitioning to STOPPING`,
+        `[${this.slug}] Market closed — transitioning to STOPPING`,
         "yellow",
       );
       return;
@@ -620,10 +620,10 @@ export class MarketLifecycle {
     const remaining = this.remainingSecs;
 
     if (remaining <= 0) {
-      // Slot expired â€” cancel whatever is left
+      // Slot expired — cancel whatever is left
       if (pendingSells.length > 0) {
         this._log(
-          `[${this.slug}] Slot expired with ${pendingSells.length} unfilled SELL order(s) â€” cancelling`,
+          `[${this.slug}] Slot expired with ${pendingSells.length} unfilled SELL order(s) — cancelling`,
           "yellow",
         );
         const response = await this._cancelOrders(
@@ -658,14 +658,14 @@ export class MarketLifecycle {
 
   /**
    * Cancel any orders that have passed their expireAtMs.
-   * Fills arrive via user channel callbacks â€” this only handles expiry.
+   * Fills arrive via user channel callbacks — this only handles expiry.
    */
   private async _checkExpiries(): Promise<void> {
     const now = this._clock.nowMs();
     for (const pending of this._pendingOrders) {
       if (now < pending.expireAtMs) continue;
       // Defer expiry for orders that have MATCHED but are awaiting MINED.
-      // Cancelling here would race against the in-flight settlement â€” the
+      // Cancelling here would race against the in-flight settlement — the
       // trade would be dropped and onFilled never fires.
       if (this._userChannel.isMatched(pending.orderId)) continue;
       // Read partial fill from channel BEFORE cancel (order still tracked here).
@@ -686,7 +686,7 @@ export class MarketLifecycle {
   // ---------------------------------------------------------------------------
 
   /**
-   * Fire-and-forget order placement. Returns immediately â€” do NOT await the
+   * Fire-and-forget order placement. Returns immediately — do NOT await the
    * result to know if an order was placed. Use `onFilled` to react to a fill
    * and `onExpired` to react to a cancellation or failed placement.
    * Buys retry up to BUY_MAX_RETRIES times on balance errors; sells retry until slot end.
@@ -710,7 +710,7 @@ export class MarketLifecycle {
     orderIds: string[],
     status: "canceled" | "expired" = "canceled",
   ): Promise<CancelOrderResponse> {
-    // Skip orders that have MATCHED but are awaiting MINED â€” cancelling them
+    // Skip orders that have MATCHED but are awaiting MINED — cancelling them
     // would unlock the wallet here while the pending settlement still fires
     // onFilled later, double-counting the tracker.
     const cancellable = orderIds.filter(
@@ -795,7 +795,7 @@ export class MarketLifecycle {
                 resolve();
               },
               onExpired: () => {
-                // GTC expired after 2s â€” retry with fresh bid
+                // GTC expired after 2s — retry with fresh bid
                 failed = true;
                 resolve();
               },
@@ -1132,7 +1132,7 @@ export class MarketLifecycle {
             .map((p) => p!.errorMsg)
             .join("; ");
           this._log(
-            `[${this.slug}] Balance not ready â€” retrying (attempt ${retryCount}): ${summary} | error: ${errors || "pre-flight rejected"}`,
+            `[${this.slug}] Balance not ready — retrying (attempt ${retryCount}): ${summary} | error: ${errors || "pre-flight rejected"}`,
             "yellow",
           );
         }

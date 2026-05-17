@@ -240,7 +240,7 @@ export class EarlyBird {
         if (initialBalance === 0) {
           console.error(
             "Wallet balance is $0.00. Fund your funder wallet with pUSD before starting the engine.\n" +
-            "Run `bun scripts/pusd.ts wrap` to convert USDC.e â†’ pUSD, or see docs/MIGRATE_V2.md.",
+            "Run `bun scripts/pusd.ts wrap` to convert USDC.e → pUSD, or see docs/MIGRATE_V2.md.",
           );
           process.exit(1);
         }

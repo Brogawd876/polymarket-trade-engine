@@ -35,7 +35,7 @@ export const simulationStrategy: Strategy = async (ctx) => {
   // We trade the UP side throughout this example.
   const upTokenId = ctx.clobTokenIds[0];
 
-  // The strategy is invoked before the market window opens â€” we are always
+  // The strategy is invoked before the market window opens — we are always
   // running ahead of time (slot offset >= 1). The actual market window opens
   // at slotEndMs - 300_000 (i.e. 5 minutes before slot end).
   // Schedule a log for when that moment arrives.
@@ -49,13 +49,13 @@ export const simulationStrategy: Strategy = async (ctx) => {
   timers.push(
     ctx.clock.setTimeout(() => {
       ctx.log(
-        `[simulation] market window open â€” slot ends at ${new Date(ctx.slotEndMs).toISOString()}`,
+        `[simulation] market window open — slot ends at ${new Date(ctx.slotEndMs).toISOString()}`,
         "cyan",
       );
     }, msUntilOpen),
   );
 
-  // â”€â”€ Step 1 â€” place a buy order immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ Step 1 — place a buy order immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   ctx.postOrders([
     {
       req: {
@@ -68,14 +68,14 @@ export const simulationStrategy: Strategy = async (ctx) => {
       // The order is automatically cancelled if it hasn't filled when 100s is remaining for market end.
       expireAtMs: ctx.slotEndMs - 100_000,
 
-      // â”€â”€ Step 2 â€” buy filled: place a take-profit sell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â”€â”€ Step 2 — buy filled: place a take-profit sell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       onFilled(filledShares) {
         ctx.log(
-          `[simulation] BUY filled â€” ${filledShares} shares @ 0.49`,
+          `[simulation] BUY filled — ${filledShares} shares @ 0.49`,
           "green",
         );
 
-        // â”€â”€ Step 3 â€” place a take-profit sell, expiring 30 s before close â”€â”€
+        // â”€â”€ Step 3 — place a take-profit sell, expiring 30 s before close â”€â”€
         ctx.postOrders([
           {
             req: {
@@ -88,7 +88,7 @@ export const simulationStrategy: Strategy = async (ctx) => {
 
             onFilled() {
               ctx.log(
-                "[simulation] SELL filled @ 0.70 â€” trade complete",
+                "[simulation] SELL filled @ 0.70 — trade complete",
                 "green",
               );
             },
@@ -110,7 +110,7 @@ export const simulationStrategy: Strategy = async (ctx) => {
 
               if (pendingSellIds.length > 0) {
                 ctx.log(
-                  "[simulation] sell not filled â€” 30 s remaining, triggering emergency sell",
+                  "[simulation] sell not filled — 30 s remaining, triggering emergency sell",
                   "red",
                 );
                 ctx.emergencySells(pendingSellIds);
