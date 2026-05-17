@@ -1,5 +1,10 @@
 import { useStore } from '../../store';
 
+export function formatDivergencePct(divergencePct: number | null | undefined) {
+    if (divergencePct == null) return '---';
+    return `${divergencePct.toFixed(4)}%`;
+}
+
 export function PredictiveSignalPanel() {
     const predictiveAggregate = useStore(state => state.predictiveAggregate);
     const leadLag = useStore(state => state.leadLag);
@@ -17,7 +22,7 @@ export function PredictiveSignalPanel() {
                             {predictiveAggregate?.price != null ? `$${predictiveAggregate.price.toFixed(4)}` : '---'}
                         </span>
                         <span className={`text-sm ${predictiveAggregate?.divergencePct != null && Math.abs(predictiveAggregate.divergencePct) > 0.01 ? 'text-amber-400' : 'text-slate-500'}`}>
-                            Div: {predictiveAggregate?.divergencePct != null ? `${(predictiveAggregate.divergencePct * 100).toFixed(2)}%` : '---'}
+                            Div: {formatDivergencePct(predictiveAggregate?.divergencePct)}
                         </span>
                     </div>
                 </div>

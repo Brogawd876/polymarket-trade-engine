@@ -84,6 +84,16 @@ describe("DefaultPredictiveAggregator", () => {
     expect(latest.disagreement).toBe(false);
   });
 
+  test("plausible BTC feed divergence remains a tiny percent", () => {
+    binance.emit(btcEvent("binance", 78135.20));
+    coinbase.emit(btcEvent("coinbase", 78135.50));
+    const latest = aggregator.latest();
+    expect(latest.price).toBe(78135.35);
+    expect(latest.divergenceAbs).toBeCloseTo(0.30, 6);
+    expect(latest.divergencePct).toBeCloseTo(0.000384, 6);
+    expect(latest.disagreement).toBe(false);
+  });
+
   test("disagreement flag fires when divergence exceeds threshold", () => {
     binance.emit(btcEvent("binance", 100000));
     coinbase.emit(btcEvent("coinbase", 100060));
