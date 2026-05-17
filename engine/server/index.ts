@@ -24,7 +24,12 @@ export class ControlServer {
     this._port = opts.port ?? 3000;
     this._telemetryBus = opts.telemetryBus;
     this._bot = opts.bot;
-    this._allowedOrigins = new Set(opts.allowedOrigins ?? ["http://localhost:3000", "http://127.0.0.1:3000"]);
+    this._allowedOrigins = new Set(opts.allowedOrigins ?? [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+    ]);
   }
 
   start() {
@@ -38,10 +43,21 @@ export class ControlServer {
       fetch: async (req, server) => {
         const url = new URL(req.url);
         const origin = req.headers.get("origin");
+        const responseHeaders = new Headers();
+        if (origin && allowedOrigins.has(origin)) {
+          responseHeaders.set("Access-Control-Allow-Origin", origin);
+          responseHeaders.set("Vary", "Origin");
+        }
 
         // Security: Origin validation
         if (origin && !allowedOrigins.has(origin)) {
             return new Response("Unauthorized Origin", { status: 403 });
+        }
+
+        if (req.method === "OPTIONS") {
+          responseHeaders.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+          responseHeaders.set("Access-Control-Allow-Headers", "Content-Type");
+          return new Response(null, { status: 204, headers: responseHeaders });
         }
 
         // WebSocket Telemetry Path
@@ -56,14 +72,14 @@ export class ControlServer {
 
         // REST Endpoints
         if (url.pathname === "/api/status") {
-            return Response.json(this._bot.getStatus());
+            return Response.json(this._bot.getStatus(), { headers: responseHeaders });
         }
 
         if (url.pathname === "/api/health") {
-            return new Response("OK");
+            return new Response("OK", { headers: responseHeaders });
         }
 
-        return new Response("Not Found", { status: 404 });
+        return new Response("Not Found", { status: 404, headers: responseHeaders });
       },
 
       websocket: {
