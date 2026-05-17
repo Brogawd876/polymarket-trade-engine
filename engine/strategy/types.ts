@@ -28,7 +28,7 @@ export type OrderRequest = {
   onFailed?: (reason: string) => void;
 };
 
-/** Context exposed to strategies â€” subset of lifecycle internals. */
+/** Context exposed to strategies — subset of lifecycle internals. */
 export type StrategyContext = {
   slug: string;
   slotStartMs: number;
@@ -39,7 +39,7 @@ export type StrategyContext = {
 
   getOrderById: (orderId: string) => Promise<Order | null>;
   /**
-   * Fire-and-forget order placement. Returns immediately â€” do not use the
+   * Fire-and-forget order placement. Returns immediately — do not use the
    * return value to determine if an order was placed. Use `onFilled` to react
    * to a successful fill and `onExpired` to react to a cancellation or failed
    * placement. Buys are dropped if buy-blocked; sells are dropped if sell-blocked.
@@ -55,7 +55,7 @@ export type StrategyContext = {
   /**
    * Prevent the lifecycle from exiting RUNNING while the strategy is still
    * active (e.g. waiting for a price condition before placing orders).
-   * Returns a `release` function â€” call it when the hold is no longer needed.
+   * Returns a `release` function — call it when the hold is no longer needed.
    * The lifecycle stays RUNNING until all active holds are released.
    */
   hold: () => () => void;

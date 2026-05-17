@@ -17,7 +17,7 @@ import { Env } from "../../utils/config.ts";
 // ---------------------------------------------------------------------------
 
 export const simulationStrategy: Strategy = async (ctx) => {
-  // â”€â”€ Prod guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Prod guard ────────────────────────────────────────────────────────────
   // This strategy is specially designed for simulation only. If you still
   // want to run it in production, remove this block and make the necessary
   // changes to the strategy logic as per your needs.
@@ -42,7 +42,7 @@ export const simulationStrategy: Strategy = async (ctx) => {
   const marketOpenMs = ctx.slotEndMs - 300_000;
   const msUntilOpen = marketOpenMs - ctx.clock.nowMs();
 
-  // â”€â”€ Cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Cleanup ───────────────────────────────────────────────────────────────
   // Collect timer handles here so the cleanup function can cancel them all.
   const timers: any[] = [];
 
@@ -55,7 +55,7 @@ export const simulationStrategy: Strategy = async (ctx) => {
     }, msUntilOpen),
   );
 
-  // â”€â”€ Step 1 — place a buy order immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Step 1 — place a buy order immediately ───────────────────────────────
   ctx.postOrders([
     {
       req: {
@@ -68,14 +68,14 @@ export const simulationStrategy: Strategy = async (ctx) => {
       // The order is automatically cancelled if it hasn't filled when 100s is remaining for market end.
       expireAtMs: ctx.slotEndMs - 100_000,
 
-      // â”€â”€ Step 2 — buy filled: place a take-profit sell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ── Step 2 — buy filled: place a take-profit sell ──────────────────
       onFilled(filledShares) {
         ctx.log(
           `[simulation] BUY filled — ${filledShares} shares @ 0.49`,
           "green",
         );
 
-        // â”€â”€ Step 3 — place a take-profit sell, expiring 30 s before close â”€â”€
+        // ── Step 3 — place a take-profit sell, expiring 30 s before close ──
         ctx.postOrders([
           {
             req: {
