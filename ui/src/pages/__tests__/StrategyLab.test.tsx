@@ -28,6 +28,36 @@ const completedBatch = {
         worstPnl: 1.05,
         blocked: 0,
         problems: 0,
+        byStrategy: [{
+            strategy: 'simulation',
+            baseStrategy: 'simulation',
+            label: 'simulation',
+            paperEligible: true,
+            runs: 1,
+            completed: 1,
+            failed: 0,
+            canceled: 0,
+            wins: 1,
+            losses: 0,
+            noTrades: 0,
+            tradeCount: 1,
+            winRate: 1,
+            tradeRate: 1,
+            totalPnl: 1.05,
+            avgPnl: 1.05,
+            bestPnl: 1.05,
+            worstPnl: 1.05,
+            blocked: 0,
+            problems: 0,
+            score: 21.5,
+        }],
+        recommendation: {
+            strategy: 'simulation',
+            label: 'simulation',
+            score: 21.5,
+            readyForPaper: true,
+            rationale: ['Ranked #1 by safety-weighted score (21.50).'],
+        },
     },
     runs: [{
         id: 'run-1',
@@ -35,6 +65,9 @@ const completedBatch = {
         file: fixture.path,
         slug: fixture.slug,
         status: 'completed',
+        baseStrategy: 'simulation',
+        variantLabel: 'simulation',
+        paperEligible: true,
         pnl: 1.05,
         direction: 'DOWN',
         openPrice: 79136.21,
@@ -60,7 +93,13 @@ describe('StrategyLab', () => {
     it('loads strategy choices and replayable fixtures', async () => {
         globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
             const target = String(url);
-            if (target.endsWith('/strategy-lab/strategies')) return Response.json({ strategies: ['late-entry', 'simulation'] });
+            if (target.endsWith('/strategy-lab/strategies')) return Response.json({
+                strategies: ['late-entry', 'simulation'],
+                variants: [
+                    { id: 'late-entry-loose', label: 'late-entry loose', strategy: 'late-entry', description: 'Looser replay tuning', config: {}, paperEligible: false },
+                    { id: 'simulation', label: 'simulation', strategy: 'simulation', description: 'Baseline', config: {}, paperEligible: true },
+                ],
+            });
             if (target.endsWith('/replay-fixtures')) return Response.json({ files: [fixture] });
             return Response.json({});
         }) as typeof fetch;
@@ -68,8 +107,8 @@ describe('StrategyLab', () => {
         const view = render(<StrategyLab />);
 
         expect(await view.findByText('Strategy Lab')).toBeTruthy();
-        expect(await view.findByLabelText('simulation')).toBeTruthy();
-        expect(await view.findByLabelText('late-entry')).toBeTruthy();
+        expect((await view.findAllByText('simulation')).length).toBeGreaterThanOrEqual(1);
+        expect((await view.findAllByText('late-entry loose')).length).toBeGreaterThanOrEqual(1);
         expect(await view.findByText(fixture.label)).toBeTruthy();
     });
 
@@ -105,6 +144,9 @@ describe('StrategyLab', () => {
         expect((await view.findAllByText('$1.05')).length).toBeGreaterThanOrEqual(1);
         expect(await view.findByText('win')).toBeTruthy();
         expect(await view.findByText('DOWN: $79136.21 -> $79122.36')).toBeTruthy();
+        expect(await view.findByText('Recommendation')).toBeTruthy();
+        expect(await view.findByText('Variant Ranking')).toBeTruthy();
+        expect(await view.findByText('paper candidate')).toBeTruthy();
     });
 
     it('shows failed rows without breaking the table', async () => {

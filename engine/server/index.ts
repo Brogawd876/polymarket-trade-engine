@@ -147,7 +147,7 @@ export class ControlServer {
         }
 
         if (url.pathname === "/api/operator/strategy-lab/strategies") {
-            return Response.json({ strategies: this._strategyLab.listStrategies() }, { headers: responseHeaders });
+            return Response.json({ strategies: this._strategyLab.listStrategies(), variants: this._strategyLab.listVariants() }, { headers: responseHeaders });
         }
 
         if (url.pathname === "/api/operator/strategy-lab/batches" && req.method === "POST") {

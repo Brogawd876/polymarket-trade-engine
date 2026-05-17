@@ -91,6 +91,7 @@ type MarketLifecycleOptions = {
   log: (msg: string, color?: LogColor) => void;
   strategyName: string;
   strategy: Strategy;
+  strategyConfig?: Record<string, unknown>;
   tracker: WalletTracker;
   ticker: TickerTracker;
   userChannel: UserChannel;
@@ -143,6 +144,7 @@ export class MarketLifecycle {
   private readonly _log: (msg: string, color?: LogColor) => void;
   private readonly _strategyName: string;
   private readonly _strategy: Strategy;
+  private readonly _strategyConfig: Record<string, unknown>;
   private readonly _tracker: WalletTracker;
   private readonly _ticker: TickerTracker;
   private readonly _alwaysLog: boolean;
@@ -163,6 +165,7 @@ export class MarketLifecycle {
     this._log = opts.log;
     this._strategyName = opts.strategyName;
     this._strategy = opts.strategy;
+    this._strategyConfig = { ...(opts.strategyConfig ?? {}) };
     this._tracker = opts.tracker;
     this._ticker = opts.ticker;
     this._alwaysLog = opts.alwaysLog ?? false;
@@ -522,6 +525,8 @@ export class MarketLifecycle {
 
     const ctx: StrategyContext = {
       slug: this.slug,
+      strategyName: this._strategyName,
+      strategyConfig: { ...this._strategyConfig },
       slotStartMs: this.slotStartMs,
       slotEndMs: this.slotEndMs,
       clobTokenIds: this._clobTokenIds,

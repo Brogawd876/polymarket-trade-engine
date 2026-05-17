@@ -4,7 +4,7 @@ import { MarketLifecycle } from "./market-lifecycle.ts";
 import type { PendingOrder, CompletedOrder } from "./market-lifecycle.ts";
 import { APIQueue } from "../tracker/api-queue.ts";
 import type { LogColor } from "./log.ts";
-import { strategies } from "./strategy/index.ts";
+import { resolveStrategySelection } from "./strategy/index.ts";
 import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
@@ -59,8 +59,10 @@ async function recoverMarket(
   ticker: TickerTracker,
   userChannelFactory: () => UserChannel,
 ): Promise<MarketLifecycle | null> {
-  const strategy = strategies[market.strategyName];
-  if (!strategy) {
+  let resolvedStrategy: ReturnType<typeof resolveStrategySelection>;
+  try {
+    resolvedStrategy = resolveStrategySelection(market.strategyName);
+  } catch {
     logFn(
       `[startup] Unknown strategy "${market.strategyName}" for ${market.slug}. Skipping.`,
       "yellow",
@@ -165,8 +167,9 @@ async function recoverMarket(
     apiQueue,
     client,
     log: logFn,
-    strategyName: market.strategyName,
-    strategy,
+    strategyName: resolvedStrategy.selection,
+    strategy: resolvedStrategy.strategy,
+    strategyConfig: resolvedStrategy.config,
     tracker,
     ticker,
     userChannel: userChannelFactory(),

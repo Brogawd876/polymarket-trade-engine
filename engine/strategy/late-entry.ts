@@ -212,7 +212,63 @@ type LateEntryState = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const SHARES = 6;
+export type LateEntryConfig = {
+  shares?: number;
+  minRemainingSec?: number;
+  entryWindowSec?: number;
+  maxAtr?: number;
+  minGapSafety?: number;
+  maxDivergence?: number;
+  minPeakGapRatio?: number;
+  certaintyPrice?: number;
+  minLiquidity?: number;
+  stopLossPrice?: number;
+  stopLossStartSec?: number;
+  stopLossEndSec?: number;
+  stopLossFinalSec?: number;
+  stopLossGapConfirm?: number;
+};
+
+const DEFAULT_CONFIG: Required<LateEntryConfig> = {
+  shares: 6,
+  minRemainingSec: 5,
+  entryWindowSec: 90,
+  maxAtr: 2,
+  minGapSafety: 40,
+  maxDivergence: 10,
+  minPeakGapRatio: 0.75,
+  certaintyPrice: 0.85,
+  minLiquidity: 20,
+  stopLossPrice: 0.48,
+  stopLossStartSec: 80,
+  stopLossEndSec: 20,
+  stopLossFinalSec: 20,
+  stopLossGapConfirm: 5,
+};
+
+function numberConfig(config: Record<string, unknown>, key: keyof LateEntryConfig, fallback: number): number {
+  const value = config[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function resolveConfig(config: Record<string, unknown>): Required<LateEntryConfig> {
+  return {
+    shares: numberConfig(config, "shares", DEFAULT_CONFIG.shares),
+    minRemainingSec: numberConfig(config, "minRemainingSec", DEFAULT_CONFIG.minRemainingSec),
+    entryWindowSec: numberConfig(config, "entryWindowSec", DEFAULT_CONFIG.entryWindowSec),
+    maxAtr: numberConfig(config, "maxAtr", DEFAULT_CONFIG.maxAtr),
+    minGapSafety: numberConfig(config, "minGapSafety", DEFAULT_CONFIG.minGapSafety),
+    maxDivergence: numberConfig(config, "maxDivergence", DEFAULT_CONFIG.maxDivergence),
+    minPeakGapRatio: numberConfig(config, "minPeakGapRatio", DEFAULT_CONFIG.minPeakGapRatio),
+    certaintyPrice: numberConfig(config, "certaintyPrice", DEFAULT_CONFIG.certaintyPrice),
+    minLiquidity: numberConfig(config, "minLiquidity", DEFAULT_CONFIG.minLiquidity),
+    stopLossPrice: numberConfig(config, "stopLossPrice", DEFAULT_CONFIG.stopLossPrice),
+    stopLossStartSec: numberConfig(config, "stopLossStartSec", DEFAULT_CONFIG.stopLossStartSec),
+    stopLossEndSec: numberConfig(config, "stopLossEndSec", DEFAULT_CONFIG.stopLossEndSec),
+    stopLossFinalSec: numberConfig(config, "stopLossFinalSec", DEFAULT_CONFIG.stopLossFinalSec),
+    stopLossGapConfirm: numberConfig(config, "stopLossGapConfirm", DEFAULT_CONFIG.stopLossGapConfirm),
+  };
+}
 
 function checkEntry(params: {
   remaining: number;
@@ -226,6 +282,7 @@ function checkEntry(params: {
   gapSafety: number | null;
   divergence: number | null;
   peakGapRatio: number | null;
+  config: Required<LateEntryConfig>;
 }): EntrySignal | null {
   const {
     remaining,
@@ -236,39 +293,40 @@ function checkEntry(params: {
     atr,
     gapSafety,
     peakGapRatio,
+    config,
   } = params;
 
-  if (remaining < 5) return null;
+  if (remaining < config.minRemainingSec) return null;
 
   const gap = btcPrice - priceToBeat;
   const absGap = Math.abs(gap);
   const divergence = params.divergence ?? Infinity;
 
   if (
-    remaining <= 90 &&
+    remaining <= config.entryWindowSec &&
     atr &&
-    atr <= 2 &&
+    atr <= config.maxAtr &&
     gapSafety &&
-    gapSafety >= 40 &&
-    divergence <= 10 &&
+    gapSafety >= config.minGapSafety &&
+    divergence <= config.maxDivergence &&
     peakGapRatio &&
-    peakGapRatio >= 0.75
+    peakGapRatio >= config.minPeakGapRatio
   ) {
-    const upCertain = up != null && up.price > 0.85;
-    const downCertain = down != null && down.price > 0.85;
+    const upCertain = up != null && up.price > config.certaintyPrice;
+    const downCertain = down != null && down.price > config.certaintyPrice;
 
     if (upCertain || downCertain) {
       const side: "UP" | "DOWN" = upCertain ? "UP" : "DOWN";
       const info = (side === "UP" ? up : down)!;
 
-      if (info.liquidity < 20) return null;
+      if (info.liquidity < config.minLiquidity) return null;
 
       return {
         side,
         ask: info.price,
         gap: absGap,
         liquidity: info.liquidity,
-        stopLossPrice: 0.48,
+        stopLossPrice: config.stopLossPrice,
       };
     }
   }
@@ -284,13 +342,14 @@ function placeEntry(
   ctx: StrategyContext,
   state: LateEntryState,
   signal: EntrySignal,
+  config: Required<LateEntryConfig>,
 ): void {
   const tokenId =
     signal.side === "UP" ? ctx.clobTokenIds[0] : ctx.clobTokenIds[1];
 
   ctx.postOrders([
     {
-      req: { tokenId, action: "buy", price: signal.ask, shares: SHARES },
+      req: { tokenId, action: "buy", price: signal.ask, shares: config.shares },
       expireAtMs: ctx.slotEndMs,
       onFilled(filledShares) {
         state.position = {
@@ -329,6 +388,7 @@ function checkStopLoss(
   remaining: number,
   gap: number | null,
   rsi: number | null,
+  config: Required<LateEntryConfig>,
 ): void {
   const pos = state.position;
   if (!pos) return;
@@ -336,22 +396,21 @@ function checkStopLoss(
   const bestAsk = ctx.orderBook.bestAskInfo(pos.side)?.price ?? null;
   const bestBid = ctx.orderBook.bestBidPrice(pos.side);
 
-  const GAP_CONFIRM_THRESHOLD = 5;
   const gapConfirmsPosition =
     gap !== null &&
-    ((pos.side === "UP" && gap > GAP_CONFIRM_THRESHOLD) ||
-      (pos.side === "DOWN" && gap < -GAP_CONFIRM_THRESHOLD));
+    ((pos.side === "UP" && gap > config.stopLossGapConfirm) ||
+      (pos.side === "DOWN" && gap < -config.stopLossGapConfirm));
   const rsiConfirmsMomentum =
     rsi !== null && (pos.side === "UP" ? rsi >= 50 : rsi <= 50);
 
   const shouldSell =
-    (remaining <= 80 &&
-      remaining >= 20 &&
+    (remaining <= config.stopLossStartSec &&
+      remaining >= config.stopLossEndSec &&
       bestAsk !== null &&
       bestAsk <= pos.stopLossPrice &&
       !gapConfirmsPosition &&
       !rsiConfirmsMomentum) ||
-    (remaining < 20 &&
+    (remaining < config.stopLossFinalSec &&
       bestAsk !== null &&
       bestAsk <= pos.stopLossPrice &&
       !gapConfirmsPosition);
@@ -438,6 +497,7 @@ export const lateEntry: Strategy = async (ctx) => {
     stopLossFired: false,
   };
   const indicators = new Indicators();
+  const config = resolveConfig(ctx.strategyConfig);
 
   const tickInterval = ctx.clock.setInterval(() => {
     const remaining = Math.floor((ctx.slotEndMs - ctx.clock.nowMs()) / 1000);
@@ -478,6 +538,7 @@ export const lateEntry: Strategy = async (ctx) => {
           gapSafety: gap !== null ? indicators.gapSafety(gap) : null,
           divergence: ctx.ticker.divergence,
           peakGapRatio: gap !== null ? indicators.peakGapRatio(gap) : null,
+          config,
         });
 
         if (signal) {
@@ -486,13 +547,13 @@ export const lateEntry: Strategy = async (ctx) => {
             `[${ctx.slug}] late-entry: signal ${signal.side} @ ${signal.ask} (gap ${signal.gap.toFixed(0)}, liq $${signal.liquidity.toFixed(0)})`,
             "cyan",
           );
-          placeEntry(ctx, state, signal);
+          placeEntry(ctx, state, signal, config);
         }
       }
     }
 
     if (state.position && !state.stopLossFired) {
-      checkStopLoss(ctx, state, remaining, gap, indicators.rsi);
+      checkStopLoss(ctx, state, remaining, gap, indicators.rsi, config);
     }
   }, 0);
 };

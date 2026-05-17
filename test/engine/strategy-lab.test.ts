@@ -33,6 +33,14 @@ describe("StrategyLabBatchManager", () => {
     })).rejects.toThrow(/Unknown strategy/);
   });
 
+  test("exposes backend-owned strategy variants", () => {
+    const manager = new StrategyLabBatchManager();
+    const variants = manager.listVariants();
+    expect(variants.some(variant => variant.id === "simulation")).toBe(true);
+    expect(variants.some(variant => variant.id === "late-entry-loose")).toBe(true);
+    expect(variants.every(variant => typeof variant.description === "string")).toBe(true);
+  });
+
   test("rejects non-replayable fixture files", async () => {
     await withTempLog("early-bird-2026-05-16-00-00-00.log", "plain console text", async (file) => {
       const manager = new StrategyLabBatchManager();
@@ -74,6 +82,24 @@ describe("StrategyLabBatchManager", () => {
     expect(completed.progress.completedRuns).toBe(4);
     expect(completed.summary.completed + completed.summary.failed + completed.summary.canceled).toBe(4);
     expect(completed.summary.avgPnl === null || Number.isFinite(completed.summary.avgPnl)).toBe(true);
+  });
+
+  test("runs multiple variants and produces ranked recommendation", async () => {
+    const manager = new StrategyLabBatchManager();
+    const batch = await manager.createBatch({
+      variants: ["simulation", "late-entry-loose"],
+      files: [
+        join(FIXTURES_DIR, "filled-order.log"),
+        join(FIXTURES_DIR, "expired-order.log"),
+      ],
+    });
+
+    const completed = await waitForBatch(manager, batch.id);
+    expect(completed.summary.totalRuns).toBe(4);
+    expect(completed.summary.byStrategy).toHaveLength(2);
+    expect(completed.summary.byStrategy[0]!.score).toBeGreaterThanOrEqual(completed.summary.byStrategy[1]!.score);
+    expect(completed.summary.recommendation?.strategy).toBe(completed.summary.byStrategy[0]!.strategy);
+    expect(completed.runs.every(run => run.variantLabel.length > 0)).toBe(true);
   });
 
   test("failed fixture produces a failed row without killing the batch", async () => {

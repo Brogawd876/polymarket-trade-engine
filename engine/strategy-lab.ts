@@ -1,6 +1,6 @@
 import { EarlyBird } from "./early-bird.ts";
 import { ReplayRunner, VirtualClock, type TelemetryEvent, type TelemetrySink } from "./bot-core/index.ts";
-import { strategies } from "./strategy/index.ts";
+import { listStrategyVariants, resolveStrategySelection, type StrategyVariant } from "./strategy/index.ts";
 import { validateReplayFixture } from "./server/helpers/replay-fixtures.ts";
 
 export type StrategyLabBatchState = "queued" | "running" | "completed" | "failed" | "canceled";
@@ -8,13 +8,17 @@ export type StrategyLabRunStatus = "queued" | "running" | "completed" | "failed"
 export type StrategyLabVerdict = "win" | "loss" | "flat" | "no_trade" | "blocked" | "failed";
 
 export type StrategyLabBatchRequest = {
-  strategies: string[];
+  strategies?: string[];
+  variants?: string[];
   files: string[];
 };
 
 export type StrategyLabRunResult = {
   id: string;
   strategy: string;
+  baseStrategy: string;
+  variantLabel: string;
+  paperEligible: boolean;
   file: string;
   slug: string | null;
   status: StrategyLabRunStatus;
@@ -34,6 +38,39 @@ export type StrategyLabRunResult = {
   error?: string;
 };
 
+export type StrategyLabVariantSummary = {
+  strategy: string;
+  baseStrategy: string;
+  label: string;
+  paperEligible: boolean;
+  runs: number;
+  completed: number;
+  failed: number;
+  canceled: number;
+  wins: number;
+  losses: number;
+  noTrades: number;
+  blockedVerdicts: number;
+  tradeCount: number;
+  winRate: number | null;
+  tradeRate: number | null;
+  totalPnl: number;
+  avgPnl: number | null;
+  bestPnl: number | null;
+  worstPnl: number | null;
+  blocked: number;
+  problems: number;
+  score: number;
+};
+
+export type StrategyLabRecommendation = {
+  strategy: string;
+  label: string;
+  score: number;
+  readyForPaper: boolean;
+  rationale: string[];
+} | null;
+
 export type StrategyLabBatchSummary = {
   totalRuns: number;
   completed: number;
@@ -46,6 +83,8 @@ export type StrategyLabBatchSummary = {
   worstPnl: number | null;
   blocked: number;
   problems: number;
+  byStrategy: StrategyLabVariantSummary[];
+  recommendation: StrategyLabRecommendation;
 };
 
 export type StrategyLabBatch = {
@@ -94,6 +133,8 @@ function emptySummary(totalRuns: number): StrategyLabBatchSummary {
     worstPnl: null,
     blocked: 0,
     problems: 0,
+    byStrategy: [],
+    recommendation: null,
   };
 }
 
@@ -159,6 +200,7 @@ function recomputeSummary(batch: StrategyLabBatch): StrategyLabBatchSummary {
   const pnlRuns = completedRuns.filter(run => typeof run.pnl === "number") as Array<StrategyLabRunResult & { pnl: number }>;
   const wins = completedRuns.filter(run => run.verdict === "win").length;
   const totalPnl = parseFloat(pnlRuns.reduce((sum, run) => sum + run.pnl, 0).toFixed(4));
+  const byStrategy = summarizeByStrategy(batch.runs);
 
   return {
     totalRuns: batch.runs.length,
@@ -172,6 +214,141 @@ function recomputeSummary(batch: StrategyLabBatch): StrategyLabBatchSummary {
     worstPnl: pnlRuns.length > 0 ? Math.min(...pnlRuns.map(run => run.pnl)) : null,
     blocked: batch.runs.reduce((sum, run) => sum + run.counts.blocked, 0),
     problems: batch.runs.reduce((sum, run) => sum + run.counts.problems, 0),
+    byStrategy,
+    recommendation: recommendStrategy(byStrategy),
+  };
+}
+
+function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSummary[] {
+  const grouped = new Map<string, StrategyLabRunResult[]>();
+  for (const run of runs) {
+    const current = grouped.get(run.strategy) ?? [];
+    current.push(run);
+    grouped.set(run.strategy, current);
+  }
+
+  return [...grouped.entries()]
+    .map(([strategy, items]) => {
+      const completed = items.filter(run => run.status === "completed");
+      const pnlRuns = completed.filter(run => typeof run.pnl === "number") as Array<StrategyLabRunResult & { pnl: number }>;
+      const wins = completed.filter(run => run.verdict === "win").length;
+      const losses = completed.filter(run => run.verdict === "loss").length;
+      const noTrades = completed.filter(run => run.verdict === "no_trade").length;
+      const blockedVerdicts = completed.filter(run => run.verdict === "blocked").length;
+      const tradeCount = completed.filter(run => run.counts.fills > 0 || run.counts.intents > 0).length;
+      const totalPnl = parseFloat(pnlRuns.reduce((sum, run) => sum + run.pnl, 0).toFixed(4));
+      const failed = items.filter(run => run.status === "failed").length;
+      const canceled = items.filter(run => run.status === "canceled").length;
+      const blocked = items.reduce((sum, run) => sum + run.counts.blocked, 0);
+      const problems = items.reduce((sum, run) => sum + run.counts.problems, 0);
+      const tradeRate = completed.length > 0 ? tradeCount / completed.length : null;
+      const score = scoreStrategy({
+        totalPnl,
+        completed: completed.length,
+        failed,
+        canceled,
+        wins,
+        losses,
+        noTrades,
+        blocked,
+        problems,
+        worstPnl: pnlRuns.length > 0 ? Math.min(...pnlRuns.map(run => run.pnl)) : null,
+        tradeRate,
+      });
+
+      return {
+        strategy,
+        baseStrategy: items[0]?.baseStrategy ?? strategy,
+        label: items[0]?.variantLabel ?? strategy,
+        paperEligible: items.some(run => run.paperEligible),
+        runs: items.length,
+        completed: completed.length,
+        failed,
+        canceled,
+        wins,
+        losses,
+        noTrades,
+        blockedVerdicts,
+        tradeCount,
+        winRate: completed.length > 0 ? wins / completed.length : null,
+        tradeRate,
+        totalPnl,
+        avgPnl: pnlRuns.length > 0 ? parseFloat((totalPnl / pnlRuns.length).toFixed(4)) : null,
+        bestPnl: pnlRuns.length > 0 ? Math.max(...pnlRuns.map(run => run.pnl)) : null,
+        worstPnl: pnlRuns.length > 0 ? Math.min(...pnlRuns.map(run => run.pnl)) : null,
+        blocked,
+        problems,
+        score,
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.totalPnl - a.totalPnl || a.strategy.localeCompare(b.strategy));
+}
+
+function scoreStrategy(input: {
+  totalPnl: number;
+  completed: number;
+  failed: number;
+  canceled: number;
+  wins: number;
+  losses: number;
+  noTrades: number;
+  blocked: number;
+  problems: number;
+  worstPnl: number | null;
+  tradeRate: number | null;
+}): number {
+  const winRate = input.completed > 0 ? input.wins / input.completed : 0;
+  const tradeRate = input.tradeRate ?? 0;
+  const worstPenalty = input.worstPnl != null && input.worstPnl < 0 ? Math.abs(input.worstPnl) * 1.5 : 0;
+  const score =
+    input.totalPnl * 10 +
+    winRate * 8 +
+    tradeRate * 3 -
+    input.losses * 2 -
+    input.noTrades * 0.4 -
+    input.failed * 8 -
+    input.canceled * 5 -
+    input.blocked * 1.5 -
+    input.problems * 2 -
+    worstPenalty;
+  return parseFloat(score.toFixed(4));
+}
+
+function recommendStrategy(summaries: StrategyLabVariantSummary[]): StrategyLabRecommendation {
+  const viable = summaries.filter(summary => summary.completed > 0 && summary.failed === 0 && summary.canceled === 0);
+  if (viable.length === 0) return null;
+
+  const winner = viable[0]!;
+  const readyForPaper =
+    winner.paperEligible &&
+    winner.totalPnl > 0 &&
+    (winner.tradeRate ?? 0) >= 0.2 &&
+    winner.problems === 0 &&
+    winner.blocked === 0 &&
+    (winner.worstPnl ?? 0) >= -2;
+
+  const rationale = [
+    `Ranked #1 by safety-weighted score (${winner.score.toFixed(2)}).`,
+    `Total PnL ${winner.totalPnl >= 0 ? "+" : ""}$${winner.totalPnl.toFixed(2)} across ${winner.completed}/${winner.runs} completed runs.`,
+    `Trade rate ${winner.tradeRate == null ? "---" : `${Math.round(winner.tradeRate * 100)}%`} with ${winner.problems} problems and ${winner.blocked} blocked decisions.`,
+  ];
+
+  if (!readyForPaper) {
+    if (!winner.paperEligible) {
+      rationale.push("Keep this variant in replay tuning because it is not marked paper-eligible.");
+    } else {
+      rationale.push("Keep in replay tuning before paper mode because the safety gate did not pass.");
+    }
+  } else {
+    rationale.push("Eligible for a paper-mode smoke run under operator supervision.");
+  }
+
+  return {
+    strategy: winner.strategy,
+    label: winner.label,
+    score: winner.score,
+    readyForPaper,
+    rationale,
   };
 }
 
@@ -185,20 +362,29 @@ export class StrategyLabBatchManager {
   private currentBots = new Map<string, EarlyBird>();
 
   listStrategies(): string[] {
-    return Object.keys(strategies).sort();
+    return [...new Set(listStrategyVariants().map(variant => variant.strategy))].sort();
+  }
+
+  listVariants(): StrategyVariant[] {
+    return listStrategyVariants();
   }
 
   async createBatch(request: StrategyLabBatchRequest): Promise<StrategyLabBatch> {
-    const selectedStrategies = [...new Set(request.strategies ?? [])];
+    const selectedStrategies = [...new Set(request.variants ?? request.strategies ?? [])];
     const selectedFiles = [...new Set(request.files ?? [])];
 
-    if (selectedStrategies.length === 0) throw new Error("At least one strategy is required");
+    if (selectedStrategies.length === 0) throw new Error("At least one strategy variant is required");
     if (selectedFiles.length === 0) throw new Error("At least one replay fixture is required");
 
-    const unknown = selectedStrategies.filter(strategy => !strategies[strategy]);
-    if (unknown.length > 0) throw new Error(`Unknown strategy: ${unknown.join(", ")}`);
+    const resolvedSelections = selectedStrategies.map(selection => {
+      try {
+        return resolveStrategySelection(selection);
+      } catch {
+        throw new Error(`Unknown strategy variant: ${selection}`);
+      }
+    });
 
-    const totalRuns = selectedStrategies.length * selectedFiles.length;
+    const totalRuns = resolvedSelections.length * selectedFiles.length;
     if (totalRuns > MAX_BATCH_RUNS) {
       throw new Error(`Strategy Lab batches are capped at ${MAX_BATCH_RUNS} runs; requested ${totalRuns}`);
     }
@@ -210,12 +396,15 @@ export class StrategyLabBatchManager {
     }
 
     const runs: StrategyLabRunResult[] = [];
-    for (const strategy of selectedStrategies) {
+    for (const resolved of resolvedSelections) {
       for (const file of selectedFiles) {
         const fixture = fixtureMetadata.find(meta => meta.path === file);
         runs.push({
           id: crypto.randomUUID(),
-          strategy,
+          strategy: resolved.selection,
+          baseStrategy: resolved.strategyName,
+          variantLabel: resolved.variant.label,
+          paperEligible: resolved.variant.paperEligible,
           file,
           slug: fixture?.slug ?? null,
           status: "queued",

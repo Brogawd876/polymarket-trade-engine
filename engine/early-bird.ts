@@ -9,9 +9,9 @@ import { getSlug } from "../utils/slot.ts";
 import { log } from "./log.ts";
 import { recover } from "./recovery.ts";
 import {
-  strategies,
   DEFAULT_STRATEGY,
   type Strategy,
+  resolveStrategySelection,
 } from "./strategy/index.ts";
 import { WalletTracker } from "./wallet-tracker.ts";
 import { TickerTracker } from "../tracker/ticker.ts";
@@ -74,6 +74,7 @@ export class EarlyBird {
   private _lastSaveMs = 0;
   private readonly _strategyName: string;
   private readonly _strategy: Strategy;
+  private readonly _strategyConfig: Record<string, unknown>;
   private readonly _slotOffset: number;
 
   private readonly _statePath: string;
@@ -114,8 +115,10 @@ export class EarlyBird {
       ? "state/early-bird-prod.json"
       : "state/early-bird.json";
     this._rounds = rounds;
-    this._strategyName = strategyName ?? DEFAULT_STRATEGY;
-    this._strategy = strategies[this._strategyName]!;
+    const resolvedStrategy = resolveStrategySelection(strategyName ?? DEFAULT_STRATEGY);
+    this._strategyName = resolvedStrategy.selection;
+    this._strategy = resolvedStrategy.strategy;
+    this._strategyConfig = resolvedStrategy.config;
     this._slotOffset = slotOffset;
     this._alwaysLog = alwaysLog;
     this._minSessionPnl = parseFloat(process.env.MAX_SESSION_LOSS ?? "3");
@@ -438,6 +441,7 @@ export class EarlyBird {
             log: (msg, color) => log.write(msg, color),
             strategyName: this._strategyName,
             strategy: this._strategy,
+            strategyConfig: this._strategyConfig,
             tracker: this._tracker,
             ticker: this._ticker,
             alwaysLog: this._alwaysLog,

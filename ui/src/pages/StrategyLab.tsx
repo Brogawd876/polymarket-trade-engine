@@ -21,6 +21,9 @@ type Verdict = 'win' | 'loss' | 'flat' | 'no_trade' | 'blocked' | 'failed';
 type BatchRun = {
     id: string;
     strategy: string;
+    baseStrategy?: string;
+    variantLabel?: string;
+    paperEligible?: boolean;
     file: string;
     slug: string | null;
     status: RunStatus;
@@ -40,6 +43,47 @@ type BatchRun = {
     error?: string;
 };
 
+type StrategyVariant = {
+    id: string;
+    label: string;
+    strategy: string;
+    description: string;
+    config: Record<string, unknown>;
+    paperEligible: boolean;
+};
+
+type StrategyRank = {
+    strategy: string;
+    baseStrategy: string;
+    label: string;
+    paperEligible?: boolean;
+    runs: number;
+    completed: number;
+    failed: number;
+    canceled: number;
+    wins: number;
+    losses: number;
+    noTrades: number;
+    tradeCount: number;
+    winRate: number | null;
+    tradeRate: number | null;
+    totalPnl: number;
+    avgPnl: number | null;
+    bestPnl: number | null;
+    worstPnl: number | null;
+    blocked: number;
+    problems: number;
+    score: number;
+};
+
+type StrategyRecommendation = {
+    strategy: string;
+    label: string;
+    score: number;
+    readyForPaper: boolean;
+    rationale: string[];
+} | null;
+
 type BatchSummary = {
     totalRuns: number;
     completed: number;
@@ -52,6 +96,8 @@ type BatchSummary = {
     worstPnl: number | null;
     blocked: number;
     problems: number;
+    byStrategy?: StrategyRank[];
+    recommendation?: StrategyRecommendation;
 };
 
 type StrategyBatch = {
@@ -116,7 +162,7 @@ function SummaryCard({ label, value, tone = 'slate' }: { label: string; value: s
 
 export default function StrategyLab() {
     const isConnected = useStore(state => state.isConnected);
-    const [strategies, setStrategies] = useState<string[]>([]);
+    const [variants, setVariants] = useState<StrategyVariant[]>([]);
     const [fixtures, setFixtures] = useState<ReplayFixture[]>([]);
     const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
     const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
@@ -159,12 +205,22 @@ export default function StrategyLab() {
             if (!fixtureResponse.ok) throw new Error(fixtureData.error || 'Unable to load replay fixtures');
 
             const loadedStrategies = Array.isArray(strategyData.strategies) ? strategyData.strategies as string[] : [];
+            const loadedVariants = Array.isArray(strategyData.variants)
+                ? strategyData.variants as StrategyVariant[]
+                : loadedStrategies.map(strategy => ({
+                    id: strategy,
+                    label: strategy,
+                    strategy,
+                    description: '',
+                    config: {},
+                    paperEligible: strategy === 'simulation',
+                }));
             const loadedFixtures = Array.isArray(fixtureData.files) ? fixtureData.files as ReplayFixture[] : [];
             const validFiles = loadedFixtures.filter(fixture => fixture.replayable).slice(0, 3).map(fixture => fixture.path);
 
-            setStrategies(loadedStrategies);
+            setVariants(loadedVariants);
             setFixtures(loadedFixtures);
-            setSelectedStrategies(current => current.length > 0 ? current : loadedStrategies);
+            setSelectedStrategies(current => current.length > 0 ? current : loadedVariants.map(variant => variant.id));
             setSelectedFiles(current => current.length > 0 ? current : validFiles);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unable to load Strategy Lab inputs');
@@ -185,7 +241,7 @@ export default function StrategyLab() {
             const response = await fetch(`${API_BASE}/strategy-lab/batches`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ strategies: selectedStrategies, files: selectedFiles }),
+                body: JSON.stringify({ variants: selectedStrategies, files: selectedFiles }),
             });
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || 'Strategy Lab batch failed to start');
@@ -291,17 +347,21 @@ export default function StrategyLab() {
                     </div>
 
                     <fieldset className="space-y-2">
-                        <legend className="text-xs font-bold text-slate-500 uppercase tracking-wider">Strategies</legend>
-                        <div className="grid grid-cols-2 gap-2">
-                            {strategies.map(strategy => (
-                                <label key={strategy} className="flex items-center gap-2 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200">
+                        <legend className="text-xs font-bold text-slate-500 uppercase tracking-wider">Strategy Variants</legend>
+                        <div className="grid grid-cols-1 gap-2">
+                            {variants.map(variant => (
+                                <label key={variant.id} className="flex items-start gap-2 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200">
                                     <input
                                         type="checkbox"
-                                        checked={selectedStrategies.includes(strategy)}
-                                        onChange={() => toggleValue(strategy, selectedStrategies, setSelectedStrategies)}
+                                        className="mt-1"
+                                        checked={selectedStrategies.includes(variant.id)}
+                                        onChange={() => toggleValue(variant.id, selectedStrategies, setSelectedStrategies)}
                                         disabled={isBatchActive}
                                     />
-                                    {strategy}
+                                    <span className="min-w-0">
+                                        <span className="block font-semibold">{variant.label}</span>
+                                        <span className="block text-xs text-slate-500">{variant.description}</span>
+                                    </span>
                                 </label>
                             ))}
                         </div>
@@ -367,6 +427,63 @@ export default function StrategyLab() {
                 </div>
 
                 <div className="space-y-4">
+                    {batch?.summary.recommendation && (
+                        <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                <div>
+                                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Recommendation</div>
+                                    <h2 className="text-xl font-bold text-slate-100 mt-1">{batch.summary.recommendation.label}</h2>
+                                    <div className={`mt-2 inline-flex rounded border px-2 py-1 text-xs font-bold uppercase ${batch.summary.recommendation.readyForPaper ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300' : 'border-amber-500/40 bg-amber-500/15 text-amber-300'}`}>
+                                        {batch.summary.recommendation.readyForPaper ? 'paper candidate' : 'keep tuning'}
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Score</div>
+                                    <div className="text-2xl font-black text-blue-300">{batch.summary.recommendation.score.toFixed(2)}</div>
+                                </div>
+                            </div>
+                            <div className="mt-4 grid gap-2 text-sm text-slate-300">
+                                {batch.summary.recommendation.rationale.map(item => (
+                                    <div key={item} className="border-l-2 border-slate-600 pl-3">{item}</div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {(batch?.summary.byStrategy?.length ?? 0) > 0 && (
+                        <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                            <h2 className="text-lg font-semibold text-slate-100 mb-3">Variant Ranking</h2>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                    <thead className="text-slate-500 uppercase">
+                                        <tr className="border-b border-slate-700">
+                                            <th className="text-left py-2 pr-3">Variant</th>
+                                            <th className="text-right py-2 pr-3">Score</th>
+                                            <th className="text-right py-2 pr-3">PnL</th>
+                                            <th className="text-right py-2 pr-3">Win</th>
+                                            <th className="text-right py-2 pr-3">Trade</th>
+                                            <th className="text-right py-2 pr-3">No Trade</th>
+                                            <th className="text-right py-2 pr-3">Problems</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {batch!.summary.byStrategy!.map(rank => (
+                                            <tr key={rank.strategy} className="border-b border-slate-700/50">
+                                                <td className="py-2 pr-3 text-slate-200 font-semibold">{rank.label}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-blue-300">{rank.score.toFixed(2)}</td>
+                                                <td className={`py-2 pr-3 text-right font-mono ${rank.totalPnl >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(rank.totalPnl)}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.winRate)}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.tradeRate)}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{rank.noTrades}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{rank.problems}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <SummaryCard label="Completed" value={batch?.summary.completed ?? 0} tone="emerald" />
                         <SummaryCard label="Avg PnL" value={money(batch?.summary.avgPnl)} tone={(batch?.summary.avgPnl ?? 0) >= 0 ? 'emerald' : 'red'} />
@@ -384,7 +501,7 @@ export default function StrategyLab() {
                             <div className="flex flex-wrap gap-2">
                                 <select className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200" value={strategyFilter} onChange={event => setStrategyFilter(event.target.value)}>
                                     <option value="all">All strategies</option>
-                                    {strategies.map(strategy => <option key={strategy} value={strategy}>{strategy}</option>)}
+                                    {variants.map(variant => <option key={variant.id} value={variant.id}>{variant.label}</option>)}
                                 </select>
                                 <select className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200" value={verdictFilter} onChange={event => setVerdictFilter(event.target.value as VerdictFilter)}>
                                     <option value="all">All verdicts</option>
@@ -417,7 +534,7 @@ export default function StrategyLab() {
                                     <tbody>
                                         {filteredRuns.map(run => (
                                             <tr key={run.id} className="border-b border-slate-700/50 align-top">
-                                                <td className="py-2 pr-3 font-semibold text-slate-200">{run.strategy}</td>
+                                                <td className="py-2 pr-3 font-semibold text-slate-200">{run.variantLabel ?? run.strategy}</td>
                                                 <td className="py-2 pr-3 text-slate-300 max-w-64">
                                                     <div className="truncate">{run.slug ?? basename(run.file)}</div>
                                                     {run.error && <div className="text-red-300 mt-1">{run.error}</div>}

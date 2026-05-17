@@ -24,10 +24,19 @@ type ReplayFixture = {
     reason?: string;
 };
 
+type StrategyVariant = {
+    id: string;
+    label: string;
+    strategy: string;
+    description: string;
+    paperEligible: boolean;
+};
+
 export default function ControlCenter() {
     const operatorStatus = useStore(state => state.operatorStatus);
     const isConnected = useStore(state => state.isConnected);
     const [fixtures, setFixtures] = useState<ReplayFixture[]>([]);
+    const [strategyVariants, setStrategyVariants] = useState<StrategyVariant[]>([]);
     const [selectedReplay, setSelectedReplay] = useState<string>('');
     const [simRounds, setSimRounds] = useState<number>(0);
     const [strategy, setStrategy] = useState<string>('simulation');
@@ -47,6 +56,22 @@ export default function ControlCenter() {
                 }
             })
             .catch(err => console.error("Failed to fetch replay fixtures", err));
+
+        fetch(`${API_BASE}/strategy-lab/strategies`)
+            .then(res => res.json())
+            .then(data => {
+                const loaded = Array.isArray(data.variants)
+                    ? data.variants as StrategyVariant[]
+                    : [
+                        { id: 'simulation', label: 'simulation', strategy: 'simulation', description: '', paperEligible: true },
+                        { id: 'late-entry', label: 'late-entry', strategy: 'late-entry', description: '', paperEligible: false },
+                    ];
+                setStrategyVariants(loaded);
+                if (!loaded.some(item => item.id === strategy)) {
+                    setStrategy(loaded.find(item => item.paperEligible)?.id ?? loaded[0]?.id ?? 'simulation');
+                }
+            })
+            .catch(err => console.error("Failed to fetch strategy variants", err));
     }, []);
 
     const handleStartSim = async () => {
@@ -214,8 +239,12 @@ export default function ControlCenter() {
                                         onChange={e => setStrategy(e.target.value)}
                                         disabled={isRunning || isStopping}
                                     >
-                                        <option value="simulation">simulation</option>
-                                        <option value="late-entry">late-entry</option>
+                                        {strategyVariants.map(variant => (
+                                            <option key={variant.id} value={variant.id}>
+                                                {variant.label}{variant.paperEligible ? '' : ' (replay tuning)'}
+                                            </option>
+                                        ))}
+                                        {strategyVariants.length === 0 && <option value="simulation">simulation</option>}
                                     </select>
                                 </div>
                                 <div className="space-y-2">
