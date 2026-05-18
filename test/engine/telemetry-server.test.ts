@@ -81,6 +81,51 @@ describe("Telemetry & Control Plane Hardening", () => {
     }
   });
 
+  test("ControlServer protects operator endpoints when OPERATOR_AUTH_TOKEN is set", async () => {
+    const originalToken = process.env.OPERATOR_AUTH_TOKEN;
+    process.env.OPERATOR_AUTH_TOKEN = "test-operator-token";
+
+    const bus = new TelemetryBus();
+    const sessionManager = new SessionManager(bus);
+    const server = new ControlServer({ port: 3008, telemetryBus: bus, sessionManager });
+    server.start();
+
+    const protectedRequests: Array<[string, RequestInit | undefined]> = [
+      ["/api/operator/status", undefined],
+      ["/api/operator/simulation/start", { method: "POST", body: "{}" }],
+      ["/api/operator/replay/start", { method: "POST", body: "{}" }],
+      ["/api/operator/session/stop", { method: "POST" }],
+      ["/api/operator/simulation/reset-state", { method: "POST" }],
+      ["/api/operator/strategy/presets", { method: "POST", body: "{}" }],
+      ["/api/operator/strategy-lab/experiments", { method: "POST", body: "{}" }],
+      ["/api/operator/tiny-live/unlock", { method: "POST", body: "{}" }],
+      ["/api/operator/config", undefined],
+      ["/api/operator/logs", undefined],
+    ];
+
+    try {
+      const health = await fetch("http://127.0.0.1:3008/api/health");
+      expect(health.status).toBe(200);
+
+      for (const [path, init] of protectedRequests) {
+        const res = await fetch(`http://127.0.0.1:3008${path}`, init);
+        expect(res.status).toBe(401);
+      }
+
+      const authorized = await fetch("http://127.0.0.1:3008/api/operator/status", {
+        headers: { Authorization: "Bearer test-operator-token" },
+      });
+      expect(authorized.status).toBe(200);
+    } finally {
+      server.stop();
+      if (originalToken === undefined) {
+        delete process.env.OPERATOR_AUTH_TOKEN;
+      } else {
+        process.env.OPERATOR_AUTH_TOKEN = originalToken;
+      }
+    }
+  });
+
   test("Replay telemetry integration", async () => {
     const logPath = join(import.meta.dir, "..", "fixtures", "replay", "expired-order.log");
     const clock = new VirtualClock();

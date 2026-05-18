@@ -62,12 +62,41 @@ export type FeedEventBase = {
 };
 
 export type ResolutionPriceKind = "live" | "open" | "close";
+export type ResolutionSourceType =
+  | "chainlink_polygon"
+  | "polymarket_chainlink_rtds"
+  | "polymarket_crypto_price_api"
+  | "replay"
+  | "fixture";
+
+export type ResolutionStalenessStatus =
+  | "fresh"
+  | "stale"
+  | "missing"
+  | "degraded";
+
+export type ResolutionFeedMetadata = {
+  contractAddress?: string;
+  description?: string;
+  decimals?: number;
+  network?: string;
+};
 
 export type ResolutionPriceEvent = FeedEventBase & {
   role: "resolution";
   kind: ResolutionPriceKind;
+  sourceType?: ResolutionSourceType;
   price: number;
   priceToBeat?: number;
+  rawOracleAnswer?: string;
+  roundId?: string;
+  answeredInRound?: string;
+  chainStartedAtMs?: number | null;
+  chainUpdatedAtMs?: number | null;
+  localReceivedAtMs?: number;
+  oracleLagMs?: number | null;
+  stalenessStatus?: ResolutionStalenessStatus;
+  metadata?: ResolutionFeedMetadata;
 };
 
 export type VenueBookSide = {
@@ -121,6 +150,8 @@ export interface ResolutionSourceAdapter
   extends BotDataAdapter<ResolutionPriceEvent> {
   priceToBeat(round: RoundWindow): Promise<ResolutionPriceEvent | null>;
   closePrice(round: RoundWindow): Promise<ResolutionPriceEvent | null>;
+  /** Returns the most recently latched anchor price (kind: "open") for resolution truth. */
+  latestAnchor(): ResolutionPriceEvent | null;
 }
 
 export interface VenueDataAdapter extends BotDataAdapter<VenueOrderBookEvent> {
@@ -141,8 +172,45 @@ export interface PredictiveFeedAdapter
 export type PredictiveAggregateSnapshot = {
   asset: BotAsset;
   timestampMs: number;
-  /** Combined/average reference price from all healthy feeds. */
+  /** Deprecated compatibility alias for predictiveTape.compositePrice. */
   price: number | null;
+  settlementAnchor: {
+    price: number | null;
+    roundId: string | null;
+    updatedAtMs: number | null;
+    localReceivedAtMs: number | null;
+    lagMs: number | null;
+    isStale: boolean;
+    quality: FeedQuality | null;
+    source: string | null;
+    sourceType: ResolutionSourceType | null;
+  };
+  predictiveTape: {
+    compositePrice: number | null;
+    feeds: Record<string, {
+      price: number;
+      quality: FeedQuality;
+      latestEventAgeMs: number;
+      arrivalDelayMs: number | null;
+      divergenceFromSettlementAbs: number | null;
+      divergenceFromSettlementPct: number | null;
+    }>;
+    divergenceAbs: number | null;
+    divergencePct: number | null;
+    disagreement: boolean;
+  };
+  marketPrice: {
+    yesBestBid: number | null;
+    yesBestAsk: number | null;
+    yesMidpoint: number | null;
+    noBestBid: number | null;
+    noBestAsk: number | null;
+    noMidpoint: number | null;
+    yesSpread: number | null;
+    noSpread: number | null;
+    executable: boolean;
+    source: string | null;
+  };
   /** Feeds included in this aggregate. */
   feeds: Record<string, {
     price: number;
@@ -202,9 +270,13 @@ export type WhaleActivity = {
   maker?: string;
 };
 
+export type OrderFlowSource = "public_inferred" | "user_fill" | "authoritative";
+
 export type OrderFlowSnapshot = {
   asset: BotAsset;
   timestampMs: number;
+  source: OrderFlowSource;
+  confidence: "low" | "medium" | "high";
   /** Order Book Imbalance: (BidVol - AskVol) / (BidVol + AskVol) */
   imbalanceUp: number | null;
   imbalanceDown: number | null;
@@ -229,6 +301,13 @@ export type QuantSnapshot = {
   sigma: number | null;
   /** Probability of finishing UP (0.0 - 1.0) */
   probabilityUp: number | null;
+  settlementAnchorPrice?: number | null;
+  settlementRoundId?: string | null;
+  settlementUpdatedAtMs?: number | null;
+  settlementLagMs?: number | null;
+  settlementIsStale?: boolean;
+  predictiveCompositePrice?: number | null;
+  noTradeReason?: string | null;
 };
 
 export interface QuantMonitor {

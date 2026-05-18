@@ -2,6 +2,7 @@ export * from "./data-sources.ts";
 export * from "./strategy-intent.ts";
 export * from "./risk-gate.ts";
 export * from "./polymarket-resolution-adapter.ts";
+export * from "./chainlink-resolution-adapter.ts";
 export * from "./polymarket-venue-adapter.ts";
 export * from "./binance-predictive-adapter.ts";
 export * from "./coinbase-predictive-adapter.ts";

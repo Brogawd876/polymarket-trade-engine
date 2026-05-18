@@ -67,9 +67,9 @@ export class ControlServer {
           responseHeaders.set("Access-Control-Allow-Origin", origin);
           responseHeaders.set("Vary", "Origin");
         }
-        
+
         responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type");
+        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
         // Security: Origin validation
         if (origin && !allowedOrigins.has(origin)) {
@@ -80,6 +80,17 @@ export class ControlServer {
           return new Response(null, { status: 204, headers: responseHeaders });
         }
 
+        // Auth Token Validation (Optional but recommended for production)
+        const authToken = Env.get("OPERATOR_AUTH_TOKEN");
+        if (authToken && url.pathname.startsWith("/api/operator/")) {
+            const authHeader = req.headers.get("Authorization");
+            if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+                return new Response("Unauthorized: Invalid or missing Operator Token", { 
+                    status: 401, 
+                    headers: responseHeaders 
+                });
+            }
+        }
         // WebSocket Telemetry Path
         if (url.pathname === "/telemetry") {
           const success = server.upgrade(req, {

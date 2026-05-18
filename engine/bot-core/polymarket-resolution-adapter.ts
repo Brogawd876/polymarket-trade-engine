@@ -87,6 +87,7 @@ export class PolymarketResolutionAdapter implements ResolutionSourceAdapter {
           id: `poly-rtds-${clock.monotonicReceivedNs}`,
           role: "resolution",
           source: "polymarket-chainlink-rtds",
+          sourceType: "polymarket_chainlink_rtds",
           asset: this.asset,
           kind: "live",
           price,
@@ -131,6 +132,10 @@ export class PolymarketResolutionAdapter implements ResolutionSourceAdapter {
     return this._latest;
   }
 
+  latestAnchor(): ResolutionPriceEvent | null {
+    return this._latest;
+  }
+
   subscribe(handler: (event: ResolutionPriceEvent) => void): () => void {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);
@@ -161,6 +166,7 @@ export class PolymarketResolutionAdapter implements ResolutionSourceAdapter {
       id: `poly-api-open-${round.slug}`,
       role: "resolution",
       source: "polymarket-crypto-price-api",
+      sourceType: "polymarket_crypto_price_api",
       asset: this.asset,
       kind: "open",
       price: data.openPrice,
@@ -183,6 +189,7 @@ export class PolymarketResolutionAdapter implements ResolutionSourceAdapter {
       id: `poly-api-close-${round.slug}`,
       role: "resolution",
       source: "polymarket-crypto-price-api",
+      sourceType: "polymarket_crypto_price_api",
       asset: this.asset,
       kind: "close",
       price: data.closePrice,

@@ -13,6 +13,7 @@ mock.module("../../engine/logger", () => ({
     setSnapshotProvider() {}
     setMarketResultProvider() {}
     setTickerProvider() {}
+    setResolutionProvider() {}
 
     startSlot() {}
     endSlot() {}

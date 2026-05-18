@@ -1,4 +1,6 @@
 import type { Strategy, StrategyContext } from "./types.ts";
+import { Env } from "../../utils/config.ts";
+import { digitalCallProbability } from "../../utils/math.ts";
 
 export interface FairValueMakerConfig {
   shares?: number;
@@ -44,8 +46,9 @@ export const fairValueMaker: Strategy = async (ctx) => {
 
   const tickInterval = ctx.clock.setInterval(() => {
     const quant = ctx.quant?.latest();
-    const probUp = quant?.probabilityUp;
     const sigma = quant?.sigma;
+    const fairValue = calculateSettlementAnchoredFairValue(ctx, sigma);
+    const probUp = fairValue.probabilityUp;
     
     const remainingSecs = (ctx.slotEndMs - ctx.clock.nowMs()) / 1000;
     
@@ -56,11 +59,14 @@ export const fairValueMaker: Strategy = async (ctx) => {
     }
     if (probUp === null || probUp === undefined || sigma === null || sigma === undefined) {
       ctx.cancelOrders(ctx.pendingOrders.map(o => o.orderId));
+      if (fairValue.noTradeReason) {
+        ctx.log(`[fair-value] No quote: ${fairValue.noTradeReason}`, "dim");
+      }
       return;
     }
     const remFloor = Math.floor(remainingSecs);
     if (remFloor % 30 === 0 && ctx.clock.nowMs() % 1000 === 0) {
-      ctx.log(`[fair-value] P(UP)=${probUp.toFixed(4)} Sigma=${sigma.toFixed(4)} Rem=${remFloor}s`, "dim");
+      ctx.log(`[fair-value] P(UP)=${probUp.toFixed(4)} Sigma=${sigma.toFixed(4)} settlement=${fairValue.settlementAnchorPrice?.toFixed(2) ?? "n/a"} predictive=${fairValue.predictiveCompositePrice?.toFixed(2) ?? "n/a"} Rem=${remFloor}s`, "dim");
     }
     if (remainingSecs < 10) {
       // Too close to expiry, stop quoting to avoid getting picked off
@@ -110,8 +116,8 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const evUp = quoteEv(adjustedProbUp, bidPriceUp, feeRateUp, config.makerRebateEstimate);
     const evDown = quoteEv(1 - adjustedProbUp, bidPriceDown, feeRateDown, config.makerRebateEstimate);
     const flow = ctx.orderFlow?.latest() ?? null;
-    const allowUpFlow = flowAllowsSide(flow, "UP", config);
-    const allowDownFlow = flowAllowsSide(flow, "DOWN", config);
+    const allowUpFlow = flowAllowsSide(flow, "UP", config, ctx);
+    const allowDownFlow = flowAllowsSide(flow, "DOWN", config, ctx);
 
     if (bidPriceUp > 0.01 && bidPriceUp < 0.99 && evUp.edge >= config.minEdge && allowUpFlow) {
       if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
@@ -159,7 +165,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
       ctx.cancelOrders([existingDown.orderId]);
     }
     if (ordersToPost.length > 0) {
-      ctx.log(`[fair-value] Posting ${ordersToPost.length} orders. Bids: UP=${bidPriceUp} (EV=${evUp.edge.toFixed(4)}) DOWN=${bidPriceDown} (EV=${evDown.edge.toFixed(4)})`, "cyan");
+      ctx.log(`[fair-value] Posting ${ordersToPost.length} orders. Bids: UP=${bidPriceUp} (EV=${evUp.edge.toFixed(4)}) DOWN=${bidPriceDown} (EV=${evDown.edge.toFixed(4)}) settlementAnchor=${fairValue.settlementAnchorPrice?.toFixed(2) ?? "n/a"} predictiveComposite=${fairValue.predictiveCompositePrice?.toFixed(2) ?? "n/a"}`, "cyan");
       ctx.postOrders(ordersToPost);
     }
 
@@ -167,6 +173,85 @@ export const fairValueMaker: Strategy = async (ctx) => {
 
   return () => ctx.clock.clearInterval(tickInterval);
 };
+
+export function calculateSettlementAnchoredFairValue(
+  ctx: StrategyContext,
+  sigma: number | null | undefined,
+): {
+  probabilityUp: number | null;
+  settlementAnchorPrice: number | null;
+  predictiveCompositePrice: number | null;
+  noTradeReason: string | null;
+} {
+  const resolution = ctx.resolution?.latest() ?? null;
+  const anchor = ctx.resolution?.latestAnchor() ?? null;
+
+  if (!anchor) {
+    return {
+      probabilityUp: null,
+      settlementAnchorPrice: null,
+      predictiveCompositePrice: null,
+      noTradeReason: "missing Chainlink settlement anchor",
+    };
+  }
+  const chainlinkHealthStale =
+    !resolution ||
+    resolution.quality !== "live" ||
+    resolution.stalenessStatus === "stale" ||
+    resolution.stalenessStatus === "missing" ||
+    resolution.stalenessStatus === "degraded";
+  if (chainlinkHealthStale) {
+    return {
+      probabilityUp: null,
+      settlementAnchorPrice: anchor.priceToBeat ?? anchor.price,
+      predictiveCompositePrice: ctx.predictive?.aggregate?.latest().predictiveTape.compositePrice ?? ctx.predictive?.aggregate?.latest().price ?? null,
+      noTradeReason: "Chainlink resolution feed is stale or degraded",
+    };
+  }
+  if (sigma === null || sigma === undefined) {
+    return {
+      probabilityUp: null,
+      settlementAnchorPrice: anchor.priceToBeat ?? anchor.price,
+      predictiveCompositePrice: ctx.predictive?.aggregate?.latest().predictiveTape.compositePrice ?? ctx.predictive?.aggregate?.latest().price ?? null,
+      noTradeReason: "missing volatility estimate",
+    };
+  }
+
+  const aggregate = ctx.predictive?.aggregate?.latest() ?? null;
+  const predictiveCompositePrice =
+    aggregate?.predictiveTape.compositePrice ?? aggregate?.price ?? null;
+  if (predictiveCompositePrice === null) {
+    return {
+      probabilityUp: null,
+      settlementAnchorPrice: anchor.priceToBeat ?? anchor.price,
+      predictiveCompositePrice: null,
+      noTradeReason: "missing predictive composite price",
+    };
+  }
+
+  const settlementAnchorPrice = anchor.priceToBeat ?? anchor.price;
+  const remainingMs = ctx.slotEndMs - ctx.clock.nowMs();
+  if (remainingMs <= 0) {
+    return {
+      probabilityUp: predictiveCompositePrice >= settlementAnchorPrice ? 1 : 0,
+      settlementAnchorPrice,
+      predictiveCompositePrice,
+      noTradeReason: null,
+    };
+  }
+  const yearsToExpiry = remainingMs / (1000 * 3600 * 24 * 365);
+  return {
+    probabilityUp: digitalCallProbability(
+      predictiveCompositePrice,
+      settlementAnchorPrice,
+      yearsToExpiry,
+      sigma,
+    ),
+    settlementAnchorPrice,
+    predictiveCompositePrice,
+    noTradeReason: null,
+  };
+}
 
 function feeRate(ctx: StrategyContext, tokenId: string): number {
   const raw = (ctx.orderBook as unknown as { getFeeRate?: (assetId: string) => number } | undefined)?.getFeeRate?.(tokenId) ?? 0;
@@ -186,8 +271,16 @@ function flowAllowsSide(
   flow: ReturnType<NonNullable<StrategyContext["orderFlow"]>["latest"]> | null,
   side: "UP" | "DOWN",
   config: Required<FairValueMakerConfig>,
+  ctx: StrategyContext,
 ): boolean {
   if (!flow) return true;
+
+  const isProd = Env.get("PROD");
+  // Down-weight or ignore public inferred flow in production
+  if (isProd && flow.source === "public_inferred" && flow.confidence === "low") {
+    return true; // Don't block based on low-confidence noise
+  }
+
   const imbalance = side === "UP" ? flow.imbalanceUp : flow.imbalanceDown;
   if (imbalance !== null && imbalance < config.minImbalance) return false;
   const cvd = side === "UP"

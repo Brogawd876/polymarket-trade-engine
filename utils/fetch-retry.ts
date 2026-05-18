@@ -43,6 +43,13 @@ async function curlFetch(
   return new Response(body, { status: 200 });
 }
 
+export class MaintenanceError extends Error {
+  constructor(message: string, public readonly status: number = 425) {
+    super(message);
+    this.name = "MaintenanceError";
+  }
+}
+
 export async function fetchWithRetry<T = Response>(
   url: string | URL,
   params?: {
@@ -53,6 +60,7 @@ export async function fetchWithRetry<T = Response>(
     _currentRetry?: number;
     useCurl?: boolean;
     abort?: AbortSignal;
+    sleep?: (millis: number) => Promise<void>;
     /** Called on every fetch error before retrying. Throw or call process.exit() to abort. */
     onError?: (err: unknown) => void;
   },
@@ -85,6 +93,13 @@ export async function fetchWithRetry<T = Response>(
       );
     }
 
+    if (res.status === 425) {
+      // Polymarket maintenance / too early / matching engine restart
+      throw new MaintenanceError(
+        `HTTP 425: Polymarket matching engine is restarting or in maintenance.`,
+      );
+    }
+
     if (!res.ok) {
       const body = await res.text();
       if (isBlockedBody(body)) {
@@ -112,6 +127,19 @@ export async function fetchWithRetry<T = Response>(
       throw e;
     }
 
+    // Maintenance handling: aggressive exponential backoff
+    if (e instanceof MaintenanceError) {
+        if (retryTimes - currentRetry <= 0) throw e;
+        const delay = 5000 * Math.pow(2, currentRetry); // Start at 5s for maintenance
+        if (params?.onError) params.onError(e);
+        await (params?.sleep ?? sleep)(delay);
+        return await fetchWithRetry(url, {
+            ..._params,
+            _currentRetry: currentRetry + 1,
+            totalRetry: Math.max(retryTimes, 10), // Allow more retries for maintenance
+        });
+    }
+
     // caller-supplied error hook (may call process.exit or throw to stop retrying)
     if (params?.onError) params.onError(e);
 
@@ -124,7 +152,7 @@ export async function fetchWithRetry<T = Response>(
       delay = 1000 * Math.pow(2, currentRetry);
     }
     if (_params.abort?.aborted) return undefined as T;
-    await sleep(delay);
+    await (params?.sleep ?? sleep)(delay);
     return await fetchWithRetry(url, {
       ..._params,
       _currentRetry: currentRetry + 1,

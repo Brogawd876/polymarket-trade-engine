@@ -72,6 +72,8 @@ export class TradeTapeTracker implements OrderFlowMonitor {
     return {
       asset: this.asset,
       timestampMs: now,
+      source: "public_inferred",
+      confidence: "low",
       imbalanceUp: this.imbalanceUp,
       imbalanceDown: this.imbalanceDown,
       cvd10s: cvd10,

@@ -45,7 +45,14 @@ export class DefaultQuantMonitor implements QuantMonitor {
       asset: this.asset,
       timestampMs: this.clock.nowMs(),
       sigma: null,
-      probabilityUp: null
+      probabilityUp: null,
+      settlementAnchorPrice: null,
+      settlementRoundId: null,
+      settlementUpdatedAtMs: null,
+      settlementLagMs: null,
+      settlementIsStale: true,
+      predictiveCompositePrice: null,
+      noTradeReason: "missing settlement anchor",
     };
 
     // Subscriptions
@@ -73,15 +80,33 @@ export class DefaultQuantMonitor implements QuantMonitor {
     }
 
     const sigma = this._calculateSigma();
-    const probabilityUp = this._calculateProbability(price, sigma);
+    const resolution = this.resolution.latest();
+    const anchor = this.resolution.latestAnchor();
+
+    const settlementIsStale =
+      !anchor ||
+      !resolution ||
+      resolution.quality !== "live" ||
+      resolution.stalenessStatus === "stale" ||
+      resolution.stalenessStatus === "missing" ||
+      resolution.stalenessStatus === "degraded";
+    const probabilityUp = settlementIsStale
+      ? null
+      : this._calculateProbability(price, sigma, anchor);
 
     this._latest = {
       asset: this.asset,
       timestampMs: now,
       sigma,
-      probabilityUp
+      probabilityUp,
+      settlementAnchorPrice: anchor?.priceToBeat ?? anchor?.price ?? null,
+      settlementRoundId: anchor?.roundId ?? null,
+      settlementUpdatedAtMs: anchor?.chainUpdatedAtMs ?? anchor?.clock.sourceTimestampMs ?? null,
+      settlementLagMs: resolution?.oracleLagMs ?? resolution?.lagMs ?? null,
+      settlementIsStale,
+      predictiveCompositePrice: price,
+      noTradeReason: settlementIsStale ? "settlement anchor is missing or Chainlink resolution feed is stale" : probabilityUp === null ? "insufficient volatility estimate" : null,
     };
-
     for (const handler of this.handlers) {
       handler(this._latest);
     }
@@ -118,21 +143,24 @@ export class DefaultQuantMonitor implements QuantMonitor {
     return Math.sqrt(avgAnnualizedVariance);
   }
 
-  private _calculateProbability(S: number, sigma: number | null): number | null {
+  private _calculateProbability(
+    predictiveCompositePrice: number,
+    sigma: number | null,
+    res: NonNullable<ReturnType<ResolutionSourceAdapter["latest"]>>,
+  ): number | null {
     if (sigma === null) return null;
 
-    const res = this.resolution.latest();
-    if (!res || !res.round || !res.priceToBeat) return null;
+    if (!res.round) return null;
 
-    const K = res.priceToBeat;
+    const K = res.priceToBeat ?? res.price;
     const now = this.clock.nowMs();
     const T_ms = res.round.endTimeMs - now;
     
-    if (T_ms <= 0) return S >= K ? 1 : 0;
+    if (T_ms <= 0) return predictiveCompositePrice >= K ? 1 : 0;
 
     // Convert T to years
     const T_years = T_ms / (1000 * 3600 * 24 * 365);
 
-    return digitalCallProbability(S, K, T_years, sigma);
+    return digitalCallProbability(predictiveCompositePrice, K, T_years, sigma);
   }
 }

@@ -14,6 +14,7 @@ import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
 import { Env } from "../utils/config.ts";
 import { digitalCallProbability } from "../utils/math.ts";
+import type { MaintenanceTracker } from "../utils/maintenance.ts";
 import type { UserChannel } from "./user-channel.ts";
 import {
   type ResolutionSourceAdapter,
@@ -113,6 +114,7 @@ type MarketLifecycleOptions = {
   quant?: QuantMonitor;
   venue?: VenueDataAdapter;
   riskGate?: RiskGate;
+  maintenance?: MaintenanceTracker;
   clock?: Clock;
   feedReadinessTimeoutMs?: number;
   feedReadinessPollMs?: number;
@@ -163,6 +165,7 @@ export class MarketLifecycle {
   private readonly _leadLag?: LeadLagMonitor;
   private readonly _orderFlow?: OrderFlowMonitor;
   private readonly _quant?: QuantMonitor;
+  private readonly _maintenance?: MaintenanceTracker;
   private readonly _venue: VenueDataAdapter;
   private readonly _riskGate: RiskGate;
   private readonly _feedReadinessTimeoutMs: number;
@@ -191,6 +194,7 @@ export class MarketLifecycle {
     this._leadLag = opts.leadLag;
     this._orderFlow = opts.orderFlow;
     this._quant = opts.quant;
+    this._maintenance = opts.maintenance;
     this._riskGate = opts.riskGate ?? new AggregatedRiskGate();
     this._feedReadinessTimeoutMs =
       opts.feedReadinessTimeoutMs ??
@@ -483,6 +487,18 @@ export class MarketLifecycle {
     // Start venue events
     await this._venue.start();
 
+    const round: RoundWindow = {
+      slug: this.slug,
+      asset: Env.get("MARKET_ASSET"),
+      window: Env.get("MARKET_WINDOW"),
+      startTimeMs: slot.startTime,
+      endTimeMs: slot.endTime,
+    };
+
+    if (this._resolution) {
+      await this._resolution.priceToBeat(round);
+    }
+
     if (!this._orderBook.isReady() || !this._userChannel.isReady()) {
       return;
     }
@@ -534,6 +550,24 @@ export class MarketLifecycle {
         ? parseFloat((assetPrice - data.openPrice).toFixed(2))
         : undefined;
       return { openPrice: data.openPrice, gap, priceToBeat: data.openPrice };
+    });
+    this._marketLogger.setResolutionProvider(() => {
+      const resolution = this._resolution?.latest();
+      if (!resolution) return null;
+      return {
+        source: resolution.source,
+        sourceType: resolution.sourceType,
+        price: resolution.price,
+        rawOracleAnswer: resolution.rawOracleAnswer,
+        roundId: resolution.roundId,
+        answeredInRound: resolution.answeredInRound,
+        chainUpdatedAtMs: resolution.chainUpdatedAtMs,
+        localReceivedAtMs: resolution.localReceivedAtMs ?? resolution.clock.receivedAtMs,
+        oracleLagMs: resolution.oracleLagMs ?? resolution.lagMs,
+        quality: resolution.quality,
+        stalenessStatus: resolution.stalenessStatus,
+        contractAddress: resolution.metadata?.contractAddress,
+      };
     });
     this._marketLogger.startSlot(
       this.slug,
@@ -718,6 +752,23 @@ export class MarketLifecycle {
    * Buys retry up to BUY_MAX_RETRIES times on balance errors; sells retry until slot end.
    */
   private _postOrders(requests: OrderRequest[]): void {
+    const maintenance = this._maintenance?.isActive(this._clock.nowMs());
+    if (maintenance?.active) {
+      const reason = `Polymarket matching engine maintenance: ${maintenance.reason ?? "active"}`;
+      this._log(
+        `[maintenance] Skipping order placement: ${maintenance.reason}`,
+        "yellow",
+      );
+      for (const item of requests) {
+        this._marketLogger.log(
+          this._createOrderEntry(item.req, "failed", { reason }),
+        );
+        this._emitOrderLifecycle(item.req, "failed", { error: reason });
+        item.onFailed?.(reason);
+      }
+      return;
+    }
+
     const buys = requests.filter(
       (o) => o.req.action === "buy" && !this._buyBlocked,
     );
@@ -1344,6 +1395,7 @@ export class MarketLifecycle {
     return {
       nowMs: this._clock.nowMs(),
       productionEnabled: Env.get("PROD"),
+      maintenance: this._maintenance?.isActive(this._clock.nowMs()) ?? null,
       resolution: this._resolution?.latest() ?? null,
       venue: this._venue.latest(),
       predictiveFeeds: [

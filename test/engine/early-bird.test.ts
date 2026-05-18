@@ -43,6 +43,42 @@ await mocker.mock("../../tracker/orderbook.ts", () => ({
   },
 }));
 
+await mocker.mock("../../engine/bot-core/chainlink-resolution-adapter.ts", () => ({
+  ChainlinkResolutionAdapter: class {
+    readonly role = "resolution";
+    readonly source = "chainlink-polygon-btc-usd";
+    async start() {}
+    async stop() {}
+    isReady() { return true; }
+    latest() {
+      return {
+        id: "mock-chainlink",
+        role: "resolution",
+        source: "chainlink-polygon-btc-usd",
+        sourceType: "chainlink_polygon",
+        asset: "btc",
+        kind: "live",
+        price: 100_000,
+        priceToBeat: 100_000,
+        roundId: "1",
+        clock: {
+          sourceTimestampMs: Date.now(),
+          receivedAtMs: Date.now(),
+          processedAtMs: Date.now(),
+          monotonicReceivedNs: 1n,
+        },
+        quality: "live",
+        stalenessStatus: "fresh",
+        freshnessMs: 0,
+        lagMs: 0,
+      };
+    }
+    subscribe() { return () => {}; }
+    async priceToBeat() { return this.latest(); }
+    async closePrice() { return this.latest(); }
+  },
+}));
+
 beforeAll(() => {
   process.env.SIM_DELAY_MS = "0";
   process.env.WALLET_BALANCE = "50000";

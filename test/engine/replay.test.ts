@@ -4,6 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   ReplayLogReader,
+  ReplayResolutionAdapter,
   ReplayRunner,
   VirtualClock,
   type ReplayBot,
@@ -115,6 +116,50 @@ describe("ReplayLogReader", () => {
     await withTempLog("\n", (path) => {
       expect(() => new ReplayLogReader(path)).toThrow(/contains no usable events/);
     });
+  });
+
+  test("replays Chainlink settlement truth deterministically", async () => {
+    await withTempLog(
+      [
+        JSON.stringify({
+          ts: 1000,
+          type: "slot",
+          action: "start",
+          slug: "btc-updown-5m-1000",
+          startTime: 1000,
+          endTime: 301000,
+          strategy: "simulation",
+        }),
+        JSON.stringify({
+          ts: 1100,
+          type: "chainlink_resolution",
+          source: "chainlink-polygon-btc-usd",
+          sourceType: "chainlink_polygon",
+          price: 100000.25,
+          rawOracleAnswer: "10000025000000",
+          roundId: "42",
+          answeredInRound: "42",
+          chainUpdatedAtMs: 1050,
+          localReceivedAtMs: 1100,
+          oracleLagMs: 50,
+          quality: "live",
+          stalenessStatus: "fresh",
+          contractAddress: "0xc907E116054Ad103354f2D350FD2514433D57F6f",
+        }),
+      ].join("\n"),
+      (path) => {
+        const reader = new ReplayLogReader(path);
+        const adapter = new ReplayResolutionAdapter(reader);
+        reader.advanceTo(1100);
+
+        const latest = adapter.latest();
+        expect(latest?.sourceType).toBe("chainlink_polygon");
+        expect(latest?.roundId).toBe("42");
+        expect(latest?.price).toBe(100000.25);
+        expect(latest?.oracleLagMs).toBe(50);
+        expect(latest?.metadata?.contractAddress).toBe("0xc907E116054Ad103354f2D350FD2514433D57F6f");
+      },
+    );
   });
 });
 

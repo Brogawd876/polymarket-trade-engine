@@ -8,6 +8,7 @@ import { loadState, saveState, type CompletedMarketState } from "./state.ts";
 import { getSlug } from "../utils/slot.ts";
 import { log } from "./log.ts";
 import { recover } from "./recovery.ts";
+import { MaintenanceTracker } from "../utils/maintenance.ts";
 import {
   DEFAULT_STRATEGY,
   type Strategy,
@@ -19,7 +20,7 @@ import { OrderBook } from "../tracker/orderbook.ts";
 import { TradeTapeTracker } from "../tracker/trade-tape.ts";
 import { Env } from "../utils/config.ts";
 import {
-  PolymarketResolutionAdapter,
+  ChainlinkResolutionAdapter,
   BinancePredictiveAdapter,
   CoinbasePredictiveAdapter,
   DefaultPredictiveAggregator,
@@ -101,6 +102,7 @@ export class EarlyBird {
   private _aggregator: DefaultPredictiveAggregator;
   private _leadLag: DefaultLeadLagMonitor;
   private _quant: DefaultQuantMonitor;
+  private _maintenance: MaintenanceTracker;
   private _userChannelFactory: (() => UserChannel) | null = null;
   private _replayReader: ReplayLogReader | null = null;
   private _clock: Clock;
@@ -147,7 +149,10 @@ export class EarlyBird {
       this._coinbase = new ReplayPredictiveAdapter("coinbase", this._replayReader);
     } else {
       this._ticker = new TickerTracker();
-      this._resolution = new PolymarketResolutionAdapter(this._clock, this._telemetry);
+      this._resolution = new ChainlinkResolutionAdapter({
+        clock: this._clock,
+        telemetry: this._telemetry,
+      });
       this._binance = new BinancePredictiveAdapter(this._clock, this._telemetry);
       this._coinbase = new CoinbasePredictiveAdapter(this._clock, this._telemetry);
     }
@@ -162,6 +167,7 @@ export class EarlyBird {
         binance: 0.7, // Institutional weight: Binance usually has 10x liquidity
         coinbase: 0.3,
       },
+      resolution: this._resolution,
       clock: this._clock,
     });
     this._leadLag = new DefaultLeadLagMonitor({
@@ -178,6 +184,10 @@ export class EarlyBird {
     this._tradeTape = new TradeTapeTracker({
       asset: Env.get("MARKET_ASSET"),
       clock: this._clock,
+    });
+    this._maintenance = new MaintenanceTracker();
+    this._apiQueue = new APIQueue({
+      maintenance: this._maintenance,
     });
 
     if (prod) {
@@ -466,7 +476,6 @@ export class EarlyBird {
             presetId: this._presetId,
             tracker: this._tracker,
             ticker: this._ticker,
-            alwaysLog: this._alwaysLog,
             userChannel: this._userChannelFactory!(),
             resolution: this._resolution,
             binance: this._binance,
@@ -474,11 +483,13 @@ export class EarlyBird {
             aggregator: this._aggregator,
             leadLag: this._leadLag,
             quant: this._quant,
+            maintenance: this._maintenance,
             venue,
             orderBook,
             clock: this._clock,
             telemetry: this._telemetry,
-          }),
+            }),
+
         );
         this._roundsCreated++;
       }

@@ -13,6 +13,8 @@ export type Config = {
   BUILDER_KEY: string;
   BUILDER_SECRET: string;
   BUILDER_PASSPHRASE: string;
+  OPERATOR_AUTH_TOKEN: string;
+  CHAINLINK_BTC_5M_REFERENCE_VERIFIED: boolean;
 };
 
 const ASSET_TICKER_MAP: Record<
@@ -87,6 +89,8 @@ export class Env {
     BUILDER_KEY: "",
     BUILDER_SECRET: "",
     BUILDER_PASSPHRASE: "",
+    OPERATOR_AUTH_TOKEN: "",
+    CHAINLINK_BTC_5M_REFERENCE_VERIFIED: false,
   };
 
   static get<T extends keyof Config>(key: T): Config[T] {

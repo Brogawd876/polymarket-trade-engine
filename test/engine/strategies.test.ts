@@ -1,10 +1,82 @@
 import { describe, expect, test } from "bun:test";
-import { fairValueMaker } from "../../engine/strategy/fair-value-maker.ts";
+import { calculateSettlementAnchoredFairValue, fairValueMaker } from "../../engine/strategy/fair-value-maker.ts";
 import { lateEntry } from "../../engine/strategy/late-entry.ts";
 import { VirtualClock } from "../../engine/bot-core/replay-runner.ts";
 import type { StrategyContext } from "../../engine/strategy/types.ts";
 
 describe("Strategy Logic Verification", () => {
+  function settlementContext(clock: VirtualClock, opts: { stale?: boolean; settlement?: number; predictive?: number } = {}) {
+    const settlement = opts.settlement ?? 100_000;
+    const predictive = opts.predictive ?? 100_100;
+    const resolution = {
+      id: "chainlink-1",
+      role: "resolution" as const,
+      source: "chainlink-polygon-btc-usd",
+      sourceType: "chainlink_polygon",
+      asset: "btc" as const,
+      kind: "live" as const,
+      price: settlement,
+      priceToBeat: settlement,
+      roundId: "1",
+      clock: { sourceTimestampMs: clock.nowMs() - (opts.stale ? 100000 : 0), receivedAtMs: clock.nowMs() - (opts.stale ? 100000 : 0), processedAtMs: clock.nowMs(), monotonicReceivedNs: 1n },
+      quality: (opts.stale ? "stale" : "live") as any,
+      stalenessStatus: (opts.stale ? "stale" : "fresh") as any,
+      freshnessMs: 0,
+      lagMs: 0,
+    };
+
+    return {
+      resolution: {
+        latest: () => resolution,
+        latestAnchor: () => ({ ...resolution, kind: "open" }),
+        subscribe: () => () => {},
+      },
+      predictive: {
+        aggregate: {
+          latest: () => ({
+            asset: "btc",
+            timestampMs: clock.nowMs(),
+            price: predictive,
+            settlementAnchor: {
+              price: settlement,
+              roundId: "1",
+              updatedAtMs: clock.nowMs(),
+              localReceivedAtMs: clock.nowMs(),
+              lagMs: 0,
+              isStale: false,
+              quality: "live",
+              source: "chainlink-polygon-btc-usd",
+              sourceType: "chainlink_polygon",
+            },
+            predictiveTape: {
+              compositePrice: predictive,
+              feeds: {},
+              divergenceAbs: 0,
+              divergencePct: 0,
+              disagreement: false,
+            },
+            marketPrice: {
+              yesBestBid: null,
+              yesBestAsk: null,
+              yesMidpoint: null,
+              noBestBid: null,
+              noBestAsk: null,
+              noMidpoint: null,
+              yesSpread: null,
+              noSpread: null,
+              executable: false,
+              source: null,
+            },
+            feeds: {},
+            divergenceAbs: 0,
+            divergencePct: 0,
+            disagreement: false,
+          }),
+        },
+      },
+    } as Partial<StrategyContext>;
+  }
+
   test("fair-value-maker places limit orders based on probability", async () => {
     const clock = new VirtualClock();
     
@@ -12,6 +84,7 @@ describe("Strategy Logic Verification", () => {
     const postedOrders: any[] = [];
     const ctx: Partial<StrategyContext> = {
       clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
       slotEndMs: 1000000,
       clobTokenIds: ["up-id", "down-id"],
       orderHistory: [],
@@ -56,6 +129,7 @@ describe("Strategy Logic Verification", () => {
     
     const ctx: Partial<StrategyContext> = {
       clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_000 }),
       slotEndMs: 1000000,
       clobTokenIds: ["up-id", "down-id"],
       orderHistory: [
@@ -88,6 +162,41 @@ describe("Strategy Logic Verification", () => {
     
     const downOrder = postedOrders.find(o => o.req.tokenId === "down-id");
     expect(downOrder.req.price).toBeGreaterThan(0.50);
+  });
+
+  test("fair-value-maker blocks normal fair value when Chainlink is stale", () => {
+    const clock = new VirtualClock();
+    clock.setNowMs(1000);
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      slotEndMs: 1000000,
+      ...settlementContext(clock, { stale: true }),
+    };
+
+    const result = calculateSettlementAnchoredFairValue(ctx as StrategyContext, 0.2);
+
+    expect(result.probabilityUp).toBeNull();
+    expect(result.noTradeReason).toContain("Chainlink resolution feed");
+  });
+
+  test("fair-value-maker uses predictive tape for S but Chainlink settlement anchor for K", () => {
+    const clock = new VirtualClock();
+    clock.setNowMs(1000);
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      slotEndMs: 1000000,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 101_000 }),
+    };
+
+    const highPredictive = calculateSettlementAnchoredFairValue(ctx as StrategyContext, 0.2);
+    const shiftedSettlement = calculateSettlementAnchoredFairValue({
+      ...ctx,
+      ...settlementContext(clock, { settlement: 102_000, predictive: 101_000 }),
+    } as StrategyContext, 0.2);
+
+    expect(highPredictive.settlementAnchorPrice).toBe(100_000);
+    expect(highPredictive.predictiveCompositePrice).toBe(101_000);
+    expect(highPredictive.probabilityUp).toBeGreaterThan(shiftedSettlement.probabilityUp ?? 1);
   });
 
   test("late-entry (Flow Aware) respects imbalance guard", async () => {

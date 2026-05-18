@@ -2,6 +2,7 @@ import { Command } from "commander";
 import * as readline from "readline";
 import { strategies, DEFAULT_STRATEGY } from "./engine/strategy/index.ts";
 import { acquireProcessLock } from "./utils/process-lock.ts";
+import { validateContracts } from "./utils/contracts.ts";
 import { 
     TelemetryBus,
     ControlServer
@@ -79,6 +80,10 @@ const opts = program.opts<{
 }>();
 
 acquireProcessLock("early-bird");
+validateContracts({
+  requireSettlementReferenceVerification:
+    Boolean(opts.prod) && !opts.replay && !opts.idle,
+});
 
 if (!strategies[opts.strategy] && !opts.idle && !opts.replay) {
   console.error(`Unknown strategy: "${opts.strategy}"`);

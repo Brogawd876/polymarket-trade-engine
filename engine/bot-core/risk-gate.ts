@@ -2,10 +2,12 @@ import {
   type BotFeedEvent,
   type LeadLagSnapshot,
   type PredictiveAggregateSnapshot,
+  type ResolutionPriceEvent,
   type VenueOrderBookEvent,
   type OrderFlowSnapshot,
 } from "./data-sources.ts";
 import { Env } from "../../utils/config.ts";
+import { isPolymarketMaintenance } from "../../utils/maintenance.ts";
 import type { PlaceOrderIntent, StrategyIntent } from "./strategy-intent.ts";
 import { isPlaceOrderIntent } from "./strategy-intent.ts";
 
@@ -34,7 +36,9 @@ export type RiskSnapshot = {
   orderFlow?: OrderFlowSnapshot | null;
   probabilityUp?: number | null;
   sigma?: number | null;
+  maintenance?: { active: boolean; reason?: string } | null;
   openExposureUsd: number;
+
   sessionPnlUsd: number;
   clobTokenIds?: [string, string];
 };
@@ -46,6 +50,7 @@ export type StaticRiskLimits = {
   maxOpenExposureUsd: number;
   maxSessionLossUsd: number;
   maxFeedFreshnessMs: number;
+  maxOracleLagMs: number;
   noTradeLastMs: number;
 };
 
@@ -73,6 +78,7 @@ export const DEFAULT_SIMULATION_RISK_LIMITS: StaticRiskLimits = {
   maxOpenExposureUsd: 50,
   maxSessionLossUsd: 3,
   maxFeedFreshnessMs: 1000,
+  maxOracleLagMs: 60_000,
   noTradeLastMs: 5000,
 };
 
@@ -110,6 +116,13 @@ export class StaticRiskGate implements RiskGate {
       reasons.push("session loss limit is reached");
     }
 
+    const maintenance = snapshot.maintenance;
+    if (maintenance?.active) {
+      reasons.push(
+        `Polymarket matching engine maintenance: ${maintenance.reason}`,
+      );
+    }
+
     this.checkFeedFreshness(
       "resolution",
       snapshot.resolution,
@@ -143,19 +156,31 @@ export class StaticRiskGate implements RiskGate {
     if (event.quality === "stale" || event.quality === "missing") {
       reasons.push(`${label} feed quality is ${event.quality}`);
     }
-    if (
-      snapshot.productionEnabled &&
-      event.freshnessMs !== null &&
-      event.freshnessMs > this.limits.maxFeedFreshnessMs
-    ) {
+    if (event.freshnessMs !== null && event.freshnessMs > this.limits.maxFeedFreshnessMs) {
       reasons.push(`${label} feed is stale by freshness threshold`);
     }
-    if (
-      snapshot.productionEnabled &&
-      snapshot.nowMs - event.clock.receivedAtMs >
-      this.limits.maxFeedFreshnessMs
-    ) {
+    if (snapshot.nowMs - event.clock.receivedAtMs > this.limits.maxFeedFreshnessMs) {
       reasons.push(`${label} feed is stale by received age threshold`);
+    }
+    if (label === "resolution") {
+      this.checkResolutionTruth(event as ResolutionPriceEvent, snapshot, reasons);
+    }
+  }
+
+  private checkResolutionTruth(
+    event: ResolutionPriceEvent,
+    snapshot: RiskSnapshot,
+    reasons: string[],
+  ): void {
+    if (event.stalenessStatus === "stale" || event.stalenessStatus === "missing" || event.stalenessStatus === "degraded") {
+      reasons.push(`resolution staleness status is ${event.stalenessStatus}`);
+    }
+    const oracleLagMs = event.oracleLagMs ?? event.lagMs;
+    if (oracleLagMs !== null && oracleLagMs !== undefined && oracleLagMs > this.limits.maxOracleLagMs) {
+      reasons.push("resolution oracle lag exceeds threshold");
+    }
+    if (snapshot.productionEnabled && event.sourceType !== "chainlink_polygon") {
+      reasons.push("production requires Chainlink Polygon settlement truth");
     }
   }
 
@@ -371,14 +396,45 @@ export type AggregatedRiskGateOptions = {
   blockOnInsufficientLeadLagSamples?: boolean;
 };
 
+export const DEFAULT_PRODUCTION_RISK_LIMITS: StaticRiskLimits = {
+  allowProduction: true,
+  maxOrderNotionalUsd: 50,
+  maxSharesPerOrder: 100,
+  maxOpenExposureUsd: 250,
+  maxSessionLossUsd: 10,
+  maxFeedFreshnessMs: 500, // Strict 500ms
+  maxOracleLagMs: 30_000,   // Strict 30s
+  noTradeLastMs: 15000,    // Stop trading 15s before close
+};
+
+export const DEFAULT_PRODUCTION_EXECUTION_QUALITY_LIMITS: ExecutionQualityLimits = {
+  maxSpreadUsd: 0.05,        // Max 5c spread
+  maxVenueAgeMs: 500,       // Max 500ms old quote
+  minTargetLiquidity: 1.0,  // Require at least 1 share
+  maxSlippagePct: 1.0,      // Max 1% slippage
+  requireProfitability: true, // Must be EV+ after taker fees
+};
+
 export class AggregatedRiskGate implements RiskGate {
   private readonly baseGate: RiskGate;
   private readonly qualityGate: RiskGate;
 
   constructor(private readonly opts: AggregatedRiskGateOptions = {}) {
-    this.baseGate = opts.baseGate ?? new StaticRiskGate(opts.staticLimits);
+    const isProd = Env.get("PROD");
+    const staticLimits =
+      opts.staticLimits ??
+      (isProd
+        ? DEFAULT_PRODUCTION_RISK_LIMITS
+        : DEFAULT_SIMULATION_RISK_LIMITS);
+    const qualityLimits =
+      opts.qualityLimits ??
+      (isProd
+        ? DEFAULT_PRODUCTION_EXECUTION_QUALITY_LIMITS
+        : DEFAULT_EXECUTION_QUALITY_LIMITS);
+
+    this.baseGate = opts.baseGate ?? new StaticRiskGate(staticLimits);
     this.qualityGate =
-      opts.qualityGate ?? new ExecutionQualityGate(opts.qualityLimits);
+      opts.qualityGate ?? new ExecutionQualityGate(qualityLimits);
   }
 
   evaluate(intent: StrategyIntent, snapshot: RiskSnapshot): RiskDecision {

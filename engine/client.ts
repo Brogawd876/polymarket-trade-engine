@@ -22,13 +22,14 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 import { Env } from "../utils/config";
+import { POLYGON_CONTRACTS } from "../utils/contracts.ts";
 import { type Clock, RealClock } from "./bot-core/data-sources.ts";
 
 const RELAYER_URL = "https://relayer-v2.polymarket.com";
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
-const CTF_ADDRESS = "0xADa100874d00e3331D00F2007a9c336a65009718";
+const CTF_ADDRESS = POLYGON_CONTRACTS.CONDITIONAL_TOKENS as `0x${string}`;
 const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
-const pUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
+const pUSD_ADDRESS = POLYGON_CONTRACTS.PUSD as `0x${string}`;
 const ONRAMP = "0x93070a847efEf7F70739046A929D47a521F5B8ee" as const;
 const OFFRAMP = "0x2957922Eb93258b93368531d39fAcCA3B4dC5854" as const;
 
@@ -108,28 +109,35 @@ export type BookSnapshot = {
 
 /**
  * Sim fill check: price must cross and the counterparty liquidity at best
- * price must exceed `shares * price * 2` (a 2× cost buffer to avoid fills on
- * thin, illiquid ticks).
+ * price must exceed a buffer to avoid fills on thin, illiquid ticks.
  */
 export function isSimFilled(
   order: { action: "buy" | "sell"; price: number; shares: number },
   book: BookSnapshot,
 ): boolean {
-  const requiredLiquidity = order.shares * order.price * 2;
+  const isPessimistic = process.env.PESSIMISTIC_FILL === "true";
+
+  // Neutral: 2x buffer. Pessimistic: 10x buffer + 1c hurdle
+  const multiplier = isPessimistic ? 10 : 2;
+  const hurdle = isPessimistic ? 0.01 : 0;
+
+  const requiredLiquidity = order.shares * order.price * multiplier;
+
   if (order.action === "buy") {
     return (
       book.bestAsk !== null &&
-      book.bestAsk <= order.price &&
+      book.bestAsk <= (order.price - hurdle) &&
       (book.bestAskLiquidity ?? 0) > requiredLiquidity
     );
   } else {
     return (
       book.bestBid !== null &&
-      book.bestBid >= order.price &&
+      book.bestBid >= (order.price + hurdle) &&
       (book.bestBidLiquidity ?? 0) > requiredLiquidity
     );
   }
 }
+
 
 /** How long after a buy fills before the sim allows sells on that token. */
 function simBalanceDelayMs(): number {
