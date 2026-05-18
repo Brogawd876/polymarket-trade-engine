@@ -1,23 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { parseLog } from "../utils/analytics/parse";
 import { useAnalyticsStore } from "../store/analytics";
 import type { ParsedRun } from "../types/analytics";
 
-// Default source: every .log shipped under repo `logs/` (loaded eagerly at
-// dev/build time via Vite's glob).
-const rawLogs = import.meta.glob("../../../logs/*.log", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+const API_BASE = "http://127.0.0.1:3000/api/operator";
 
-function parseDefault(): ParsedRun[] {
+async function readBackendLogs(signal?: AbortSignal): Promise<ParsedRun[]> {
   const runs: ParsedRun[] = [];
-  for (const [path, content] of Object.entries(rawLogs)) {
-    const filename = path.split("/").pop() ?? path;
-    const parsed = parseLog(filename, content);
-    if (parsed) runs.push(parsed);
+  const listResponse = await fetch(`${API_BASE}/logs`, { signal });
+  if (!listResponse.ok) throw new Error("Failed to fetch log list");
+
+  const data = await listResponse.json() as { files?: string[] };
+  for (const filename of data.files ?? []) {
+    if (!filename.endsWith(".log")) continue;
+    try {
+      const response = await fetch(`${API_BASE}/logs/${encodeURIComponent(filename)}`, { signal });
+      if (!response.ok) continue;
+      const parsed = parseLog(filename, await response.text());
+      if (parsed) runs.push(parsed);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+    }
   }
+
   runs.sort((a, b) => a.startTime - b.startTime);
   return runs;
 }
@@ -48,8 +53,24 @@ async function readCustom(files: File[]): Promise<ParsedRun[]> {
 export function useLogs(): ParsedRun[] {
   const dataSource = useAnalyticsStore((s) => s.dataSource);
 
-  const defaultRuns = useMemo(() => parseDefault(), []);
+  const [defaultRuns, setDefaultRuns] = useState<ParsedRun[]>([]);
   const [customRuns, setCustomRuns] = useState<ParsedRun[]>([]);
+
+  useEffect(() => {
+    if (dataSource.kind === "custom") return;
+
+    const controller = new AbortController();
+    readBackendLogs(controller.signal)
+      .then(setDefaultRuns)
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load backend logs", error);
+          setDefaultRuns([]);
+        }
+      });
+
+    return () => controller.abort();
+  }, [dataSource.kind]);
 
   useEffect(() => {
     if (dataSource.kind !== "custom") {

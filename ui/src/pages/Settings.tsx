@@ -123,7 +123,7 @@ export default function Settings() {
                                 <div className="text-right">
                                     <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Type</div>
                                     <div className="text-xs text-indigo-400 font-medium px-2 py-0.5 bg-indigo-500/10 rounded border border-indigo-500/20">
-                                        {signatureTypeLabel(config?.POLY_SIGNATURE_TYPE || -1)}
+                                        {signatureTypeLabel(config?.POLY_SIGNATURE_TYPE ?? -1)}
                                     </div>
                                 </div>
                             </div>

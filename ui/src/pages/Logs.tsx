@@ -6,6 +6,7 @@ export default function Logs() {
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [content, setContent] = useState<string>('');
     const [loading, setLoading] = useState(false);
+    const [refreshKey, setRefreshKey] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
     const scrollRef = useRef<HTMLPreElement>(null);
 
@@ -15,18 +16,19 @@ export default function Logs() {
             .then(data => {
                 if (Array.isArray(data.files)) {
                     setFiles(data.files);
-                    if (data.files.length > 0 && !selectedFile) {
-                        setSelectedFile(data.files[0]);
-                    }
+                    setSelectedFile(current => {
+                        if (data.files.length === 0) return null;
+                        return current && data.files.includes(current) ? current : data.files[0];
+                    });
                 }
             })
             .catch(err => console.error("Failed to fetch log files", err));
-    }, []);
+    }, [refreshKey]);
 
     useEffect(() => {
         if (!selectedFile) return;
         setLoading(true);
-        fetch(`http://127.0.0.1:3000/api/operator/logs/${selectedFile}`)
+        fetch(`http://127.0.0.1:3000/api/operator/logs/${encodeURIComponent(selectedFile)}`)
             .then(res => res.text())
             .then(text => {
                 setContent(text);
@@ -36,7 +38,7 @@ export default function Logs() {
                 console.error("Failed to fetch log content", err);
                 setLoading(false);
             });
-    }, [selectedFile]);
+    }, [selectedFile, refreshKey]);
 
     const filteredContent = searchTerm 
         ? content.split('\n').filter(line => line.toLowerCase().includes(searchTerm.toLowerCase())).join('\n')
@@ -97,7 +99,8 @@ export default function Logs() {
                         <div className="flex items-center gap-4 ml-4">
                             <span className="text-[10px] text-slate-500 font-mono uppercase truncate max-w-40">{selectedFile}</span>
                             <button 
-                                onClick={() => setSelectedFile(selectedFile)}
+                                onClick={() => setRefreshKey(key => key + 1)}
+                                disabled={!selectedFile}
                                 className="p-1.5 hover:bg-slate-700 rounded text-slate-400 transition-colors"
                                 title="Refresh"
                             >

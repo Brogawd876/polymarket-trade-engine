@@ -211,7 +211,7 @@ export class ControlServer {
         const logFileMatch = url.pathname.match(/^\/api\/operator\/logs\/([^/]+)$/);
         if (logFileMatch && req.method === "GET") {
             try {
-                const fileName = logFileMatch[1]!;
+                const fileName = path.basename(decodeURIComponent(logFileMatch[1]!));
                 const filePath = path.join("logs", fileName);
                 const content = await Bun.file(filePath).text();
                 return new Response(content, { headers: responseHeaders });
