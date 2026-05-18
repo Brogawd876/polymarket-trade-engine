@@ -146,9 +146,12 @@ export class EarlyBird {
         binance: this._binance,
         coinbase: this._coinbase,
       },
+      feedWeights: {
+        binance: 0.7, // Institutional weight: Binance usually has 10x liquidity
+        coinbase: 0.3,
+      },
       clock: this._clock,
     });
-
     this._leadLag = new DefaultLeadLagMonitor({
       asset: Env.get("MARKET_ASSET"),
       aggregator: this._aggregator,

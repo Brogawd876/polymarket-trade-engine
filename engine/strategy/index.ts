@@ -1,6 +1,8 @@
 import type { Strategy } from "./types.ts";
 import { simulationStrategy } from "./simulation.ts";
 import { lateEntry, type LateEntryConfig } from "./late-entry.ts";
+import { lateEntryOptimized } from "./late-entry-optimized.ts";
+import { lateEntryAdaptive } from "./late-entry-adaptive.ts";
 
 export type StrategyVariant = {
   id: string;
@@ -16,6 +18,8 @@ const LATE_ENTRY_DEFAULT: LateEntryConfig = {};
 export const strategies: Record<string, Strategy> = {
   "simulation": simulationStrategy,
   "late-entry": lateEntry,
+  "late-entry-optimized": lateEntryOptimized,
+  "late-entry-adaptive": lateEntryAdaptive,
 };
 
 export const DEFAULT_STRATEGY = "simulation";
@@ -26,6 +30,22 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     label: "simulation",
     strategy: "simulation",
     description: "Baseline paper/replay strategy used to validate order lifecycle plumbing.",
+    config: {},
+    paperEligible: true,
+  },
+  "late-entry-optimized": {
+    id: "late-entry-optimized",
+    label: "late-entry optimized",
+    strategy: "late-entry-optimized",
+    description: "Institutional refinements (dynamic certainty, theta decay) for better signal capture.",
+    config: {},
+    paperEligible: true,
+  },
+  "late-entry-adaptive": {
+    id: "late-entry-adaptive",
+    label: "late-entry adaptive",
+    strategy: "late-entry-adaptive",
+    description: "Smart sizing and slippage buffering based on market divergence.",
     config: {},
     paperEligible: true,
   },

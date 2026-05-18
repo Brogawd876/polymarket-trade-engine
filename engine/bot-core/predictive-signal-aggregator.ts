@@ -11,6 +11,8 @@ import {
 export type AggregatorOptions = {
   asset: BotAsset;
   feeds: Record<string, PredictiveFeedAdapter>;
+  /** Weights per feed. Default: uniform weights. Example: { binance: 0.7, coinbase: 0.3 } */
+  feedWeights?: Record<string, number>;
   /** Max divergence between feeds before marking disagreement. Default: 50 ($50 for BTC). */
   divergenceThresholdAbs?: number;
   clock?: Clock;
@@ -22,12 +24,14 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
   private latestEvents = new Map<string, PredictivePriceEvent>();
   private handlers = new Set<(snapshot: PredictiveAggregateSnapshot) => void>();
   private divergenceThresholdAbs: number;
+  private feedWeights: Record<string, number>;
   private clock: Clock;
 
   constructor(opts: AggregatorOptions) {
     this.asset = opts.asset;
     this.feeds = opts.feeds;
     this.divergenceThresholdAbs = opts.divergenceThresholdAbs ?? 50;
+    this.feedWeights = opts.feedWeights ?? {};
     this.clock = opts.clock ?? new RealClock();
 
     for (const [name, adapter] of Object.entries(this.feeds)) {
@@ -40,7 +44,7 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
 
   latest(): PredictiveAggregateSnapshot {
     const snapshotFeeds: PredictiveAggregateSnapshot["feeds"] = {};
-    const healthyPrices: number[] = [];
+    const healthyFeedNames: string[] = [];
     const now = this.clock.nowMs();
 
     for (const [name, event] of this.latestEvents) {
@@ -52,7 +56,7 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
       };
 
       if (event.quality === "live") {
-        healthyPrices.push(event.price);
+        healthyFeedNames.push(name);
       }
     }
 
@@ -61,8 +65,21 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
     let divergencePct: number | null = null;
     let disagreement = false;
 
-    if (healthyPrices.length > 0) {
-      price = healthyPrices.reduce((a, b) => a + b, 0) / healthyPrices.length;
+    if (healthyFeedNames.length > 0) {
+      // Calculate Weighted Price
+      let totalWeight = 0;
+      let weightedSum = 0;
+      const healthyPrices: number[] = [];
+
+      for (const name of healthyFeedNames) {
+        const weight = this.feedWeights[name] ?? 1.0;
+        const p = this.latestEvents.get(name)!.price;
+        weightedSum += p * weight;
+        totalWeight += weight;
+        healthyPrices.push(p);
+      }
+      
+      price = weightedSum / totalWeight;
 
       if (healthyPrices.length > 1) {
         const max = Math.max(...healthyPrices);
@@ -70,13 +87,14 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
         divergenceAbs = max - min;
         divergencePct = (divergenceAbs / price) * 100;
 
+        // Institutional Disagreement: If high-weight feeds agree but low-weight lags, 
+        // we might NOT mark disagreement. For now, we stick to the absolute threshold.
         if (divergenceAbs > this.divergenceThresholdAbs) {
           disagreement = true;
         }
       }
-      // If exactly one healthy feed, disagreement remains false as divergence cannot be computed.
     } else {
-      disagreement = true; // No live feeds is a form of disagreement/failure
+      disagreement = true;
     }
     return {
       asset: this.asset,
