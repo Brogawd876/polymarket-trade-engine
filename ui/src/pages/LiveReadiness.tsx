@@ -51,6 +51,23 @@ type Experiment = {
     error?: string;
 };
 
+type PaperSessionEvidence = {
+    id: string;
+    presetId: string;
+    moduleId: string;
+    label: string;
+    configHash: string;
+    startedAtMs: number;
+    endedAtMs: number;
+    status: 'completed' | 'failed' | 'canceled';
+    pnl: number;
+    fills: number;
+    blocked: number;
+    problems: number;
+    decisionSnapshots: number;
+    verdict: 'win' | 'loss' | 'flat' | 'no_trade' | 'problem' | 'canceled' | 'failed';
+};
+
 function money(value: number | null | undefined) {
     if (value == null) return '---';
     return `${value >= 0 ? '$' : '-$'}${Math.abs(value).toFixed(2)}`;
@@ -81,6 +98,7 @@ export default function LiveReadiness() {
 };`);
     const [validation, setValidation] = useState<string | null>(null);
     const [experiment, setExperiment] = useState<Experiment | null>(null);
+    const [evidenceRows, setEvidenceRows] = useState<PaperSessionEvidence[]>([]);
     const [message, setMessage] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -88,6 +106,11 @@ export default function LiveReadiness() {
     const replayable = useMemo(() => fixtures.filter(fixture => fixture.replayable).slice(0, 3), [fixtures]);
     const holdout = useMemo(() => fixtures.filter(fixture => fixture.replayable).slice(3, 5), [fixtures]);
     const activePreset = presets.find(preset => preset.id === selectedPreset);
+    const activeEvidence = useMemo(() => evidenceRows.filter(row => row.presetId === selectedPreset), [evidenceRows, selectedPreset]);
+    const hasCleanPaperEvidence = activeEvidence.some(row => row.status === 'completed' && row.problems === 0 && row.fills > 0 && row.decisionSnapshots > 0 && row.pnl >= 0);
+    const hasReplayEvidence = activePreset?.promotionStatus === 'paper_candidate' || activePreset?.promotionStatus === 'tiny_live_candidate' || activePreset?.promotionStatus === 'replay_candidate';
+    const hasPaperApproval = activePreset?.riskProfile === 'paper' || activePreset?.riskProfile === 'tiny-live';
+    const canPromoteTinyCandidate = Boolean(activePreset && hasReplayEvidence && hasPaperApproval && hasCleanPaperEvidence && activePreset.promotionStatus === 'paper_candidate');
     const canUnlockTinyLive = activePreset?.promotionStatus === 'tiny_live_candidate' && activePreset.riskProfile === 'paper';
 
     useEffect(() => {
@@ -100,19 +123,22 @@ export default function LiveReadiness() {
     async function loadAll() {
         setLoading(true);
         try {
-            const [moduleResponse, presetResponse, fixtureResponse] = await Promise.all([
+            const [moduleResponse, presetResponse, fixtureResponse, evidenceResponse] = await Promise.all([
                 fetch(`${API_BASE}/strategy/modules`),
                 fetch(`${API_BASE}/strategy/presets`),
                 fetch(`${API_BASE}/replay-fixtures`),
+                fetch(`${API_BASE}/strategy/evidence`),
             ]);
             const moduleData = await moduleResponse.json();
             const presetData = await presetResponse.json();
             const fixtureData = await fixtureResponse.json();
+            const evidenceData = await evidenceResponse.json();
             const nextModules = moduleData.modules ?? [];
             const nextPresets = presetData.presets ?? [];
             setModules(nextModules);
             setPresets(nextPresets);
             setFixtures(fixtureData.files ?? []);
+            setEvidenceRows(evidenceData.evidence ?? []);
             setSelectedModule(current => nextModules.some((item: StrategyModule) => item.id === current) ? current : nextModules[0]?.id ?? 'simulation');
             setSelectedPreset(current => nextPresets.some((item: StrategyPreset) => item.id === current) ? current : nextPresets[0]?.id ?? 'simulation');
         } finally {
@@ -199,6 +225,14 @@ export default function LiveReadiness() {
         const response = await fetch(`${API_BASE}/paper-tuning/recommendations/${experiment.recommendation.id}/apply`, { method: 'POST' });
         const data = await response.json();
         setMessage(data.success ? `Applied paper tuning preset ${data.preset.id}` : data.error);
+        await loadAll();
+    }
+
+    async function promotePaperCandidate() {
+        if (!selectedPreset) return;
+        const response = await fetch(`${API_BASE}/strategy/presets/${encodeURIComponent(selectedPreset)}/promote-paper-candidate`, { method: 'POST' });
+        const data = await response.json();
+        setMessage(data.success ? `Preset ${data.preset.label} is now a tiny-live candidate.` : data.error);
         await loadAll();
     }
 
@@ -317,16 +351,40 @@ export default function LiveReadiness() {
                     <div className="grid gap-3">
                         <div className="rounded border border-slate-700 bg-slate-900/40 p-3 flex items-center justify-between">
                             <span className="text-slate-300">Replay evidence exists</span>
-                            <CheckCircle2 className={`w-5 h-5 ${activePreset?.promotionStatus !== 'draft' ? 'text-emerald-400' : 'text-slate-600'}`} />
+                            <CheckCircle2 className={`w-5 h-5 ${hasReplayEvidence ? 'text-emerald-400' : 'text-slate-600'}`} />
                         </div>
                         <div className="rounded border border-slate-700 bg-slate-900/40 p-3 flex items-center justify-between">
                             <span className="text-slate-300">Paper recommendation approved</span>
-                            <CheckCircle2 className={`w-5 h-5 ${activePreset?.riskProfile === 'paper' || activePreset?.riskProfile === 'tiny-live' ? 'text-emerald-400' : 'text-slate-600'}`} />
+                            <CheckCircle2 className={`w-5 h-5 ${hasPaperApproval ? 'text-emerald-400' : 'text-slate-600'}`} />
+                        </div>
+                        <div className="rounded border border-slate-700 bg-slate-900/40 p-3 flex items-center justify-between">
+                            <span className="text-slate-300">Clean paper evidence exists</span>
+                            <CheckCircle2 className={`w-5 h-5 ${hasCleanPaperEvidence ? 'text-emerald-400' : 'text-slate-600'}`} />
                         </div>
                         <div className="rounded border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                             Ultra-tiny caps: $1/order | $5 exposure | $5 loss | strict feed and close-window gates.
                         </div>
                     </div>
+                    <div className="rounded border border-slate-700 bg-slate-900/40 p-3">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm font-semibold text-slate-200">Recent Paper Evidence</span>
+                            <span className="text-xs text-slate-500">{activeEvidence.length} rows</span>
+                        </div>
+                        <div className="grid gap-2">
+                            {activeEvidence.slice(0, 4).map(row => (
+                                <div key={row.id} className="grid grid-cols-4 gap-2 text-xs text-slate-400 border border-slate-800 rounded p-2">
+                                    <span className="text-slate-200">{row.verdict}</span>
+                                    <span>{money(row.pnl)}</span>
+                                    <span>{row.fills} fills</span>
+                                    <span>{row.problems} problems</span>
+                                </div>
+                            ))}
+                            {activeEvidence.length === 0 && <div className="text-xs text-slate-500">No paper evidence recorded for this preset yet.</div>}
+                        </div>
+                    </div>
+                    <button onClick={promotePaperCandidate} disabled={!canPromoteTinyCandidate} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 rounded font-bold text-white">
+                        Promote to Tiny-Live Candidate
+                    </button>
                     <button onClick={unlockTinyLive} disabled={!canUnlockTinyLive} className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 rounded font-bold text-white">
                         Explicitly Unlock Tiny-Live
                     </button>

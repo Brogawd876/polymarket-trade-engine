@@ -48,6 +48,9 @@ describe('LiveReadiness', () => {
             if (target.endsWith('/replay-fixtures')) {
                 return Response.json({ files: [{ path: 'logs/a.log', label: 'a', replayable: true }] });
             }
+            if (target.endsWith('/strategy/evidence')) {
+                return Response.json({ evidence: [] });
+            }
             if (target.endsWith('/strategy/modules/validate')) {
                 expect(init?.method).toBe('POST');
                 return Response.json({ success: false, errors: ['Source code must include an evaluate function'] }, { status: 400 });
@@ -76,6 +79,9 @@ describe('LiveReadiness', () => {
             if (target.endsWith('/replay-fixtures')) {
                 return Response.json({ files: [{ path: 'logs/a.log', label: 'a', replayable: true }, { path: 'logs/b.log', label: 'b', replayable: true }, { path: 'logs/c.log', label: 'c', replayable: true }, { path: 'logs/d.log', label: 'd', replayable: true }] });
             }
+            if (target.endsWith('/strategy/evidence')) {
+                return Response.json({ evidence: [{ id: 'row-1', presetId: 'simulation', moduleId: 'simulation', label: 'simulation', configHash: 'abc123', startedAtMs: 1, endedAtMs: 2, status: 'completed', pnl: 0.5, fills: 1, blocked: 0, problems: 0, decisionSnapshots: 2, verdict: 'win' }] });
+            }
             if (target.endsWith('/strategy-lab/experiments')) {
                 return Response.json({ success: true, experimentId: 'exp-1', experiment: { id: 'exp-1', name: 'Replay to paper recommendation', state: 'running', recommendation: null } });
             }
@@ -90,5 +96,7 @@ describe('LiveReadiness', () => {
         fireEvent.click(await view.findByText('Run Experiment'));
         await waitFor(() => expect(view.getByText('Recommendation score 20.00')).toBeTruthy(), { timeout: 3000 });
         expect(view.getByText('ready for paper approval')).toBeTruthy();
+        expect(view.getByText('Clean paper evidence exists')).toBeTruthy();
+        expect(view.getByText('win')).toBeTruthy();
     });
 });

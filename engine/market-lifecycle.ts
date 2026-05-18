@@ -93,6 +93,7 @@ type MarketLifecycleOptions = {
   strategyName: string;
   strategy: Strategy;
   strategyConfig?: Record<string, unknown>;
+  presetId?: string;
   tracker: WalletTracker;
   ticker: TickerTracker;
   userChannel: UserChannel;
@@ -146,6 +147,7 @@ export class MarketLifecycle {
   private readonly _strategyName: string;
   private readonly _strategy: Strategy;
   private readonly _strategyConfig: Record<string, unknown>;
+  private readonly _presetId?: string;
   private readonly _tracker: WalletTracker;
   private readonly _ticker: TickerTracker;
   private readonly _alwaysLog: boolean;
@@ -167,6 +169,7 @@ export class MarketLifecycle {
     this._strategyName = opts.strategyName;
     this._strategy = opts.strategy;
     this._strategyConfig = { ...(opts.strategyConfig ?? {}) };
+    this._presetId = opts.presetId;
     this._tracker = opts.tracker;
     this._ticker = opts.ticker;
     this._alwaysLog = opts.alwaysLog ?? false;
@@ -1270,6 +1273,7 @@ export class MarketLifecycle {
       slug: this.slug,
       strategyId: this._strategyName,
       strategyConfig: this._strategyConfig,
+      presetId: this._presetId,
       snapshot: params.snapshot,
       intent: params.intent,
       decision: params.decision,

@@ -52,7 +52,9 @@ export function SessionCommandBar() {
                             <span className="text-sm font-medium text-slate-400 leading-none">
                                 {operatorStatus?.engineMode === 'replay' 
                                     ? operatorStatus.activeReplayFile?.split('/').pop() 
-                                    : operatorStatus?.engineStatus?.strategy}
+                                    : operatorStatus?.activePreset
+                                        ? `${operatorStatus.activePreset.label} (${operatorStatus.activePreset.configHash})`
+                                        : operatorStatus?.engineStatus?.strategy}
                             </span>
                         </div>
                         <div className="h-8 w-px bg-slate-700" />

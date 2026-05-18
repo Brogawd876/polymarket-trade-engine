@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { LiveReadinessManager, stableConfigHash, type ExperimentRequest } from "../../engine/live-readiness.ts";
 import type { StrategyLabBatch } from "../../engine/strategy-lab.ts";
+import { mkdtemp } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
 
 function completedBatch(id: string, strategy = "simulation"): StrategyLabBatch {
   return {
@@ -49,6 +52,14 @@ class FakeStrategyLab {
 }
 
 describe("LiveReadinessManager", () => {
+  async function tempManager() {
+    const dir = await mkdtemp(join(tmpdir(), "live-readiness-"));
+    return new LiveReadinessManager(new FakeStrategyLab() as any, {
+      presetFile: join(dir, "presets.json"),
+      evidenceFile: join(dir, "evidence.json"),
+    });
+  }
+
   test("lists built-in strategy modules with live disabled by default", async () => {
     const manager = new LiveReadinessManager(new FakeStrategyLab() as any);
     const modules = await manager.listModules();
@@ -87,9 +98,59 @@ describe("LiveReadinessManager", () => {
     throw new Error("Timed out waiting for fake experiment");
   });
 
-  test("tiny-live promotion requires a paper candidate and paper approval", () => {
+  test("paper evidence records rows and gates promotion", async () => {
+    const manager = await tempManager();
+    const before = await manager.promotePaperCandidate("simulation");
+    expect(before.success).toBe(false);
+    expect(before.report.reasons.join(" ")).toMatch(/paper evidence/);
+
+    await manager.recordPaperEvidence({
+      presetId: "simulation",
+      moduleId: "simulation",
+      label: "simulation",
+      configHash: stableConfigHash({}),
+      strategyVersion: "1.0.0",
+      startedAtMs: Date.now() - 1000,
+      status: "completed",
+      pnl: 0.25,
+      fills: 1,
+      blocked: 0,
+      problems: 0,
+      decisionSnapshots: 2,
+    });
+
+    const evidence = await manager.getPresetEvidence("simulation");
+    expect(evidence.summary.cleanSessions).toBe(1);
+
+    const after = await manager.promotePaperCandidate("simulation");
+    expect(after.success).toBe(true);
+    expect(after.preset?.promotionStatus).toBe("tiny_live_candidate");
+  });
+
+  test("failed paper evidence is row-level and does not satisfy promotion", async () => {
+    const manager = await tempManager();
+    await manager.recordPaperEvidence({
+      presetId: "simulation",
+      moduleId: "simulation",
+      label: "simulation",
+      configHash: stableConfigHash({}),
+      strategyVersion: "1.0.0",
+      startedAtMs: Date.now() - 1000,
+      status: "failed",
+      pnl: -1,
+      fills: 0,
+      blocked: 0,
+      problems: 1,
+      decisionSnapshots: 1,
+    });
+    const evidence = await manager.getPresetEvidence("simulation");
+    expect(evidence.rows[0]?.verdict).toBe("failed");
+    expect(evidence.summary.promotionReady).toBe(false);
+  });
+
+  test("tiny-live promotion requires a paper candidate and paper approval", async () => {
     const manager = new LiveReadinessManager(new FakeStrategyLab() as any);
-    const report = manager.evaluatePromotion({
+    const report = await manager.evaluatePromotion({
       id: "draft",
       moduleId: "simulation",
       label: "Draft",

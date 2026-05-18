@@ -34,6 +34,7 @@ export class ControlServer {
     this._sessionManager = opts.sessionManager;
     this._strategyLab = new StrategyLabBatchManager();
     this._liveReadiness = new LiveReadinessManager(this._strategyLab);
+    this._sessionManager.setPaperEvidenceRecorder((evidence) => this._liveReadiness.recordPaperEvidence(evidence));
     this._allowedOrigins = new Set(opts.allowedOrigins ?? [
       "http://localhost:3000",
       "http://127.0.0.1:3000",
@@ -107,6 +108,13 @@ export class ControlServer {
                     if (!preset) throw new Error("Strategy preset not found");
                     config.strategy = preset.moduleId;
                     config.strategyConfigOverride = preset.config;
+                    config.presetContext = {
+                        id: preset.id,
+                        moduleId: preset.moduleId,
+                        label: preset.label,
+                        configHash: preset.configHash,
+                        strategyVersion: "1.0.0",
+                    };
                 }
                 await this._sessionManager.startSimulation(config);
                 return Response.json({ success: true }, { headers: responseHeaders });
@@ -182,6 +190,25 @@ export class ControlServer {
             try {
                 const preset = await this._liveReadiness.savePreset(await req.json() as any);
                 return Response.json({ success: true, preset }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if (url.pathname === "/api/operator/strategy/evidence" && req.method === "GET") {
+            return Response.json({ evidence: await this._liveReadiness.listEvidence() }, { headers: responseHeaders });
+        }
+
+        const presetEvidenceMatch = url.pathname.match(/^\/api\/operator\/strategy\/presets\/([^/]+)\/evidence$/);
+        if (presetEvidenceMatch && req.method === "GET") {
+            return Response.json({ evidence: await this._liveReadiness.getPresetEvidence(decodeURIComponent(presetEvidenceMatch[1]!)) }, { headers: responseHeaders });
+        }
+
+        const promotePresetMatch = url.pathname.match(/^\/api\/operator\/strategy\/presets\/([^/]+)\/promote-paper-candidate$/);
+        if (promotePresetMatch && req.method === "POST") {
+            try {
+                const result = await this._liveReadiness.promotePaperCandidate(decodeURIComponent(promotePresetMatch[1]!));
+                return Response.json(result, { status: result.success ? 200 : 400, headers: responseHeaders });
             } catch (e: any) {
                 return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
             }

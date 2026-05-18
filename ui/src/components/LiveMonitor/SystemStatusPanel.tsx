@@ -25,6 +25,10 @@ export function SystemStatusPanel() {
                     <span className="text-slate-200 font-medium">{bootInfo?.strategy || systemStatus?.strategy || 'None'}</span>
                 </div>
                 <div>
+                    <span className="text-slate-400 block">Preset</span>
+                    <span className="text-slate-200 font-medium">{operatorStatus?.activePreset ? `${operatorStatus.activePreset.label} (${operatorStatus.activePreset.configHash})` : 'None'}</span>
+                </div>
+                <div>
                     <span className="text-slate-400 block">Active Lifecycles</span>
                     <span className="text-slate-200 font-medium">{systemStatus?.activeLifecycles || 0}</span>   
                 </div>

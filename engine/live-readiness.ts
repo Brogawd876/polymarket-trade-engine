@@ -70,10 +70,42 @@ export type StrategyPreset = {
   lastValidation?: PromotionReport;
 };
 
+export type PaperSessionEvidence = {
+  id: string;
+  presetId: string;
+  moduleId: string;
+  label: string;
+  configHash: string;
+  strategyVersion: string;
+  startedAtMs: number;
+  endedAtMs: number;
+  status: "completed" | "failed" | "canceled";
+  pnl: number;
+  fills: number;
+  blocked: number;
+  problems: number;
+  decisionSnapshots: number;
+  verdict: "win" | "loss" | "flat" | "no_trade" | "problem" | "canceled" | "failed";
+  notes?: string;
+};
+
+export type StrategyPresetEvidence = {
+  presetId: string;
+  rows: PaperSessionEvidence[];
+  summary: {
+    totalSessions: number;
+    cleanSessions: number;
+    totalPnl: number;
+    latestVerdict: PaperSessionEvidence["verdict"] | null;
+    promotionReady: boolean;
+  };
+};
+
 export type PromotionReport = {
   presetId: string;
   replayPassed: boolean;
   paperApproved: boolean;
+  paperEvidencePassed?: boolean;
   tinyLiveEligible: boolean;
   reasons: string[];
   checkedAtMs: number;
@@ -147,6 +179,7 @@ export type TinyLiveUnlockResult = {
 
 const DATA_DIR = "state";
 const PRESET_FILE = path.join(DATA_DIR, "strategy-presets.json");
+const EVIDENCE_FILE = path.join(DATA_DIR, "strategy-paper-evidence.json");
 const CUSTOM_MODULE_DIR = path.join("engine", "strategy", "custom");
 
 const DEFAULT_CONFIG_SCHEMA: Record<string, ConfigFieldSchema> = {
@@ -219,8 +252,13 @@ export class LiveReadinessManager {
   private experiments = new Map<string, ExperimentResult>();
   private recommendations = new Map<string, PaperTuningRecommendation>();
   private tinyLiveUnlocks = new Map<string, PromotionReport>();
+  private readonly presetFile: string;
+  private readonly evidenceFile: string;
 
-  constructor(private readonly strategyLab: StrategyLabBatchManager) {}
+  constructor(private readonly strategyLab: StrategyLabBatchManager, opts: { presetFile?: string; evidenceFile?: string } = {}) {
+    this.presetFile = opts.presetFile ?? PRESET_FILE;
+    this.evidenceFile = opts.evidenceFile ?? EVIDENCE_FILE;
+  }
 
   async listModules(): Promise<StrategyModule[]> {
     const custom = await this.listCustomModules();
@@ -262,7 +300,7 @@ export class LiveReadinessManager {
   }
 
   async listPresets(): Promise<StrategyPreset[]> {
-    const saved = await readJsonFile<StrategyPreset[]>(PRESET_FILE, []);
+    const saved = await readJsonFile<StrategyPreset[]>(this.presetFile, []);
     if (saved.length > 0) return saved;
     const now = Date.now();
     return builtInModules().map((module) => ({
@@ -306,8 +344,57 @@ export class LiveReadinessManager {
     };
 
     const next = [...presets.filter(item => item.id !== id), preset].sort((a, b) => a.id.localeCompare(b.id));
-    await writeJsonFile(PRESET_FILE, next);
+    await writeJsonFile(this.presetFile, next);
     return preset;
+  }
+
+  async listEvidence(presetId?: string): Promise<PaperSessionEvidence[]> {
+    const rows = await readJsonFile<PaperSessionEvidence[]>(this.evidenceFile, []);
+    const filtered = presetId ? rows.filter(row => row.presetId === presetId) : rows;
+    return filtered.sort((a, b) => b.startedAtMs - a.startedAtMs);
+  }
+
+  async getPresetEvidence(presetId: string): Promise<StrategyPresetEvidence> {
+    const rows = await this.listEvidence(presetId);
+    const cleanSessions = rows.filter(row => this.isCleanPaperEvidence(row)).length;
+    const totalPnl = parseFloat(rows.reduce((sum, row) => sum + row.pnl, 0).toFixed(4));
+    return {
+      presetId,
+      rows,
+      summary: {
+        totalSessions: rows.length,
+        cleanSessions,
+        totalPnl,
+        latestVerdict: rows[0]?.verdict ?? null,
+        promotionReady: cleanSessions > 0,
+      },
+    };
+  }
+
+  async recordPaperEvidence(input: Omit<PaperSessionEvidence, "id" | "endedAtMs" | "verdict"> & { id?: string; endedAtMs?: number; verdict?: PaperSessionEvidence["verdict"] }): Promise<PaperSessionEvidence> {
+    const evidence: PaperSessionEvidence = {
+      ...input,
+      id: input.id ?? crypto.randomUUID(),
+      endedAtMs: input.endedAtMs ?? Date.now(),
+      pnl: parseFloat(input.pnl.toFixed(4)),
+      verdict: input.verdict ?? this.deriveEvidenceVerdict(input),
+    };
+    const rows = await readJsonFile<PaperSessionEvidence[]>(this.evidenceFile, []);
+    const next = [evidence, ...rows.filter(row => row.id !== evidence.id)].slice(0, 500);
+    await writeJsonFile(this.evidenceFile, next);
+    return evidence;
+  }
+
+  async promotePaperCandidate(presetId: string): Promise<{ success: boolean; preset?: StrategyPreset; report: PromotionReport; error?: string }> {
+    const presets = await this.listPresets();
+    const preset = presets.find(item => item.id === presetId);
+    if (!preset) throw new Error("Preset not found");
+    const report = await this.evaluatePromotion(preset);
+    if (!report.tinyLiveEligible) {
+      return { success: false, report, error: report.reasons.join("; ") };
+    }
+    const promoted = await this.savePreset({ ...preset, promotionStatus: "tiny_live_candidate", lastValidation: report });
+    return { success: true, preset: promoted, report };
   }
 
   async createExperiment(request: ExperimentRequest): Promise<ExperimentResult> {
@@ -351,7 +438,7 @@ export class LiveReadinessManager {
     const presets = await this.listPresets();
     const preset = presets.find(item => item.id === request.presetId);
     if (!preset) throw new Error("Preset not found");
-    const report = this.evaluatePromotion(preset);
+    const report = await this.evaluatePromotion(preset);
     if (!request.operatorAck) report.reasons.push("operator acknowledgement is required");
     const success = report.tinyLiveEligible && request.operatorAck === true;
     if (success) {
@@ -361,23 +448,41 @@ export class LiveReadinessManager {
     return { success, presetId: preset.id, guard: ULTRA_TINY_LIVE_GUARD, report, error: success ? undefined : report.reasons.join("; ") };
   }
 
-  evaluatePromotion(preset: StrategyPreset): PromotionReport {
+  async evaluatePromotion(preset: StrategyPreset): Promise<PromotionReport> {
     const reasons: string[] = [];
     if (preset.promotionStatus !== "tiny_live_candidate" && preset.promotionStatus !== "paper_candidate") {
       reasons.push("preset is not a paper or tiny-live candidate");
     }
     const replayPassed = preset.lastValidation?.replayPassed === true || preset.promotionStatus === "paper_candidate" || preset.promotionStatus === "tiny_live_candidate";
     const paperApproved = preset.riskProfile === "paper" || preset.riskProfile === "tiny-live";
+    const evidence = await this.getPresetEvidence(preset.id);
+    const paperEvidencePassed = evidence.summary.cleanSessions > 0;
     if (!replayPassed) reasons.push("positive replay holdout is required");
     if (!paperApproved) reasons.push("approved paper recommendation is required");
+    if (!paperEvidencePassed) reasons.push("at least one clean paper evidence row is required");
     return {
       presetId: preset.id,
       replayPassed,
       paperApproved,
-      tinyLiveEligible: replayPassed && paperApproved && reasons.length === 0,
+      paperEvidencePassed,
+      tinyLiveEligible: replayPassed && paperApproved && paperEvidencePassed && reasons.length === 0,
       reasons,
       checkedAtMs: Date.now(),
     };
+  }
+
+  private isCleanPaperEvidence(row: PaperSessionEvidence): boolean {
+    return row.status === "completed" && row.problems === 0 && row.fills > 0 && row.decisionSnapshots > 0 && row.pnl >= 0;
+  }
+
+  private deriveEvidenceVerdict(row: Omit<PaperSessionEvidence, "id" | "endedAtMs" | "verdict">): PaperSessionEvidence["verdict"] {
+    if (row.status === "failed") return "failed";
+    if (row.status === "canceled") return "canceled";
+    if (row.problems > 0) return "problem";
+    if (row.fills === 0) return "no_trade";
+    if (row.pnl > 0) return "win";
+    if (row.pnl < 0) return "loss";
+    return "flat";
   }
 
   private async listCustomModules(): Promise<StrategyModule[]> {

@@ -12,6 +12,7 @@ export type DecisionFeatureSnapshot = {
     version: string;
     configHash: string;
     gitCommit: string;
+    presetId?: string;
   };
   round: {
     asset: string;
@@ -83,6 +84,7 @@ export function createDecisionFeatureSnapshot(params: {
   slug: string;
   strategyId: string;
   strategyConfig: Record<string, unknown>;
+  presetId?: string;
   snapshot: RiskSnapshot;
   intent?: StrategyIntent;
   decision?: RiskDecision;
@@ -113,6 +115,7 @@ export function createDecisionFeatureSnapshot(params: {
       version: "1.0.0",
       configHash: stableConfigHash(params.strategyConfig),
       gitCommit: gitCommit(),
+      presetId: params.presetId,
     },
     round: {
       asset: params.snapshot.resolution?.round?.asset ?? intent?.round.asset ?? "btc",

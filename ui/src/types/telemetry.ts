@@ -76,7 +76,7 @@ export interface DecisionFeatureSnapshot {
   event: "consider" | "blocked" | "placed" | "filled" | "failed" | "settled" | "skipped";
   ts: number;
   slug: string;
-  strategy: { id: string; version: string; configHash: string; gitCommit: string };
+  strategy: { id: string; version: string; configHash: string; gitCommit: string; presetId?: string };
   risk: { approved: boolean | null; reasons: string[] };
   feeds: { predictiveDisagreement: boolean | null; divergencePct: number | null; leadLagConfidence: string | null };
   orderbook: { side: "UP" | "DOWN" | null; bid: number | null; ask: number | null; spread: number | null; targetLiquidity: number | null; slippageEstimatePct: number | null };
@@ -124,4 +124,11 @@ export type OperatorStatus = {
   engineStatus: EngineStatus | null;
   blockReason: string | null;
   activeReplayFile: string | null;
+  activePreset: {
+    id: string;
+    moduleId: string;
+    label: string;
+    configHash: string;
+    strategyVersion: string;
+  } | null;
 };

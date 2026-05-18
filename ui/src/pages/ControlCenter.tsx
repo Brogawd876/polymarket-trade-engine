@@ -190,6 +190,7 @@ export default function ControlCenter() {
     const isRunning = operatorStatus?.sessionState === "running" || operatorStatus?.sessionState === "starting";
     const isStopping = operatorStatus?.sessionState === "stopping";
     const isBlocked = operatorStatus?.blockReason != null;
+    const selectedPreset = strategyPresets.find(preset => preset.id === strategy);
 
     return (
         <div className="p-8 max-w-6xl mx-auto space-y-8">
@@ -321,6 +322,14 @@ export default function ControlCenter() {
                                         ))}
                                         {strategyPresets.length === 0 && strategyVariants.length === 0 && <option value="simulation">simulation</option>}
                                     </select>
+                                    {selectedPreset && (
+                                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+                                            <div className="flex justify-between gap-2">
+                                                <span>{selectedPreset.moduleId} | {selectedPreset.riskProfile} | {selectedPreset.promotionStatus}</span>
+                                                <span className="font-mono text-slate-300">{selectedPreset.configHash}</span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-2">
                                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">Rounds Limit</label>
@@ -410,7 +419,9 @@ export default function ControlCenter() {
                             <div className="text-slate-300">
                                 {operatorStatus?.engineMode === 'replay' 
                                     ? `Backtesting fixture: ${operatorStatus.activeReplayFile?.split('/').pop()}`
-                                    : `Active Strategy: ${operatorStatus?.engineStatus?.strategy}`}
+                                    : operatorStatus?.activePreset
+                                        ? `Active Preset: ${operatorStatus.activePreset.label} (${operatorStatus.activePreset.configHash})`
+                                        : `Active Strategy: ${operatorStatus?.engineStatus?.strategy}`}
                             </div>
                         </div>
                     </div>
