@@ -14,6 +14,7 @@ export * from "./replay-resolution-adapter.ts";
 export * from "./replay-ticker-tracker.ts";
 export * from "./replay-orderbook.ts";
 export * from "./replay-runner.ts";
+export * from "./quant-monitor.ts";
 export * from "../telemetry/types.ts";
 export * from "../telemetry/bus.ts";
 export * from "../server/index.ts";

@@ -193,6 +193,49 @@ export interface LeadLagMonitor {
   subscribe(handler: (snapshot: LeadLagSnapshot) => void): () => void;
 }
 
+export type WhaleActivity = {
+  ts: number;
+  side: "buy" | "sell";
+  price: number;
+  shares: number;
+  notionalUsd: number;
+  maker?: string;
+};
+
+export type OrderFlowSnapshot = {
+  asset: BotAsset;
+  timestampMs: number;
+  /** Order Book Imbalance: (BidVol - AskVol) / (BidVol + AskVol) */
+  imbalanceUp: number | null;
+  imbalanceDown: number | null;
+  /** Cumulative Volume Delta (CVD) for recent windows */
+  cvd10s: { up: number; down: number };
+  cvd60s: { up: number; down: number };
+  /** Recent Whale activity */
+  recentWhales: WhaleActivity[];
+  /** High-level sentiment derived from flow */
+  sentiment: "bullish" | "bearish" | "neutral";
+};
+
+export interface OrderFlowMonitor {
+  latest(): OrderFlowSnapshot;
+  subscribe(handler: (snapshot: OrderFlowSnapshot) => void): () => void;
+}
+
+export type QuantSnapshot = {
+  asset: BotAsset;
+  timestampMs: number;
+  /** Annualized Realized Volatility (sigma) */
+  sigma: number | null;
+  /** Probability of finishing UP (0.0 - 1.0) */
+  probabilityUp: number | null;
+};
+
+export interface QuantMonitor {
+  latest(): QuantSnapshot;
+  subscribe(handler: (snapshot: QuantSnapshot) => void): () => void;
+}
+
 export function createEventClock(params: {
   sourceTimestampMs?: number | null;
   receivedAtMs?: number;

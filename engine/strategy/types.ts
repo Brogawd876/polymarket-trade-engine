@@ -10,6 +10,7 @@ import type {
   PredictiveFeedAdapter,
   PredictiveSignalAggregator,
   LeadLagMonitor,
+  OrderFlowMonitor,
   Clock,
 } from "../bot-core/data-sources.ts";
 
@@ -85,6 +86,8 @@ export type StrategyContext = {
     /** Tracks observed feed timing leadership across exchanges. */
     leadLag?: LeadLagMonitor;
   };
+  /** Tracks Polymarket Order Book Flow and Whale activity. */
+  orderFlow?: OrderFlowMonitor;
   /** Shared clock (real or virtual). Use this for all timers and Date.now(). */
   clock: Clock;
 };

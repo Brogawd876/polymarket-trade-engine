@@ -7,6 +7,8 @@ import {
   type ReconnectingWs 
 } from "../utils/reconnecting-ws.ts";
 
+import { TradeTapeTracker } from "./trade-tape.ts";
+
 const DEFAULT_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 
 type OrderLevel = { price: string; size: string };
@@ -38,6 +40,15 @@ type TickSizeChangeMessage = {
   new_tick_size: string;
 };
 
+type TradeMessage = {
+  event_type: "trades";
+  asset_id: string;
+  price: string;
+  size: string;
+  side: "buy" | "sell";
+  timestamp: string;
+};
+
 type LastTradePriceMessage = {
   event_type: "last_trade_price";
   asset_id: string;
@@ -58,9 +69,11 @@ export class OrderBook {
   protected feeRates = new Map<string, number>(); // tokenId -> feeRateBps
   private listeners = new Set<() => void>();
   private _isTerminallyBroken = false;
+  private _tradeTape?: TradeTapeTracker;
 
-  constructor(clock?: Clock) {
+  constructor(clock?: Clock, tradeTape?: TradeTapeTracker) {
     this._clock = clock ?? new RealClock();
+    this._tradeTape = tradeTape;
   }
 
   subscribe(clobTokenIds: string[]) {
@@ -81,7 +94,14 @@ export class OrderBook {
             assets_ids: this.assetIds,
           }),
         );
+        ws.send(
+          JSON.stringify({
+            type: "trades",
+            assets_ids: this.assetIds,
+          }),
+        );
       },
+
       onmessage: (event) => this.handleMessage(event),
       isTerminal: (event) => {
         // Code 1006 with no reason often happens on 403 Handshake rejection in some envs,
@@ -115,7 +135,13 @@ export class OrderBook {
 
   private handleMessage(event: MessageEvent) {
     if (!event.data) return;
-    const data = JSON.parse(event.data as string);
+    let data;
+    try {
+      data = JSON.parse(event.data as string);
+    } catch (e) {
+      console.warn(`[OrderBook] Received non-JSON message: ${event.data}`);
+      return;
+    }
 
     // Initial snapshot is an array of book messages
     if (Array.isArray(data)) {
@@ -128,14 +154,28 @@ export class OrderBook {
 
     if (data.event_type === "book") {
       this.applyBookSnapshot(data as BookMessage);
+      this._updateTapeImbalance();
     } else if (data.event_type === "price_change") {
       this.applyPriceChange(data as PriceChangeMessage);
+      this._updateTapeImbalance();
     } else if (data.event_type === "tick_size_change") {
       const msg = data as TickSizeChangeMessage;
       this.tickSizes.set(msg.asset_id, msg.new_tick_size);
     } else if (data.event_type === "last_trade_price") {
       const msg = data as LastTradePriceMessage;
       this.feeRates.set(msg.asset_id, parseFloat(msg.fee_rate_bps));
+      this._recordTapeTrade(msg);
+    } else if (data.event_type === "trades") {
+      const msg = data as TradeMessage;
+      if (this._tradeTape) {
+        this._tradeTape.recordTrade({
+          assetId: msg.asset_id,
+          price: parseFloat(msg.price),
+          size: parseFloat(msg.size),
+          side: msg.side,
+          ts: parseInt(msg.timestamp)
+        });
+      }
     }
     this.notify();
   }
@@ -347,6 +387,7 @@ export class OrderBook {
   }
 
   /** Order book depth table + net gain as an array of display lines */
+  /** Order book depth table + net gain as an array of display lines */
   getDisplayLines(): string[] {
     const { apiSymbol } = Env.getAssetConfig();
     if (this.assetIds.length < 2)
@@ -374,5 +415,42 @@ export class OrderBook {
         { upFee, downFee },
       ),
     ];
+  }
+
+  private _updateTapeImbalance() {
+    if (!this._tradeTape || this.assetIds.length < 2) return;
+    const up = this.books.get(this.assetIds[0]!);
+    const down = this.books.get(this.assetIds[1]!);
+    
+    const calculateImbalance = (book: AssetBook | undefined) => {
+      if (!book) return null;
+      const bidVol = book.bids.top(3).reduce((sum, [, size]) => sum + size, 0);
+      const askVol = book.asks.top(3).reduce((sum, [, size]) => sum + size, 0);
+      if (bidVol + askVol === 0) return 0;
+      return (bidVol - askVol) / (bidVol + askVol);
+    };
+
+    this._tradeTape.updateImbalance(calculateImbalance(up), calculateImbalance(down));
+  }
+
+  private _recordTapeTrade(msg: LastTradePriceMessage) {
+    if (!this._tradeTape) return;
+    // Polymarket last_trade_price doesn't include side, but price_change often follows.
+    // For now we'll mock side as "buy" if price >= bestAsk and "sell" if price <= bestBid.
+    const price = parseFloat(msg.price);
+    const bestAsk = this.bestAskPrice(msg.asset_id === this.assetIds[0] ? "UP" : "DOWN");
+    const bestBid = this.bestBidPrice(msg.asset_id === this.assetIds[0] ? "UP" : "DOWN");
+    
+    let side: "buy" | "sell" = "buy";
+    if (bestBid !== null && price <= bestBid) side = "sell";
+
+    this._tradeTape.recordTrade({
+      assetId: msg.asset_id,
+      price,
+      size: 0, // last_trade_price message doesn't include size in public feed! 
+               // Need to wait for user trades or refine with price_change deltas.
+      side,
+      ts: this._clock.nowMs()
+    });
   }
 }

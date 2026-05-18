@@ -13,6 +13,7 @@ import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
 import { Env } from "../utils/config.ts";
+import { digitalCallProbability } from "../utils/math.ts";
 import type { UserChannel } from "./user-channel.ts";
 import {
   type ResolutionSourceAdapter,
@@ -20,6 +21,8 @@ import {
   type PredictiveFeedAdapter,
   type PredictiveSignalAggregator,
   type LeadLagMonitor,
+  type OrderFlowMonitor,
+  type QuantMonitor,
   type RoundWindow,
   PolymarketVenueAdapter,
   AggregatedRiskGate,
@@ -106,6 +109,8 @@ type MarketLifecycleOptions = {
   coinbase?: PredictiveFeedAdapter;
   aggregator?: PredictiveSignalAggregator;
   leadLag?: LeadLagMonitor;
+  orderFlow?: OrderFlowMonitor;
+  quant?: QuantMonitor;
   venue?: VenueDataAdapter;
   riskGate?: RiskGate;
   clock?: Clock;
@@ -156,6 +161,8 @@ export class MarketLifecycle {
   private readonly _coinbase?: PredictiveFeedAdapter;
   private readonly _aggregator?: PredictiveSignalAggregator;
   private readonly _leadLag?: LeadLagMonitor;
+  private readonly _orderFlow?: OrderFlowMonitor;
+  private readonly _quant?: QuantMonitor;
   private readonly _venue: VenueDataAdapter;
   private readonly _riskGate: RiskGate;
   private readonly _feedReadinessTimeoutMs: number;
@@ -182,6 +189,8 @@ export class MarketLifecycle {
     this._coinbase = opts.coinbase;
     this._aggregator = opts.aggregator;
     this._leadLag = opts.leadLag;
+    this._orderFlow = opts.orderFlow;
+    this._quant = opts.quant;
     this._riskGate = opts.riskGate ?? new AggregatedRiskGate();
     this._feedReadinessTimeoutMs =
       opts.feedReadinessTimeoutMs ??
@@ -353,6 +362,9 @@ export class MarketLifecycle {
         const upAsk = this._orderBook.bestAskPrice("UP");
         const downBid = this._orderBook.bestBidPrice("DOWN");
         const downAsk = this._orderBook.bestAskPrice("DOWN");
+
+        const prob = this._quant?.latest().probabilityUp;
+        const sigma = this._quant?.latest().sigma;
 
         this._telemetry.push({
           ts: this._clock.nowMs(),
@@ -571,6 +583,8 @@ export class MarketLifecycle {
         aggregate: this._aggregator,
         leadLag: this._leadLag,
       },
+      orderFlow: this._orderFlow,
+      quant: this._quant,
       clock: this._clock,
     };
 
@@ -1030,11 +1044,13 @@ export class MarketLifecycle {
           const p = placed[i];
           const item = remaining[i]!;
           if (!p || !p.orderId) {
+            this._log(`[placement] Order failed: ${p?.errorMsg}`, "red");
             if (
               p?.errorMsg?.includes("not enough balance") &&
               this._clock.nowMs() < this.slotEndMs &&
               retryCount < maxRetries
             ) {
+
               // Parse actual balance from CLOB error and adjust shares
               const balMatch = p.errorMsg.match(
                 /balance:\s*(\d+).*?order amount:\s*(\d+)/,
@@ -1332,6 +1348,7 @@ export class MarketLifecycle {
       ].filter((event): event is NonNullable<typeof event> => event !== null),
       predictiveAggregate: this._aggregator?.latest() ?? null,
       leadLag: this._leadLag?.latest() ?? null,
+      orderFlow: this._orderFlow?.latest() ?? null,
       openExposureUsd: this._openExposureUsd(),
       sessionPnlUsd: this._pnl,
       clobTokenIds: this._clobTokenIds ?? undefined,

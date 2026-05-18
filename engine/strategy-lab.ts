@@ -2,6 +2,7 @@ import { EarlyBird } from "./early-bird.ts";
 import { ReplayRunner, VirtualClock, type TelemetryEvent, type TelemetrySink } from "./bot-core/index.ts";
 import { listStrategyVariants, resolveStrategySelection, type StrategyVariant } from "./strategy/index.ts";
 import { validateReplayFixture } from "./server/helpers/replay-fixtures.ts";
+import { calculateBrierScore, calculateLogLoss } from "../utils/math.ts";
 
 export type StrategyLabBatchState = "queued" | "running" | "completed" | "failed" | "canceled";
 export type StrategyLabRunStatus = "queued" | "running" | "completed" | "failed" | "canceled";
@@ -35,6 +36,8 @@ export type StrategyLabRunResult = {
     settlements: number;
   };
   verdict: StrategyLabVerdict | null;
+  brierScore: number | null;
+  logLoss: number | null;
   error?: string;
 };
 
@@ -60,6 +63,8 @@ export type StrategyLabVariantSummary = {
   worstPnl: number | null;
   blocked: number;
   problems: number;
+  brierScore: number | null;
+  logLoss: number | null;
   score: number;
 };
 
@@ -145,11 +150,20 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
     status: "completed",
     pnl: 0,
     verdict: "flat",
+    brierScore: null,
+    logLoss: null,
   };
+
+  const forecasts: number[] = [];
 
   for (const event of events) {
     switch (event.type) {
       case "SYSTEM_BOOT":
+        break;
+      case "DECISION_FEATURE_SNAPSHOT":
+        if (event.payload.event === "consider" && event.payload.quant.probabilityUp !== null) {
+          forecasts.push(event.payload.quant.probabilityUp);
+        }
         break;
       case "ORDER_INTENT":
         result.slug = event.payload.slug;
@@ -182,6 +196,14 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
         result.pnl = event.payload.pnl;
         break;
     }
+  }
+
+  // Calculate probabilistic scoring (Brier/LogLoss) if we have forecasts and an outcome
+  if (forecasts.length > 0 && result.direction !== null) {
+    const outcome = result.direction === "UP" ? 1 : 0;
+    const outcomes = new Array(forecasts.length).fill(outcome);
+    result.brierScore = calculateBrierScore(forecasts, outcomes);
+    result.logLoss = calculateLogLoss(forecasts, outcomes);
   }
 
   const pnl = result.pnl ?? 0;
@@ -241,6 +263,10 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
       const canceled = items.filter(run => run.status === "canceled").length;
       const blocked = items.reduce((sum, run) => sum + run.counts.blocked, 0);
       const problems = items.reduce((sum, run) => sum + run.counts.problems, 0);
+      const brierRuns = completed.filter(run => run.brierScore !== null);
+      const avgBrier = brierRuns.length > 0 ? brierRuns.reduce((sum, run) => sum + run.brierScore!, 0) / brierRuns.length : null;
+      const avgLogLoss = brierRuns.length > 0 ? brierRuns.reduce((sum, run) => sum + run.logLoss!, 0) / brierRuns.length : null;
+
       const tradeRate = completed.length > 0 ? tradeCount / completed.length : null;
       const score = scoreStrategy({
         totalPnl,
@@ -254,6 +280,7 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
         problems,
         worstPnl: pnlRuns.length > 0 ? Math.min(...pnlRuns.map(run => run.pnl)) : null,
         tradeRate,
+        brierScore: avgBrier,
       });
 
       return {
@@ -278,6 +305,8 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
         worstPnl: pnlRuns.length > 0 ? Math.min(...pnlRuns.map(run => run.pnl)) : null,
         blocked,
         problems,
+        brierScore: avgBrier !== null ? parseFloat(avgBrier.toFixed(6)) : null,
+        logLoss: avgLogLoss !== null ? parseFloat(avgLogLoss.toFixed(6)) : null,
         score,
       };
     })
@@ -296,14 +325,23 @@ function scoreStrategy(input: {
   problems: number;
   worstPnl: number | null;
   tradeRate: number | null;
+  brierScore: number | null;
 }): number {
   const winRate = input.completed > 0 ? input.wins / input.completed : 0;
   const tradeRate = input.tradeRate ?? 0;
   const worstPenalty = input.worstPnl != null && input.worstPnl < 0 ? Math.abs(input.worstPnl) * 1.5 : 0;
+  
+  // Probabilistic calibration score:
+  // 0.25 is no-skill (predicting 0.5 for all). 
+  // We reward strategies that are better than 0.25 and penalize those worse.
+  const brierScore = input.brierScore ?? 0.25;
+  const calibrationBonus = (0.25 - brierScore) * 60; // Max bonus +15 at Brier=0
+
   const score =
     input.totalPnl * 10 +
     winRate * 8 +
-    tradeRate * 3 -
+    tradeRate * 3 +
+    calibrationBonus -
     input.losses * 2 -
     input.noTrades * 0.4 -
     input.failed * 8 -
@@ -490,6 +528,9 @@ export class StrategyLabBatchManager {
 
         const runner = new ReplayRunner(reader, bot, clock, sink);
         await runner.run();
+
+        // Yield to microtasks to ensure all telemetry from async placements is flushed
+        await new Promise(resolve => setTimeout(resolve, 0));
 
         if (run.status !== "canceled") {
           Object.assign(run, deriveResultFromEvents(run, sink.events));

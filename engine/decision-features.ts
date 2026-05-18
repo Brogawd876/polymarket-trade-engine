@@ -34,6 +34,13 @@ export type DecisionFeatureSnapshot = {
     targetLiquidity: number | null;
     slippageEstimatePct: number | null;
   };
+  flow: {
+    imbalance: number | null;
+    cvd10s: number | null;
+    cvd60s: number | null;
+    whaleCount: number;
+    sentiment: string | null;
+  };
   feeds: {
     predictivePrice: number | null;
     predictiveDisagreement: boolean | null;
@@ -42,6 +49,10 @@ export type DecisionFeatureSnapshot = {
     resolutionFreshnessMs: number | null;
     venueFreshnessMs: number | null;
     predictiveFreshnessMs: number | null;
+  };
+  quant: {
+    probabilityUp: number | null;
+    sigma: number | null;
   };
   risk: {
     approved: boolean | null;
@@ -103,7 +114,8 @@ export function createDecisionFeatureSnapshot(params: {
   const openPrice = resolution && "priceToBeat" in resolution ? resolution.priceToBeat ?? null : null;
   const gap = currentPrice != null && openPrice != null ? parseFloat((currentPrice - openPrice).toFixed(4)) : null;
   const direction = gap == null ? null : gap > 0 ? "UP" : gap < 0 ? "DOWN" : "TIE";
-  const predictiveAges = predictive ? Object.values(predictive.feeds).map(feed => feed.latestEventAgeMs) : [];
+  const predictiveAges = predictive ? Object.values(predictive.feeds).map(feed => feed.latestEventAgeMs) : [];  
+  const flow = params.snapshot.orderFlow;
 
   return {
     schemaVersion: 1,
@@ -133,6 +145,13 @@ export function createDecisionFeatureSnapshot(params: {
       side: side ?? null,
       ...book,
     },
+    flow: {
+      imbalance: side === "UP" ? flow?.imbalanceUp ?? null : side === "DOWN" ? flow?.imbalanceDown ?? null : null,
+      cvd10s: side === "UP" ? (flow?.cvd10s.up ?? 0) - (flow?.cvd10s.down ?? 0) : side === "DOWN" ? (flow?.cvd10s.down ?? 0) - (flow?.cvd10s.up ?? 0) : null,
+      cvd60s: side === "UP" ? (flow?.cvd60s.up ?? 0) - (flow?.cvd60s.down ?? 0) : side === "DOWN" ? (flow?.cvd60s.down ?? 0) - (flow?.cvd60s.up ?? 0) : null,
+      whaleCount: flow?.recentWhales.length ?? 0,
+      sentiment: flow?.sentiment ?? "neutral",
+    },
     feeds: {
       predictivePrice: predictive?.price ?? null,
       predictiveDisagreement: predictive?.disagreement ?? null,
@@ -142,7 +161,12 @@ export function createDecisionFeatureSnapshot(params: {
       venueFreshnessMs: params.snapshot.venue?.freshnessMs ?? null,
       predictiveFreshnessMs: predictiveAges.length > 0 ? Math.max(...predictiveAges) : null,
     },
+    quant: {
+      probabilityUp: params.snapshot.probabilityUp ?? null,
+      sigma: params.snapshot.sigma ?? null,
+    },
     risk: {
+
       approved: params.decision?.approved ?? null,
       reasons: params.decision?.reasons ?? [],
     },

@@ -240,7 +240,7 @@ export class ControlServer {
             }
         }
 
-        if ((url.pathname === "/api/operator/tiny-live/unlock" || url.pathname === "/api/operator/operator/tiny-live/unlock") && req.method === "POST") {
+        if (url.pathname === "/api/operator/tiny-live/unlock" && req.method === "POST") {
             try {
                 const result = await this._liveReadiness.unlockTinyLive(await req.json() as any);
                 return Response.json(result, { status: result.success ? 200 : 400, headers: responseHeaders });

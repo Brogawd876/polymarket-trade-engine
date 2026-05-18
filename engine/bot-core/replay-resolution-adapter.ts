@@ -15,8 +15,11 @@ export class ReplayResolutionAdapter implements ResolutionSourceAdapter {
   private asset: BotAsset = "btc";
 
   constructor(reader: ReplayLogReader) {
+    this.reader = reader;
     reader.subscribe((evt) => this.handleEvent(evt));
   }
+
+  private reader: ReplayLogReader;
 
   isReady(): boolean {
     return this._latest !== null;
@@ -62,6 +65,7 @@ export class ReplayResolutionAdapter implements ResolutionSourceAdapter {
         quality: "live",
         freshnessMs: 0,
         lagMs: 0,
+        round: this.reader.round ?? undefined
       };
 
       this._latest = resEvent;
@@ -82,10 +86,12 @@ export class ReplayResolutionAdapter implements ResolutionSourceAdapter {
         asset: this.asset,
         kind: "live",
         price: evt.assetPrice,
+        priceToBeat: this._latest?.priceToBeat,
         clock,
         quality: "live",
         freshnessMs: 0,
         lagMs: 0,
+        round: this.reader.round ?? undefined
       };
 
       this._latest = resEvent;

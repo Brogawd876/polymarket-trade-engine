@@ -3,6 +3,7 @@ import {
   type LeadLagSnapshot,
   type PredictiveAggregateSnapshot,
   type VenueOrderBookEvent,
+  type OrderFlowSnapshot,
 } from "./data-sources.ts";
 import { Env } from "../../utils/config.ts";
 import type { PlaceOrderIntent, StrategyIntent } from "./strategy-intent.ts";
@@ -30,6 +31,9 @@ export type RiskSnapshot = {
   predictiveFeeds: BotFeedEvent[];
   predictiveAggregate?: PredictiveAggregateSnapshot | null;
   leadLag?: LeadLagSnapshot | null;
+  orderFlow?: OrderFlowSnapshot | null;
+  probabilityUp?: number | null;
+  sigma?: number | null;
   openExposureUsd: number;
   sessionPnlUsd: number;
   clobTokenIds?: [string, string];
@@ -140,12 +144,14 @@ export class StaticRiskGate implements RiskGate {
       reasons.push(`${label} feed quality is ${event.quality}`);
     }
     if (
+      snapshot.productionEnabled &&
       event.freshnessMs !== null &&
       event.freshnessMs > this.limits.maxFeedFreshnessMs
     ) {
       reasons.push(`${label} feed is stale by freshness threshold`);
     }
     if (
+      snapshot.productionEnabled &&
       snapshot.nowMs - event.clock.receivedAtMs >
       this.limits.maxFeedFreshnessMs
     ) {
@@ -208,7 +214,9 @@ export class ExecutionQualityGate implements RiskGate {
 
     // 1. Stale Quote Check (Venue-specific strict threshold)
     const venueAge = snapshot.nowMs - venue.clock.receivedAtMs;
-    if (venueAge > this.limits.maxVenueAgeMs) {
+    // During sim/replay (productionEnabled=false), we ignore absolute age staleness
+    // because events may be sparse or time may have jumped in virtual time.
+    if (snapshot.productionEnabled && venueAge > this.limits.maxVenueAgeMs) {
       reasons.push(
         `venue quote is stale (${venueAge}ms > ${this.limits.maxVenueAgeMs}ms limit)`,
       );

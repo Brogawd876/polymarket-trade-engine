@@ -7,8 +7,8 @@ export class ReplayOrderBook extends OrderBook {
   private lastUp: any = null;
   private lastDown: any = null;
 
-  constructor(reader: ReplayLogReader, clock: Clock) {
-    super(clock);
+  constructor(reader: ReplayLogReader, clock: Clock, tradeTape?: any) {
+    super(clock, tradeTape);
     reader.subscribe((evt) => this.handleEvent(evt));
   }
 
