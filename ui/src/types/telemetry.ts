@@ -71,6 +71,17 @@ export interface OrderIntentSnapshot {
   orderIds?: string[];
 }
 
+export interface DecisionFeatureSnapshot {
+  schemaVersion: 1;
+  event: "consider" | "blocked" | "placed" | "filled" | "failed" | "settled" | "skipped";
+  ts: number;
+  slug: string;
+  strategy: { id: string; version: string; configHash: string; gitCommit: string };
+  risk: { approved: boolean | null; reasons: string[] };
+  feeds: { predictiveDisagreement: boolean | null; divergencePct: number | null; leadLagConfidence: string | null };
+  orderbook: { side: "UP" | "DOWN" | null; bid: number | null; ask: number | null; spread: number | null; targetLiquidity: number | null; slippageEstimatePct: number | null };
+}
+
 export type TelemetryEvent = {
     ts: number;
 } & (
@@ -87,6 +98,7 @@ export type TelemetryEvent = {
     | { type: "ROUND_RESOLUTION"; payload: { slug: string; openPrice: number; closePrice: number; direction: "UP" | "DOWN" } }
     | { type: "SESSION_PNL"; payload: { pnl: number; loss: number } }
     | { type: "REPLAY_PROGRESS"; payload: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } }
+    | { type: "DECISION_FEATURE_SNAPSHOT"; payload: DecisionFeatureSnapshot }
 );
 
 export type EngineStatus = {

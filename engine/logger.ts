@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import type { DecisionFeatureSnapshot } from "./decision-features.ts";
 
 type LogEntry =
   | {
@@ -20,6 +21,7 @@ type LogEntry =
       reason?: string;
     }
   | { type: "info"; msg: string; reason?: string }
+  | { type: "decision_feature"; snapshot: DecisionFeatureSnapshot }
   | {
       type: "resolution";
       direction: "UP" | "DOWN";

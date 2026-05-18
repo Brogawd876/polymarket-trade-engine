@@ -50,6 +50,7 @@ export type EarlyBirdRuntimeOptions = {
   clock?: Clock;
   persistState?: boolean;
   telemetry?: TelemetrySink;
+  strategyConfigOverride?: Record<string, unknown>;
 };
 
 export type EngineStatus = {
@@ -118,7 +119,7 @@ export class EarlyBird {
     const resolvedStrategy = resolveStrategySelection(strategyName ?? DEFAULT_STRATEGY);
     this._strategyName = resolvedStrategy.selection;
     this._strategy = resolvedStrategy.strategy;
-    this._strategyConfig = resolvedStrategy.config;
+    this._strategyConfig = { ...resolvedStrategy.config, ...(runtime.strategyConfigOverride ?? {}) };
     this._slotOffset = slotOffset;
     this._alwaysLog = alwaysLog;
     this._minSessionPnl = parseFloat(process.env.MAX_SESSION_LOSS ?? "3");

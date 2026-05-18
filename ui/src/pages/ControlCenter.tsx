@@ -33,11 +33,21 @@ type StrategyVariant = {
     paperEligible: boolean;
 };
 
+type StrategyPreset = {
+    id: string;
+    moduleId: string;
+    label: string;
+    configHash: string;
+    riskProfile: string;
+    promotionStatus: string;
+};
+
 export default function ControlCenter() {
     const operatorStatus = useStore(state => state.operatorStatus);
     const isConnected = useStore(state => state.isConnected);
     const [fixtures, setFixtures] = useState<ReplayFixture[]>([]);
     const [strategyVariants, setStrategyVariants] = useState<StrategyVariant[]>([]);
+    const [strategyPresets, setStrategyPresets] = useState<StrategyPreset[]>([]);
     const [selectedReplay, setSelectedReplay] = useState<string>('');
     const [simRounds, setSimRounds] = useState<number>(0);
     const [strategy, setStrategy] = useState<string>('simulation');
@@ -79,6 +89,18 @@ export default function ControlCenter() {
                 }
             })
             .catch(err => console.error("Failed to fetch strategy variants", err));
+
+        fetch(`${API_BASE}/strategy/presets`)
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data.presets)) {
+                    setStrategyPresets(data.presets);
+                    if (data.presets.some((preset: StrategyPreset) => preset.id === strategy)) return;
+                    const paper = data.presets.find((preset: StrategyPreset) => preset.riskProfile === 'paper');
+                    if (paper) setStrategy(paper.id);
+                }
+            })
+            .catch(err => console.error("Failed to fetch strategy presets", err));
     }, []);
 
     const handleStartSim = async () => {
@@ -88,6 +110,7 @@ export default function ControlCenter() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     strategy,
+                    presetId: strategyPresets.some(preset => preset.id === strategy) ? strategy : undefined,
                     rounds: simRounds > 0 ? simRounds : undefined
                 })
             });
@@ -279,19 +302,24 @@ export default function ControlCenter() {
                         <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">Strategy</label>
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">Strategy Preset</label>
                                     <select
                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
                                         value={strategy}
                                         onChange={e => setStrategy(e.target.value)}
                                         disabled={isRunning || isStopping}
                                     >
-                                        {strategyVariants.map(variant => (
+                                        {strategyPresets.map(preset => (
+                                            <option key={preset.id} value={preset.id}>
+                                                {preset.label} ({preset.riskProfile}, {preset.configHash})
+                                            </option>
+                                        ))}
+                                        {strategyPresets.length === 0 && strategyVariants.map(variant => (
                                             <option key={variant.id} value={variant.id}>
                                                 {variant.label}{variant.paperEligible ? '' : ' (replay tuning)'}
                                             </option>
                                         ))}
-                                        {strategyVariants.length === 0 && <option value="simulation">simulation</option>}
+                                        {strategyPresets.length === 0 && strategyVariants.length === 0 && <option value="simulation">simulation</option>}
                                     </select>
                                 </div>
                                 <div className="space-y-2">

@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Activity, BarChart2, Settings, FileText, PlayCircle } from 'lucide-react';
+import { Activity, BarChart2, Settings, FileText, PlayCircle, ShieldCheck } from 'lucide-react';
 import { useTelemetry } from '../../hooks/useTelemetry';
 import { useStore } from '../../store';
 
@@ -14,6 +14,7 @@ export function AppLayout() {
         { path: '/controls', label: 'Control Center', icon: Settings },
         { path: '/replay', label: 'Replay Lab', icon: PlayCircle },
         { path: '/strategy', label: 'Strategy Lab', icon: BarChart2 },
+        { path: '/readiness', label: 'Live Readiness', icon: ShieldCheck },
         { path: '/analytics', label: 'Analytics', icon: BarChart2 },
         { path: '/logs', label: 'Diagnostics', icon: FileText },
         { path: '/settings', label: 'Settings', icon: Settings },

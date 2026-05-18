@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TelemetryEvent, FeedQuality, PredictiveAggregateSnapshot, LeadLagSnapshot, OrderIntentSnapshot } from '../types/telemetry';
+import type { TelemetryEvent, FeedQuality, PredictiveAggregateSnapshot, LeadLagSnapshot, OrderIntentSnapshot, DecisionFeatureSnapshot } from '../types/telemetry';
 
 interface FeedState {
     status: "connected" | "stale" | "error" | "forbidden";
@@ -98,6 +98,7 @@ export interface AppState {
     roundPnl: Record<string, number>;
     roundResolutions: Record<string, RoundResolution>;
     replayProgress: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } | null;
+    decisionSnapshots: DecisionFeatureSnapshot[];
     
     // Chart Series (derived from events)
     priceHistory: Record<string, ChartDataPoint[]>;
@@ -137,9 +138,10 @@ export interface AppState {
     roundPnl: {},
     roundResolutions: {},
     replayProgress: null,
+    decisionSnapshots: [],
     priceHistory: {},
 
-    clearEvents: () => set({ eventTimeline: [], executionRows: [], priceHistory: {} }),
+    clearEvents: () => set({ eventTimeline: [], executionRows: [], priceHistory: {}, decisionSnapshots: [] }),
 
     clearAllTelemetry: () => set({
         bootInfo: null,
@@ -155,6 +157,7 @@ export interface AppState {
         roundPnl: {},
         roundResolutions: {},
         replayProgress: null,
+        decisionSnapshots: [],
         priceHistory: {},
     }),
 
@@ -360,6 +363,9 @@ export interface AppState {
                 break;
             case "REPLAY_PROGRESS":
                 nextState.replayProgress = event.payload;
+                break;
+            case "DECISION_FEATURE_SNAPSHOT":
+                nextState.decisionSnapshots = [event.payload, ...state.decisionSnapshots].slice(0, 100);
                 break;
         }
 

@@ -36,7 +36,7 @@ export class SessionManager {
     };
   }
 
-  async startSimulation(config: { strategy: string; rounds?: number; alwaysLog?: boolean; maxSessionLoss?: number }): Promise<void> {
+  async startSimulation(config: { strategy: string; rounds?: number; alwaysLog?: boolean; maxSessionLoss?: number; strategyConfigOverride?: Record<string, unknown> }): Promise<void> {
     if (this._sessionState === "running" || this._sessionState === "starting") {
       throw new Error("Session is already active");
     }
@@ -61,7 +61,8 @@ export class SessionManager {
         {
           clock,
           persistState: true,
-          telemetry: this.telemetryBus
+          telemetry: this.telemetryBus,
+          strategyConfigOverride: config.strategyConfigOverride,
         }
       );
       

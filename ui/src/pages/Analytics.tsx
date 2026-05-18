@@ -28,6 +28,27 @@ export default function Analytics() {
         [runs, strategy]
     );
 
+    const decisionStats = useMemo(() => {
+        const features = filteredRuns.flatMap(run => run.raw.filter(entry => entry.type === 'decision_feature').map(entry => entry.snapshot));
+        const blocked = features.filter(snapshot => snapshot?.event === 'blocked').length;
+        const placed = features.filter(snapshot => snapshot?.event === 'placed').length;
+        const feedDisagreements = features.filter(snapshot => snapshot?.feeds?.predictiveDisagreement === true).length;
+        const reasons = new Map<string, number>();
+        for (const snapshot of features) {
+            for (const reason of snapshot?.risk?.reasons ?? []) {
+                if (reason === 'approved') continue;
+                reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+            }
+        }
+        return {
+            total: features.length,
+            blocked,
+            placed,
+            feedDisagreements,
+            topReasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
+        };
+    }, [filteredRuns]);
+
     return (
         <div className="p-6 h-full flex flex-col overflow-y-auto">
             <header className="mb-6 flex justify-between items-end">
@@ -125,6 +146,45 @@ export default function Analytics() {
                             <h3 className="text-slate-300 font-medium">Performance Charts</h3>
                             <p className="text-slate-500 text-sm max-w-xs mt-2">Charts from legacy analysis are being integrated with Tailwind & Lightweight Charts.</p>
                          </div>
+                    </div>
+                    <div className="bg-slate-800/40 rounded-xl border border-slate-700/50 p-5">
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <h2 className="text-sm font-semibold text-slate-300">Decision Features</h2>
+                                <p className="text-xs text-slate-500 mt-1">Canonical strategy/risk snapshots captured during replay and paper sessions</p>
+                            </div>
+                            <span className="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full uppercase">
+                                {decisionStats.total} snapshots
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+                                <div className="text-[10px] text-slate-500 uppercase font-bold">Placed</div>
+                                <div className="text-xl font-black text-emerald-300">{decisionStats.placed}</div>
+                            </div>
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+                                <div className="text-[10px] text-slate-500 uppercase font-bold">Blocked</div>
+                                <div className="text-xl font-black text-red-300">{decisionStats.blocked}</div>
+                            </div>
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+                                <div className="text-[10px] text-slate-500 uppercase font-bold">Feed Disagree</div>
+                                <div className="text-xl font-black text-amber-300">{decisionStats.feedDisagreements}</div>
+                            </div>
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+                                <div className="text-[10px] text-slate-500 uppercase font-bold">Tradability</div>
+                                <div className="text-xl font-black text-blue-300">{decisionStats.total ? Math.round((decisionStats.placed / decisionStats.total) * 100) : 0}%</div>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            {decisionStats.topReasons.length === 0 ? (
+                                <div className="text-xs text-slate-500 italic">No blocked decision reasons captured yet.</div>
+                            ) : decisionStats.topReasons.map(([reason, count]) => (
+                                <div key={reason} className="flex justify-between gap-4 text-xs border-b border-slate-700/50 pb-2">
+                                    <span className="text-slate-300">{reason}</span>
+                                    <span className="text-slate-500 font-mono">{count}</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
 

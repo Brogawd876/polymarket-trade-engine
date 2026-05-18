@@ -4,6 +4,7 @@ import { LiveMonitor } from './components/LiveMonitor/LiveMonitor';
 import ControlCenter from './pages/ControlCenter';
 import ReplayLab from './pages/ReplayLab';
 import StrategyLab from './pages/StrategyLab';
+import LiveReadiness from './pages/LiveReadiness';
 
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
@@ -18,6 +19,7 @@ export function App() {
                     <Route path="controls" element={<ControlCenter />} />
                     <Route path="replay" element={<ReplayLab />} />
                     <Route path="strategy" element={<StrategyLab />} />
+                    <Route path="readiness" element={<LiveReadiness />} />
                     <Route path="analytics" element={<Analytics />} />     
                     <Route path="logs" element={<Logs />} />
                     <Route path="settings" element={<Settings />} />    

@@ -35,6 +35,7 @@ import {
   type TelemetrySink, 
   NullTelemetrySink 
 } from "./telemetry/index.ts";
+import { createDecisionFeatureSnapshot } from "./decision-features.ts";
 
 const DEFAULT_FEED_READINESS_TIMEOUT_MS = 5000;
 const DEFAULT_FEED_READINESS_POLL_MS = 100;
@@ -958,6 +959,12 @@ export class MarketLifecycle {
             }
           });
 
+          this._emitDecisionFeature(decision.approved ? "consider" : "blocked", {
+            snapshot: this._createRiskSnapshot(),
+            intent,
+            decision,
+          });
+
           if (decision.approved) return true;
 
           const reason = decision.reasons.join("; ");
@@ -1195,6 +1202,7 @@ export class MarketLifecycle {
       error?: string;
     } = {},
   ): void {
+    const intent = opts.intentId ? this._createSyntheticIntent(order, opts.intentId) : undefined;
     this._telemetry.push({
       ts: this._clock.nowMs(),
       type: "ORDER_LIFECYCLE",
@@ -1210,6 +1218,72 @@ export class MarketLifecycle {
         error: opts.error,
       },
     });
+    this._emitDecisionFeature(status === "filled" ? "filled" : status === "placed" ? "placed" : status === "failed" ? "failed" : "consider", {
+      snapshot: this._createRiskSnapshot(),
+      intent,
+      orderStatus: status,
+      orderId: opts.orderId,
+    });
+  }
+
+  private _createSyntheticIntent(
+    order: {
+      action: "buy" | "sell";
+      tokenId: string;
+      price: number;
+      shares: number;
+    },
+    intentId: string,
+  ): StrategyIntent {
+    return {
+      id: intentId,
+      slug: this.slug,
+      strategyName: this._strategyName,
+      createdAtMs: this._clock.nowMs(),
+      reason: "order lifecycle update",
+      triggerEventIds: [],
+      round: this._roundWindow(),
+      action: order.action,
+      side: this._side(order.tokenId),
+      tokenId: order.tokenId,
+      price: order.price,
+      shares: order.shares,
+      expireAtMs: this.slotEndMs,
+    };
+  }
+
+  private _emitDecisionFeature(
+    event: "consider" | "blocked" | "placed" | "filled" | "failed" | "settled" | "skipped",
+    params: {
+      snapshot: RiskSnapshot;
+      intent?: StrategyIntent;
+      decision?: ReturnType<RiskGate["evaluate"]>;
+      orderStatus?: string;
+      orderId?: string;
+      pnl?: number;
+      resolutionDirection?: "UP" | "DOWN";
+    },
+  ): void {
+    const snapshot = createDecisionFeatureSnapshot({
+      event,
+      ts: this._clock.nowMs(),
+      slug: this.slug,
+      strategyId: this._strategyName,
+      strategyConfig: this._strategyConfig,
+      snapshot: params.snapshot,
+      intent: params.intent,
+      decision: params.decision,
+      orderStatus: params.orderStatus,
+      orderId: params.orderId,
+      pnl: params.pnl,
+      resolutionDirection: params.resolutionDirection,
+    });
+    this._telemetry.push({
+      ts: this._clock.nowMs(),
+      type: "DECISION_FEATURE_SNAPSHOT",
+      payload: snapshot,
+    });
+    this._marketLogger.log({ type: "decision_feature", snapshot });
   }
 
   private _roundWindow(): RoundWindow {
@@ -1516,6 +1590,11 @@ export class MarketLifecycle {
           closePrice: data.closePrice,
           direction: resolvedUp ? "UP" : "DOWN",
         },
+      });
+      this._emitDecisionFeature("settled", {
+        snapshot: this._createRiskSnapshot(),
+        pnl: this._pnl,
+        resolutionDirection: resolvedUp ? "UP" : "DOWN",
       });
     } else {
       this._pnl = parseFloat(pnl.toFixed(4));

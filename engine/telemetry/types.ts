@@ -5,6 +5,7 @@ import type {
   LeadLagSnapshot,
 } from "../bot-core/data-sources.ts";
 import type { StrategyIntent } from "../bot-core/strategy-intent.ts";
+import type { DecisionFeatureSnapshot } from "../decision-features.ts";
 
 export type TelemetryEvent = {
   ts: number; // Engine's nowMs()
@@ -22,6 +23,7 @@ export type TelemetryEvent = {
   | { type: "ROUND_RESOLUTION"; payload: { slug: string; openPrice: number; closePrice: number; direction: "UP" | "DOWN" } }
   | { type: "SESSION_PNL"; payload: { pnl: number; loss: number } }
   | { type: "REPLAY_PROGRESS"; payload: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } }
+  | { type: "DECISION_FEATURE_SNAPSHOT"; payload: DecisionFeatureSnapshot }
 );
 
 export interface TelemetrySink {

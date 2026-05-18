@@ -6,6 +6,7 @@ import * as path from "path";
 import { validateReplayFixture } from "./helpers/replay-fixtures.ts";
 import { StrategyLabBatchManager } from "../strategy-lab.ts";
 import { Env } from "../../utils/config.ts";
+import { LiveReadinessManager } from "../live-readiness.ts";
 
 export type ControlServerOptions = {
   port?: number;
@@ -23,6 +24,7 @@ export class ControlServer {
   private _telemetryBus: TelemetryBus;
   private _sessionManager: SessionManager;
   private _strategyLab: StrategyLabBatchManager;
+  private _liveReadiness: LiveReadinessManager;
   private _port: number;
   private _allowedOrigins: Set<string>;
 
@@ -31,6 +33,7 @@ export class ControlServer {
     this._telemetryBus = opts.telemetryBus;
     this._sessionManager = opts.sessionManager;
     this._strategyLab = new StrategyLabBatchManager();
+    this._liveReadiness = new LiveReadinessManager(this._strategyLab);
     this._allowedOrigins = new Set(opts.allowedOrigins ?? [
       "http://localhost:3000",
       "http://127.0.0.1:3000",
@@ -98,6 +101,13 @@ export class ControlServer {
         if (url.pathname === "/api/operator/simulation/start" && req.method === "POST") {
             try {
                 const config = await req.json() as any;
+                if (config.presetId) {
+                    const presets = await this._liveReadiness.listPresets();
+                    const preset = presets.find(item => item.id === config.presetId);
+                    if (!preset) throw new Error("Strategy preset not found");
+                    config.strategy = preset.moduleId;
+                    config.strategyConfigOverride = preset.config;
+                }
                 await this._sessionManager.startSimulation(config);
                 return Response.json({ success: true }, { headers: responseHeaders });
             } catch (e: any) {
@@ -149,6 +159,67 @@ export class ControlServer {
 
         if (url.pathname === "/api/operator/strategy-lab/strategies") {
             return Response.json({ strategies: this._strategyLab.listStrategies(), variants: this._strategyLab.listVariants() }, { headers: responseHeaders });
+        }
+
+        if (url.pathname === "/api/operator/strategy/modules" && req.method === "GET") {
+            return Response.json({ modules: await this._liveReadiness.listModules() }, { headers: responseHeaders });
+        }
+
+        if (url.pathname === "/api/operator/strategy/modules/validate" && req.method === "POST") {
+            try {
+                const result = await this._liveReadiness.validateModule(await req.json() as any);
+                return Response.json(result, { status: result.success ? 200 : 400, headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, errors: [e.message] }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if (url.pathname === "/api/operator/strategy/presets" && req.method === "GET") {
+            return Response.json({ presets: await this._liveReadiness.listPresets() }, { headers: responseHeaders });
+        }
+
+        if (url.pathname === "/api/operator/strategy/presets" && req.method === "POST") {
+            try {
+                const preset = await this._liveReadiness.savePreset(await req.json() as any);
+                return Response.json({ success: true, preset }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if (url.pathname === "/api/operator/strategy-lab/experiments" && req.method === "POST") {
+            try {
+                const experiment = await this._liveReadiness.createExperiment(await req.json() as any);
+                return Response.json({ success: true, experimentId: experiment.id, experiment }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        const experimentMatch = url.pathname.match(/^\/api\/operator\/strategy-lab\/experiments\/([^/]+)$/);
+        if (experimentMatch && req.method === "GET") {
+            const experiment = this._liveReadiness.getExperiment(experimentMatch[1]!);
+            if (!experiment) return Response.json({ success: false, error: "Experiment not found" }, { status: 404, headers: responseHeaders });
+            return Response.json({ success: true, experiment }, { headers: responseHeaders });
+        }
+
+        const applyRecommendationMatch = url.pathname.match(/^\/api\/operator\/paper-tuning\/recommendations\/([^/]+)\/apply$/);
+        if (applyRecommendationMatch && req.method === "POST") {
+            try {
+                const preset = await this._liveReadiness.applyRecommendation(applyRecommendationMatch[1]!);
+                return Response.json({ success: true, preset }, { headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
+        }
+
+        if ((url.pathname === "/api/operator/tiny-live/unlock" || url.pathname === "/api/operator/operator/tiny-live/unlock") && req.method === "POST") {
+            try {
+                const result = await this._liveReadiness.unlockTinyLive(await req.json() as any);
+                return Response.json(result, { status: result.success ? 200 : 400, headers: responseHeaders });
+            } catch (e: any) {
+                return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
+            }
         }
 
         if (url.pathname === "/api/operator/strategy-lab/batches" && req.method === "POST") {
