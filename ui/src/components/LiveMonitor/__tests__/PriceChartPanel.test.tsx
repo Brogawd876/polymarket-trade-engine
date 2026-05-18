@@ -47,6 +47,8 @@ describe('PriceChartPanel', () => {
                     bid: 0.51,
                     ask: 0.52,
                     priceToBeat: 78166.35,
+                    probabilityUp: null,
+                    sigma: null,
                     lastUpdated: 1778978460000,
                 },
             },

@@ -384,8 +384,11 @@ export class MarketLifecycle {
             upAsk,
             downBid,
             downAsk,
-          }
-        });
+            probabilityUp: prob ?? null,
+            sigma: sigma ?? null,
+            },
+            });
+
         
         if (this._aggregator) {
             this._telemetry.push({

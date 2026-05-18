@@ -207,12 +207,15 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
   }
 
   const pnl = result.pnl ?? 0;
+
+  const wasPredictiveWin = (result.direction === "UP" && result.raw.some(e => e.type === "order" && e.payload?.side === "UP" && e.payload?.status === "filled")) ||
+                           (result.direction === "DOWN" && result.raw.some(e => e.type === "order" && e.payload?.side === "DOWN" && e.payload?.status === "filled"));
+
   if (result.counts.blocked > 0 && result.counts.fills === 0) result.verdict = "blocked";
   else if (result.counts.intents === 0 && result.counts.fills === 0) result.verdict = "no_trade";
-  else if (pnl > 0) result.verdict = "win";
+  else if (pnl > 0) result.verdict = wasPredictiveWin ? "win" : "flat"; // Rebate-only wins are categorized as flat in skill evaluation
   else if (pnl < 0) result.verdict = "loss";
   else result.verdict = "flat";
-
   result.pnl = parseFloat(pnl.toFixed(4));
   return result;
 }

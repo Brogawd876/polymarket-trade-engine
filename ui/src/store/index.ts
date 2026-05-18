@@ -21,6 +21,8 @@ interface MarketState {
     upAsk?: number | null;
     downBid?: number | null;
     downAsk?: number | null;
+    probabilityUp: number | null;
+    sigma: number | null;
     lastUpdated: number;
 }
 
@@ -242,6 +244,8 @@ export interface AppState {
                         upAsk,
                         downBid,
                         downAsk,
+                        probabilityUp: event.payload.probabilityUp ?? null,
+                        sigma: event.payload.sigma ?? null,
                         lastUpdated: event.ts
                     }
                 };

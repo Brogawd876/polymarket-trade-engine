@@ -120,11 +120,22 @@ export default function Analytics() {
                         <div className="text-center">
                             <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Win Rate</div>
                             <div className="text-xl font-bold text-emerald-400">
-                                {filteredRuns.length > 0 
-                                    ? ((filteredRuns.filter(r => r.outcome === 'win').length / filteredRuns.filter(r => r.outcome !== 'skip').length) * 100 || 0).toFixed(1) + '%'
+                                {filteredRuns.length > 0
+                                    ? (() => {
+                                        const completed = filteredRuns.filter(r => 
+                                            r.outcome === 'win' || 
+                                            r.outcome === 'loss' || 
+                                            r.outcome === 'rebate' || 
+                                            r.outcome === 'flat'
+                                        );
+                                        if (completed.length === 0) return '0.0%';
+                                        const wins = filteredRuns.filter(r => r.outcome === 'win').length;
+                                        return ((wins / completed.length) * 100).toFixed(1) + '%';
+                                    })()
                                     : '---'}
                             </div>
                         </div>
+
                         <div className="text-center">
                             <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Net PnL</div>
                             <div className={`text-xl font-bold ${
@@ -221,6 +232,7 @@ export default function Analytics() {
                                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                                                 run.outcome === 'win' ? 'bg-emerald-500/20 text-emerald-400' :
                                                 run.outcome === 'loss' ? 'bg-red-500/20 text-red-400' :
+                                                run.outcome === 'rebate' ? 'bg-blue-500/20 text-blue-400' :
                                                 'bg-slate-700 text-slate-400'
                                             }`}>
                                                 {run.outcome.toUpperCase()}

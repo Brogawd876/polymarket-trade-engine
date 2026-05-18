@@ -30,7 +30,7 @@ export class DefaultQuantMonitor implements QuantMonitor {
   private clock: Clock;
   private rvWindow: number;
 
-  private prices: number[] = [];
+  private samples: Array<{ price: number; ts: number }> = [];
   private handlers = new Set<(snapshot: QuantSnapshot) => void>();
   private _latest: QuantSnapshot;
 
@@ -64,11 +64,12 @@ export class DefaultQuantMonitor implements QuantMonitor {
   private update() {
     const agg = this.aggregator.latest();
     const price = agg.price;
+    const now = this.clock.nowMs();
     if (price === null) return;
 
-    this.prices.push(price);
-    if (this.prices.length > this.rvWindow + 1) {
-      this.prices.shift();
+    this.samples.push({ price, ts: now });
+    if (this.samples.length > this.rvWindow + 1) {
+      this.samples.shift();
     }
 
     const sigma = this._calculateSigma();
@@ -76,7 +77,7 @@ export class DefaultQuantMonitor implements QuantMonitor {
 
     this._latest = {
       asset: this.asset,
-      timestampMs: this.clock.nowMs(),
+      timestampMs: now,
       sigma,
       probabilityUp
     };
@@ -87,17 +88,34 @@ export class DefaultQuantMonitor implements QuantMonitor {
   }
 
   private _calculateSigma(): number | null {
-    if (this.prices.length < 5) return null;
+    if (this.samples.length < 2) return null;
 
-    let sumSqReturns = 0;
-    for (let i = 1; i < this.prices.length; i++) {
-      const logReturn = Math.log(this.prices[i]! / this.prices[i - 1]!);
-      sumSqReturns += Math.pow(logReturn, 2);
+    let sumAnnualizedSqReturns = 0;
+    let totalTimeYears = 0;
+
+    const MS_PER_YEAR = 1000 * 3600 * 24 * 365;
+
+    for (let i = 1; i < this.samples.length; i++) {
+      const p1 = this.samples[i - 1]!.price;
+      const p2 = this.samples[i]!.price;
+      const dtMs = this.samples[i]!.ts - this.samples[i - 1]!.ts;
+      
+      // Avoid division by zero if multiple ticks happen at same timestamp
+      if (dtMs <= 0) continue;
+
+      const logReturn = Math.log(p2 / p1);
+      const dtYears = dtMs / MS_PER_YEAR;
+
+      // Variance is proportional to time. Annualized variance per step = return^2 / dtYears
+      sumAnnualizedSqReturns += Math.pow(logReturn, 2) / dtYears;
+      totalTimeYears += dtYears;
     }
 
-    const meanSq = sumSqReturns / (this.prices.length - 1);
-    const TICKS_PER_YEAR = 31536000; // 365 * 24 * 3600 (assumes 1s avg tick)
-    return Math.sqrt(meanSq * TICKS_PER_YEAR);
+    if (totalTimeYears === 0) return null;
+
+    // The average annualized variance
+    const avgAnnualizedVariance = sumAnnualizedSqReturns / (this.samples.length - 1);
+    return Math.sqrt(avgAnnualizedVariance);
   }
 
   private _calculateProbability(S: number, sigma: number | null): number | null {

@@ -40,6 +40,8 @@ type BatchRun = {
         settlements: number;
     };
     verdict: Verdict | null;
+    brierScore: number | null;
+    logLoss: number | null;
     error?: string;
 };
 
@@ -73,9 +75,10 @@ type StrategyRank = {
     worstPnl: number | null;
     blocked: number;
     problems: number;
+    brierScore: number | null;
+    logLoss: number | null;
     score: number;
-};
-
+    };
 type StrategyRecommendation = {
     strategy: string;
     label: string;
@@ -461,23 +464,26 @@ export default function StrategyLab() {
                                             <th className="text-right py-2 pr-3">Score</th>
                                             <th className="text-right py-2 pr-3">PnL</th>
                                             <th className="text-right py-2 pr-3">Win</th>
+                                            <th className="text-right py-2 pr-3">Brier</th>
+                                            <th className="text-right py-2 pr-3">LogLoss</th>
                                             <th className="text-right py-2 pr-3">Trade</th>
-                                            <th className="text-right py-2 pr-3">No Trade</th>
                                             <th className="text-right py-2 pr-3">Problems</th>
                                         </tr>
-                                    </thead>
-                                    <tbody>
+                                        </thead>
+                                        <tbody>
                                         {batch!.summary.byStrategy!.map(rank => (
                                             <tr key={rank.strategy} className="border-b border-slate-700/50">
                                                 <td className="py-2 pr-3 text-slate-200 font-semibold">{rank.label}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-blue-300">{rank.score.toFixed(2)}</td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${rank.totalPnl >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(rank.totalPnl)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.winRate)}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-sky-300">{rank.brierScore?.toFixed(4) ?? '---'}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-sky-400">{rank.logLoss?.toFixed(4) ?? '---'}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.tradeRate)}</td>
-                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{rank.noTrades}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{rank.problems}</td>
                                             </tr>
                                         ))}
+
                                     </tbody>
                                 </table>
                             </div>
@@ -525,6 +531,7 @@ export default function StrategyLab() {
                                             <th className="text-left py-2 pr-3">Status</th>
                                             <th className="text-left py-2 pr-3">Verdict</th>
                                             <th className="text-right py-2 pr-3">PnL</th>
+                                            <th className="text-right py-2 pr-3">Brier</th>
                                             <th className="text-right py-2 pr-3">Fills</th>
                                             <th className="text-right py-2 pr-3">Blocked</th>
                                             <th className="text-right py-2 pr-3">Problems</th>
@@ -544,6 +551,7 @@ export default function StrategyLab() {
                                                 </td>
                                                 <td className={`py-2 pr-3 font-bold uppercase ${verdictClass(run.verdict)}`}>{run.verdict ?? '---'}</td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(run.pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(run.pnl)}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-sky-300">{run.brierScore?.toFixed(4) ?? '---'}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.fills}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.blocked}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.problems}</td>

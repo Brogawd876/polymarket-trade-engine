@@ -86,9 +86,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
 
     // Use a 1-cent tolerance to avoid churn
     const TOLERANCE = 0.01;
+    const EPSILON = 0.0001;
 
     if (bidPriceUp > 0.01 && bidPriceUp < 0.99) {
-      if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > TOLERANCE) {
+      if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
         if (existingUp) {
           ctx.log(`[fair-value] Replacing UP quote: ${existingUp.price} -> ${bidPriceUp} (P=${probUp.toFixed(3)})`, "dim");
           ctx.cancelOrders([existingUp.orderId]);
@@ -109,7 +110,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
     }
 
     if (bidPriceDown > 0.01 && bidPriceDown < 0.99) {
-      if (!existingDown || Math.abs(existingDown.price - bidPriceDown) > TOLERANCE) {
+      if (!existingDown || Math.abs(existingDown.price - bidPriceDown) > (TOLERANCE + EPSILON)) {
         if (existingDown) {
           ctx.log(`[fair-value] Replacing DOWN quote: ${existingDown.price} -> ${bidPriceDown}`, "dim");
           ctx.cancelOrders([existingDown.orderId]);
@@ -128,7 +129,6 @@ export const fairValueMaker: Strategy = async (ctx) => {
         }
       }
     }
-
     if (ordersToPost.length > 0) {
       ctx.log(`[fair-value] Posting ${ordersToPost.length} orders. Bids: UP=${bidPriceUp} DOWN=${bidPriceDown}`, "cyan");
       ctx.postOrders(ordersToPost);
