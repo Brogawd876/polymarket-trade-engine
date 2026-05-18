@@ -42,7 +42,24 @@ type BatchRun = {
     verdict: Verdict | null;
     brierScore: number | null;
     logLoss: number | null;
+    execution?: ExecutionQualitySummary;
     error?: string;
+};
+
+type ExecutionQualitySummary = {
+    fillRate: number | null;
+    cancelRate: number | null;
+    takerFeeSpend: number;
+    makerRebateEstimate: number;
+    grossEdgeCapture: number | null;
+    turnover: number;
+    maxDrawdown: number;
+    markouts: {
+        oneSecond: number | null;
+        fiveSecond: number | null;
+        thirtySecond: number | null;
+        settlement: number | null;
+    };
 };
 
 type StrategyVariant = {
@@ -77,6 +94,10 @@ type StrategyRank = {
     problems: number;
     brierScore: number | null;
     logLoss: number | null;
+    avgFillRate?: number | null;
+    avgCancelRate?: number | null;
+    avgSettlementMarkout?: number | null;
+    avgTurnover?: number | null;
     score: number;
     };
 type StrategyRecommendation = {
@@ -466,6 +487,8 @@ export default function StrategyLab() {
                                             <th className="text-right py-2 pr-3">Win</th>
                                             <th className="text-right py-2 pr-3">Brier</th>
                                             <th className="text-right py-2 pr-3">LogLoss</th>
+                                            <th className="text-right py-2 pr-3">Fill</th>
+                                            <th className="text-right py-2 pr-3">Markout</th>
                                             <th className="text-right py-2 pr-3">Trade</th>
                                             <th className="text-right py-2 pr-3">Problems</th>
                                         </tr>
@@ -479,6 +502,8 @@ export default function StrategyLab() {
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.winRate)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-300">{rank.brierScore?.toFixed(4) ?? '---'}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-400">{rank.logLoss?.toFixed(4) ?? '---'}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.avgFillRate)}</td>
+                                                <td className={`py-2 pr-3 text-right font-mono ${(rank.avgSettlementMarkout ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(rank.avgSettlementMarkout)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.tradeRate)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{rank.problems}</td>
                                             </tr>
@@ -532,6 +557,8 @@ export default function StrategyLab() {
                                             <th className="text-left py-2 pr-3">Verdict</th>
                                             <th className="text-right py-2 pr-3">PnL</th>
                                             <th className="text-right py-2 pr-3">Brier</th>
+                                            <th className="text-right py-2 pr-3">Fill</th>
+                                            <th className="text-right py-2 pr-3">Markout</th>
                                             <th className="text-right py-2 pr-3">Fills</th>
                                             <th className="text-right py-2 pr-3">Blocked</th>
                                             <th className="text-right py-2 pr-3">Problems</th>
@@ -552,6 +579,8 @@ export default function StrategyLab() {
                                                 <td className={`py-2 pr-3 font-bold uppercase ${verdictClass(run.verdict)}`}>{run.verdict ?? '---'}</td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(run.pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(run.pnl)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-300">{run.brierScore?.toFixed(4) ?? '---'}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(run.execution?.fillRate)}</td>
+                                                <td className={`py-2 pr-3 text-right font-mono ${(run.execution?.markouts.settlement ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(run.execution?.markouts.settlement)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.fills}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.blocked}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.problems}</td>

@@ -1,4 +1,5 @@
 import type { RiskDecision, RiskSnapshot } from "./bot-core/risk-gate.ts";
+import type { VenueOrderBookEvent } from "./bot-core/data-sources.ts";
 import type { StrategyIntent } from "./bot-core/strategy-intent.ts";
 import { stableConfigHash } from "./live-readiness.ts";
 
@@ -79,7 +80,7 @@ function gitCommit(): string {
 }
 
 function orderbookSide(snapshot: RiskSnapshot, side: "UP" | "DOWN" | undefined) {
-  const venue = snapshot.venue;
+  const venue = snapshot.venue?.role === "venue" ? snapshot.venue as VenueOrderBookEvent : null;
   if (!venue || !side) return { bid: null, ask: null, spread: null, targetLiquidity: null, slippageEstimatePct: null };
   const bid = side === "UP" ? venue.bestBidUp : venue.bestBidDown;
   const ask = side === "UP" ? venue.bestAskUp : venue.bestAskDown;

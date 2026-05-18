@@ -11,6 +11,7 @@ import type {
   PredictiveSignalAggregator,
   LeadLagMonitor,
   OrderFlowMonitor,
+  QuantMonitor,
   Clock,
 } from "../bot-core/data-sources.ts";
 
@@ -66,6 +67,7 @@ export type StrategyContext = {
   pendingOrders: PendingOrder[];
   orderHistory: Array<{
     action: "buy" | "sell";
+    tokenId: string;
     price: number;
     shares: number;
   }>;
@@ -88,6 +90,8 @@ export type StrategyContext = {
   };
   /** Tracks Polymarket Order Book Flow and Whale activity. */
   orderFlow?: OrderFlowMonitor;
+  /** Fair-value probability and realized-volatility model shared by strategies. */
+  quant?: QuantMonitor;
   /** Shared clock (real or virtual). Use this for all timers and Date.now(). */
   clock: Clock;
 };

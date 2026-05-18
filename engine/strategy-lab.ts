@@ -38,7 +38,24 @@ export type StrategyLabRunResult = {
   verdict: StrategyLabVerdict | null;
   brierScore: number | null;
   logLoss: number | null;
+  execution: ExecutionQualitySummary;
   error?: string;
+};
+
+export type ExecutionQualitySummary = {
+  fillRate: number | null;
+  cancelRate: number | null;
+  takerFeeSpend: number;
+  makerRebateEstimate: number;
+  grossEdgeCapture: number | null;
+  turnover: number;
+  maxDrawdown: number;
+  markouts: {
+    oneSecond: number | null;
+    fiveSecond: number | null;
+    thirtySecond: number | null;
+    settlement: number | null;
+  };
 };
 
 export type StrategyLabVariantSummary = {
@@ -65,6 +82,10 @@ export type StrategyLabVariantSummary = {
   problems: number;
   brierScore: number | null;
   logLoss: number | null;
+  avgFillRate: number | null;
+  avgCancelRate: number | null;
+  avgSettlementMarkout: number | null;
+  avgTurnover: number | null;
   score: number;
 };
 
@@ -123,6 +144,29 @@ const EMPTY_COUNTS = {
   settlements: 0,
 };
 
+const EMPTY_EXECUTION_SUMMARY: ExecutionQualitySummary = {
+  fillRate: null,
+  cancelRate: null,
+  takerFeeSpend: 0,
+  makerRebateEstimate: 0,
+  grossEdgeCapture: null,
+  turnover: 0,
+  maxDrawdown: 0,
+  markouts: {
+    oneSecond: null,
+    fiveSecond: null,
+    thirtySecond: null,
+    settlement: null,
+  },
+};
+
+function emptyExecutionSummary(): ExecutionQualitySummary {
+  return {
+    ...EMPTY_EXECUTION_SUMMARY,
+    markouts: { ...EMPTY_EXECUTION_SUMMARY.markouts },
+  };
+}
+
 const MAX_BATCH_RUNS = 50;
 
 function emptySummary(totalRuns: number): StrategyLabBatchSummary {
@@ -152,9 +196,15 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
     verdict: "flat",
     brierScore: null,
     logLoss: null,
+    execution: emptyExecutionSummary(),
   };
 
   const forecasts: number[] = [];
+  const filledSides: Array<"UP" | "DOWN"> = [];
+  let placedOrders = 0;
+  let terminalCancels = 0;
+  let turnover = 0;
+  let runningLowPnl = 0;
 
   for (const event of events) {
     switch (event.type) {
@@ -176,10 +226,16 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
         break;
       case "ORDER_LIFECYCLE":
         result.slug = event.payload.slug;
-        if (event.payload.status === "filled" || event.payload.status === "partial_filled") result.counts.fills += 1;
+        if (event.payload.status === "placed") placedOrders += 1;
+        if (event.payload.status === "filled" || event.payload.status === "partial_filled") {
+          result.counts.fills += 1;
+          filledSides.push(event.payload.side);
+          turnover += event.payload.price * event.payload.shares;
+        }
         if (event.payload.status === "failed" || event.payload.status === "canceled" || event.payload.status === "expired") {
           result.counts.problems += 1;
         }
+        if (event.payload.status === "canceled" || event.payload.status === "expired") terminalCancels += 1;
         break;
       case "ROUND_RESOLUTION":
         result.slug = event.payload.slug;
@@ -190,6 +246,7 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
       case "ROUND_PNL":
         result.slug = event.payload.slug;
         result.pnl = event.payload.pnl;
+        runningLowPnl = Math.min(runningLowPnl, event.payload.pnl);
         result.counts.settlements += 1;
         break;
       case "SESSION_PNL":
@@ -208,12 +265,28 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
 
   const pnl = result.pnl ?? 0;
 
-  const wasPredictiveWin = (result.direction === "UP" && result.raw.some(e => e.type === "order" && e.payload?.side === "UP" && e.payload?.status === "filled")) ||
-                           (result.direction === "DOWN" && result.raw.some(e => e.type === "order" && e.payload?.side === "DOWN" && e.payload?.status === "filled"));
+  const wasPredictiveWin = result.direction !== null && filledSides.some(side => side === result.direction);
+  const hadWrongDirectionalFill = result.direction !== null && filledSides.some(side => side !== result.direction);
+
+  result.execution = {
+    fillRate: result.counts.intents > 0 ? result.counts.fills / result.counts.intents : null,
+    cancelRate: placedOrders > 0 ? terminalCancels / placedOrders : null,
+    takerFeeSpend: 0,
+    makerRebateEstimate: 0,
+    grossEdgeCapture: turnover > 0 ? parseFloat((pnl / turnover).toFixed(6)) : null,
+    turnover: parseFloat(turnover.toFixed(4)),
+    maxDrawdown: parseFloat(Math.abs(runningLowPnl).toFixed(4)),
+    markouts: {
+      oneSecond: null,
+      fiveSecond: null,
+      thirtySecond: null,
+      settlement: result.counts.fills > 0 ? parseFloat(pnl.toFixed(4)) : null,
+    },
+  };
 
   if (result.counts.blocked > 0 && result.counts.fills === 0) result.verdict = "blocked";
   else if (result.counts.intents === 0 && result.counts.fills === 0) result.verdict = "no_trade";
-  else if (pnl > 0) result.verdict = wasPredictiveWin ? "win" : "flat"; // Rebate-only wins are categorized as flat in skill evaluation
+  else if (pnl > 0) result.verdict = wasPredictiveWin && !hadWrongDirectionalFill ? "win" : "flat"; // Rebate-only or mixed-side wins are not counted as directional skill.
   else if (pnl < 0) result.verdict = "loss";
   else result.verdict = "flat";
   result.pnl = parseFloat(pnl.toFixed(4));
@@ -269,6 +342,10 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
       const brierRuns = completed.filter(run => run.brierScore !== null);
       const avgBrier = brierRuns.length > 0 ? brierRuns.reduce((sum, run) => sum + run.brierScore!, 0) / brierRuns.length : null;
       const avgLogLoss = brierRuns.length > 0 ? brierRuns.reduce((sum, run) => sum + run.logLoss!, 0) / brierRuns.length : null;
+      const avgFillRate = average(completed.map(run => run.execution.fillRate));
+      const avgCancelRate = average(completed.map(run => run.execution.cancelRate));
+      const avgSettlementMarkout = average(completed.map(run => run.execution.markouts.settlement));
+      const avgTurnover = average(completed.map(run => run.execution.turnover));
 
       const tradeRate = completed.length > 0 ? tradeCount / completed.length : null;
       const score = scoreStrategy({
@@ -310,10 +387,20 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
         problems,
         brierScore: avgBrier !== null ? parseFloat(avgBrier.toFixed(6)) : null,
         logLoss: avgLogLoss !== null ? parseFloat(avgLogLoss.toFixed(6)) : null,
+        avgFillRate,
+        avgCancelRate,
+        avgSettlementMarkout,
+        avgTurnover,
         score,
       };
     })
     .sort((a, b) => b.score - a.score || b.totalPnl - a.totalPnl || a.strategy.localeCompare(b.strategy));
+}
+
+function average(values: Array<number | null | undefined>): number | null {
+  const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (finite.length === 0) return null;
+  return parseFloat((finite.reduce((sum, value) => sum + value, 0) / finite.length).toFixed(6));
 }
 
 function scoreStrategy(input: {
@@ -455,6 +542,9 @@ export class StrategyLabBatchManager {
           closePrice: null,
           counts: { ...EMPTY_COUNTS },
           verdict: null,
+          brierScore: null,
+          logLoss: null,
+          execution: emptyExecutionSummary(),
         });
       }
     }
@@ -511,7 +601,7 @@ export class StrategyLabBatchManager {
     batch.updatedAtMs = Date.now();
 
     for (const run of batch.runs) {
-      if (this.cancelRequested.has(batchId) || batch.state === "canceled") break;
+      if (this.cancelRequested.has(batchId) || (batch.state as StrategyLabBatchState) === "canceled") break;
       if (run.status !== "queued") continue;
 
       run.status = "running";
@@ -535,11 +625,11 @@ export class StrategyLabBatchManager {
         // Yield to microtasks to ensure all telemetry from async placements is flushed
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        if (run.status !== "canceled") {
+        if ((run.status as StrategyLabRunStatus) !== "canceled") {
           Object.assign(run, deriveResultFromEvents(run, sink.events));
         }
       } catch (error) {
-        if (run.status !== "canceled") {
+        if ((run.status as StrategyLabRunStatus) !== "canceled") {
           run.status = "failed";
           run.verdict = "failed";
           run.error = error instanceof Error ? error.message : String(error);
@@ -553,7 +643,7 @@ export class StrategyLabBatchManager {
       }
     }
 
-    if (batch.state !== "canceled") {
+    if ((batch.state as StrategyLabBatchState) !== "canceled") {
       batch.state = batch.runs.some(run => run.status === "failed") ? "failed" : "completed";
       batch.progress.completedRuns = batch.runs.length;
       batch.summary = recomputeSummary(batch);

@@ -1340,6 +1340,7 @@ export class MarketLifecycle {
   }
 
   private _createRiskSnapshot(): RiskSnapshot {
+    const quant = this._quant?.latest();
     return {
       nowMs: this._clock.nowMs(),
       productionEnabled: Env.get("PROD"),
@@ -1352,6 +1353,8 @@ export class MarketLifecycle {
       predictiveAggregate: this._aggregator?.latest() ?? null,
       leadLag: this._leadLag?.latest() ?? null,
       orderFlow: this._orderFlow?.latest() ?? null,
+      probabilityUp: quant?.probabilityUp ?? null,
+      sigma: quant?.sigma ?? null,
       openExposureUsd: this._openExposureUsd(),
       sessionPnlUsd: this._pnl,
       clobTokenIds: this._clobTokenIds ?? undefined,

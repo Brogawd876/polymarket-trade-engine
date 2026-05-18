@@ -50,7 +50,9 @@ export async function validateReplayFixture(logPath: string): Promise<ReplayFixt
     let foundSlot = false;
     for (let i = 0; i < Math.min(5, lines.length); i++) {
       try {
-        const entry = JSON.parse(lines[i]);
+        const line = lines[i];
+        if (line === undefined) continue;
+        const entry = JSON.parse(line);
         if (entry.type === "slot") {
           metadata.slug = entry.payload?.slug || entry.slug;
           metadata.strategy = entry.payload?.strategy || entry.strategy;

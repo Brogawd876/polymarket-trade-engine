@@ -33,6 +33,14 @@ export default function Analytics() {
         const blocked = features.filter(snapshot => snapshot?.event === 'blocked').length;
         const placed = features.filter(snapshot => snapshot?.event === 'placed').length;
         const feedDisagreements = features.filter(snapshot => snapshot?.feeds?.predictiveDisagreement === true).length;
+        const scored = features.filter(snapshot => typeof snapshot?.quant?.probabilityUp === 'number');
+        const tradable = features.filter(snapshot => snapshot?.event === 'placed' || snapshot?.event === 'blocked');
+        const avgProbability = scored.length > 0
+            ? scored.reduce((sum, snapshot) => sum + (snapshot.quant.probabilityUp ?? 0), 0) / scored.length
+            : null;
+        const avgSpread = tradable.length > 0
+            ? tradable.reduce((sum, snapshot) => sum + (snapshot?.orderbook?.spread ?? 0), 0) / tradable.length
+            : null;
         const reasons = new Map<string, number>();
         for (const snapshot of features) {
             for (const reason of snapshot?.risk?.reasons ?? []) {
@@ -45,6 +53,8 @@ export default function Analytics() {
             blocked,
             placed,
             feedDisagreements,
+            avgProbability,
+            avgSpread,
             topReasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
         };
     }, [filteredRuns]);
@@ -184,6 +194,14 @@ export default function Analytics() {
                             <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
                                 <div className="text-[10px] text-slate-500 uppercase font-bold">Tradability</div>
                                 <div className="text-xl font-black text-blue-300">{decisionStats.total ? Math.round((decisionStats.placed / decisionStats.total) * 100) : 0}%</div>
+                            </div>
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+                                <div className="text-[10px] text-slate-500 uppercase font-bold">Avg P(UP)</div>
+                                <div className="text-xl font-black text-sky-300">{decisionStats.avgProbability == null ? '---' : `${Math.round(decisionStats.avgProbability * 100)}%`}</div>
+                            </div>
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+                                <div className="text-[10px] text-slate-500 uppercase font-bold">Avg Spread</div>
+                                <div className="text-xl font-black text-indigo-300">{decisionStats.avgSpread == null ? '---' : `$${decisionStats.avgSpread.toFixed(3)}`}</div>
                             </div>
                         </div>
                         <div className="space-y-2">

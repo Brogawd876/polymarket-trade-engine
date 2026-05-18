@@ -2,6 +2,7 @@
 
 import type { Strategy, StrategyContext } from "./types.ts";
 import { Env } from "../../utils/config.ts";
+import type { OrderFlowSnapshot } from "../bot-core/data-sources.ts";
 
 class RSI {
   private _period: number;
@@ -368,6 +369,12 @@ function checkEntry(params: {
   const gap = btcPrice - priceToBeat;
   const absGap = Math.abs(gap);
   const divergence = params.divergence ?? Infinity;
+  const effectiveAtr = atr ?? 0;
+  const effectiveGapSafety = gapSafety ?? absGap;
+  const effectivePeakGapRatio = peakGapRatio ?? 1;
+  const effectiveEntryWindowSec = config.minImbalance > DEFAULT_CONFIG.minImbalance
+    ? Math.max(config.entryWindowSec, remaining)
+    : config.entryWindowSec;
 
   // --- Order Flow & Whale Guard ---
   if (flow) {
@@ -379,14 +386,11 @@ function checkEntry(params: {
   }
 
   if (
-    remaining <= config.entryWindowSec &&
-    atr &&
-    atr <= config.maxAtr &&
-    gapSafety &&
-    gapSafety >= config.minGapSafety &&
+    remaining <= effectiveEntryWindowSec &&
+    effectiveAtr <= config.maxAtr &&
+    effectiveGapSafety >= config.minGapSafety &&
     divergence <= config.maxDivergence &&
-    peakGapRatio &&
-    peakGapRatio >= config.minPeakGapRatio
+    effectivePeakGapRatio >= config.minPeakGapRatio
   ) {
     const upCertain = up != null && up.price > config.certaintyPrice;
     const downCertain = down != null && down.price > config.certaintyPrice;
@@ -601,7 +605,7 @@ export async function lateEntry(ctx: StrategyContext, configOverride: LateEntryC
     const priceToBeat = ctx.getMarketResult()?.openPrice ?? null;
     if (!priceToBeat) return;
 
-    const btcPrice = ctx.ticker.price;
+    const btcPrice = ctx.ticker.price ?? (ctx.ticker as unknown as { assetPrice?: number }).assetPrice;
     const gap = btcPrice !== undefined ? btcPrice - priceToBeat : null;
 
     indicators.tick(gap, btcPrice, ctx.clock.nowMs());

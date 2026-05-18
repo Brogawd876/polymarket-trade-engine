@@ -214,9 +214,7 @@ export class ExecutionQualityGate implements RiskGate {
 
     // 1. Stale Quote Check (Venue-specific strict threshold)
     const venueAge = snapshot.nowMs - venue.clock.receivedAtMs;
-    // During sim/replay (productionEnabled=false), we ignore absolute age staleness
-    // because events may be sparse or time may have jumped in virtual time.
-    if (snapshot.productionEnabled && venueAge > this.limits.maxVenueAgeMs) {
+    if (venueAge > this.limits.maxVenueAgeMs) {
       reasons.push(
         `venue quote is stale (${venueAge}ms > ${this.limits.maxVenueAgeMs}ms limit)`,
       );

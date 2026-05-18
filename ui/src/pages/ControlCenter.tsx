@@ -53,6 +53,7 @@ export default function ControlCenter() {
     const [strategy, setStrategy] = useState<string>('simulation');
     const [isResetting, setIsResetting] = useState(false);
     const [engineConfig, setEngineConfig] = useState<any>(null);
+    const [tinyLiveArmed, setTinyLiveArmed] = useState(false);
 
     useEffect(() => {
         fetch(`${API_BASE}/config`)
@@ -406,6 +407,67 @@ export default function ControlCenter() {
                     </div>
                 </section>
             </div>
+
+            <section className="bg-slate-800/50 border border-amber-500/30 rounded-2xl overflow-hidden shadow-xl">
+                <div className="p-6 border-b border-amber-500/20 bg-amber-500/5 flex items-center justify-between gap-4">
+                    <div className="flex items-center">
+                        <div className="p-3 bg-amber-500/10 rounded-xl mr-4">
+                            <Shield className="w-6 h-6 text-amber-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-100">Ultra-Tiny Live Evidence Lane</h2>
+                            <p className="text-xs text-amber-200/70">Real-money collection mode remains locked until technical and paper gates pass.</p>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Hard Caps</div>
+                        <div className="text-sm font-black text-amber-300">$1/order | $5 exposure | $5 loss</div>
+                    </div>
+                </div>
+                <div className="p-6 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+                            <div className="text-[10px] text-slate-500 uppercase font-bold">Execution Policy</div>
+                            <div className="mt-1 text-sm text-slate-200 font-semibold">Maker-first only</div>
+                            <div className="mt-1 text-xs text-slate-500">No aggressive lead-lag taker mode.</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+                            <div className="text-[10px] text-slate-500 uppercase font-bold">Auto Stop</div>
+                            <div className="mt-1 text-sm text-slate-200 font-semibold">Any anomaly</div>
+                            <div className="mt-1 text-xs text-slate-500">Stale feed, failed cancel, unexpected fill, or disconnect.</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+                            <div className="text-[10px] text-slate-500 uppercase font-bold">Evidence Status</div>
+                            <div className="mt-1 text-sm text-slate-200 font-semibold">Not proof of profit</div>
+                            <div className="mt-1 text-xs text-slate-500">Tiny-live results are evidence only.</div>
+                        </div>
+                    </div>
+                    <div className="space-y-3">
+                        <label className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
+                            <input
+                                type="checkbox"
+                                className="mt-1"
+                                checked={tinyLiveArmed}
+                                onChange={event => setTinyLiveArmed(event.target.checked)}
+                                disabled={isRunning || isStopping}
+                            />
+                            <span>
+                                <span className="block font-bold text-slate-100">Manual arm required</span>
+                                <span className="block text-xs text-slate-500 mt-1">Confirms the operator sees the live caps before any later live endpoint can be enabled.</span>
+                            </span>
+                        </label>
+                        <button
+                            type="button"
+                            disabled={!tinyLiveArmed || isRunning || isStopping}
+                            onClick={() => alert('Tiny-live execution is intentionally blocked in this phase. Complete paper gates before wiring a live endpoint.')}
+                            className="w-full py-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex items-center justify-center"
+                        >
+                            <LockIcon className="w-5 h-5 mr-2" />
+                            Tiny-Live Locked
+                        </button>
+                    </div>
+                </div>
+            </section>
 
             {/* Stop Action Bar */}
             {isRunning && (

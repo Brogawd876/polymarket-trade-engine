@@ -52,6 +52,7 @@ type TradeMessage = {
 type LastTradePriceMessage = {
   event_type: "last_trade_price";
   asset_id: string;
+  price: string;
   fee_rate_bps: string;
 };
 

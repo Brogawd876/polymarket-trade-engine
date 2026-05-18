@@ -1,5 +1,4 @@
 import type { Strategy, StrategyContext } from "./types.ts";
-import { Env } from "../../utils/config.ts";
 
 export interface FairValueMakerConfig {
   shares?: number;
@@ -11,6 +10,12 @@ export interface FairValueMakerConfig {
   maxInventory?: number;
   /** Minimum probability edge required to place any order. */
   minEdge?: number;
+  /** Estimated maker rebate per share, expressed as probability/USDC cents. */
+  makerRebateEstimate?: number;
+  /** Pull or avoid quotes when same-side imbalance is below this threshold. */
+  minImbalance?: number;
+  /** Pull or avoid quotes when same-side 10s CVD is below this USD threshold. */
+  minCvd10s?: number;
 }
 
 const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
@@ -19,6 +24,9 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
   inventorySkew: 0.05, // Skew price by 5% of fair value per maxInventory unit
   maxInventory: 100,
   minEdge: 0.005,
+  makerRebateEstimate: 0,
+  minImbalance: -1,
+  minCvd10s: Number.NEGATIVE_INFINITY,
 };
 
 /**
@@ -32,7 +40,7 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
 export const fairValueMaker: Strategy = async (ctx) => {
   const config = { ...DEFAULT_CONFIG, ...(ctx.strategyConfig as FairValueMakerConfig) };
   
-  const releaseLock = ctx.hold();
+  const releaseLock = ctx.hold?.() ?? (() => {});
 
   const tickInterval = ctx.clock.setInterval(() => {
     const quant = ctx.quant?.latest();
@@ -45,6 +53,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
         ctx.clock.clearInterval(tickInterval);
         releaseLock();
         return;
+    }
+    if (probUp === null || probUp === undefined || sigma === null || sigma === undefined) {
+      ctx.cancelOrders(ctx.pendingOrders.map(o => o.orderId));
+      return;
     }
     const remFloor = Math.floor(remainingSecs);
     if (remFloor % 30 === 0 && ctx.clock.nowMs() % 1000 === 0) {
@@ -67,16 +79,21 @@ export const fairValueMaker: Strategy = async (ctx) => {
       }
     }
     
-    // 2. Calculate Skewed Fair Value
-    // Formula: P_skew = P_fair - (inventory / maxInventory) * skewFactor
-    const skew = (inventoryUp / config.maxInventory) * config.inventorySkew;
+    // 2. Calculate Avellaneda-style reservation probability.
+    // Inventory pushes quotes away from the side we already hold; volatility and
+    // time-to-expiry widen the required margin rather than pretending alpha is larger.
+    const timeFraction = Math.max(0, Math.min(1, remainingSecs / 300));
+    const inventoryRatio = inventoryUp / config.maxInventory;
+    const skew = inventoryRatio * config.inventorySkew * Math.max(0.25, timeFraction);
     const adjustedProbUp = Math.max(0.01, Math.min(0.99, probUp - skew));
+    const volatilityBuffer = Math.min(0.05, Math.max(0, sigma) * Math.sqrt(Math.max(remainingSecs, 1) / 31_536_000) * 2);
+    const quoteMargin = config.margin + volatilityBuffer;
 
     // 3. Define Quotes
     // We want to buy UP at adjustedProbUp - margin
     // We want to buy DOWN at (1 - adjustedProbUp) - margin
-    const bidPriceUp = parseFloat((adjustedProbUp - config.margin).toFixed(2));
-    const bidPriceDown = parseFloat(((1 - adjustedProbUp) - config.margin).toFixed(2));
+    const bidPriceUp = parseFloat((adjustedProbUp - quoteMargin).toFixed(2));
+    const bidPriceDown = parseFloat(((1 - adjustedProbUp) - quoteMargin).toFixed(2));
 
     // 4. Update Orders
     const existingUp = ctx.pendingOrders.find(o => o.tokenId === upTokenId && o.action === "buy");
@@ -88,7 +105,15 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const TOLERANCE = 0.01;
     const EPSILON = 0.0001;
 
-    if (bidPriceUp > 0.01 && bidPriceUp < 0.99) {
+    const feeRateUp = feeRate(ctx, upTokenId);
+    const feeRateDown = feeRate(ctx, downTokenId);
+    const evUp = quoteEv(adjustedProbUp, bidPriceUp, feeRateUp, config.makerRebateEstimate);
+    const evDown = quoteEv(1 - adjustedProbUp, bidPriceDown, feeRateDown, config.makerRebateEstimate);
+    const flow = ctx.orderFlow?.latest() ?? null;
+    const allowUpFlow = flowAllowsSide(flow, "UP", config);
+    const allowDownFlow = flowAllowsSide(flow, "DOWN", config);
+
+    if (bidPriceUp > 0.01 && bidPriceUp < 0.99 && evUp.edge >= config.minEdge && allowUpFlow) {
       if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
         if (existingUp) {
           ctx.log(`[fair-value] Replacing UP quote: ${existingUp.price} -> ${bidPriceUp} (P=${probUp.toFixed(3)})`, "dim");
@@ -107,9 +132,11 @@ export const fairValueMaker: Strategy = async (ctx) => {
           });
         }
       }
+    } else if (existingUp) {
+      ctx.cancelOrders([existingUp.orderId]);
     }
 
-    if (bidPriceDown > 0.01 && bidPriceDown < 0.99) {
+    if (bidPriceDown > 0.01 && bidPriceDown < 0.99 && evDown.edge >= config.minEdge && allowDownFlow) {
       if (!existingDown || Math.abs(existingDown.price - bidPriceDown) > (TOLERANCE + EPSILON)) {
         if (existingDown) {
           ctx.log(`[fair-value] Replacing DOWN quote: ${existingDown.price} -> ${bidPriceDown}`, "dim");
@@ -128,9 +155,11 @@ export const fairValueMaker: Strategy = async (ctx) => {
           });
         }
       }
+    } else if (existingDown) {
+      ctx.cancelOrders([existingDown.orderId]);
     }
     if (ordersToPost.length > 0) {
-      ctx.log(`[fair-value] Posting ${ordersToPost.length} orders. Bids: UP=${bidPriceUp} DOWN=${bidPriceDown}`, "cyan");
+      ctx.log(`[fair-value] Posting ${ordersToPost.length} orders. Bids: UP=${bidPriceUp} (EV=${evUp.edge.toFixed(4)}) DOWN=${bidPriceDown} (EV=${evDown.edge.toFixed(4)})`, "cyan");
       ctx.postOrders(ordersToPost);
     }
 
@@ -138,3 +167,31 @@ export const fairValueMaker: Strategy = async (ctx) => {
 
   return () => ctx.clock.clearInterval(tickInterval);
 };
+
+function feeRate(ctx: StrategyContext, tokenId: string): number {
+  const raw = (ctx.orderBook as unknown as { getFeeRate?: (assetId: string) => number } | undefined)?.getFeeRate?.(tokenId) ?? 0;
+  return raw > 1 ? raw / 10_000 : raw;
+}
+
+function quoteEv(probability: number, price: number, feeRate: number, makerRebateEstimate: number) {
+  const takerFee = 0;
+  const feeReference = feeRate * price * (1 - price);
+  return {
+    edge: probability - price - takerFee + makerRebateEstimate,
+    feeReference,
+  };
+}
+
+function flowAllowsSide(
+  flow: ReturnType<NonNullable<StrategyContext["orderFlow"]>["latest"]> | null,
+  side: "UP" | "DOWN",
+  config: Required<FairValueMakerConfig>,
+): boolean {
+  if (!flow) return true;
+  const imbalance = side === "UP" ? flow.imbalanceUp : flow.imbalanceDown;
+  if (imbalance !== null && imbalance < config.minImbalance) return false;
+  const cvd = side === "UP"
+    ? flow.cvd10s.up - flow.cvd10s.down
+    : flow.cvd10s.down - flow.cvd10s.up;
+  return cvd >= config.minCvd10s;
+}

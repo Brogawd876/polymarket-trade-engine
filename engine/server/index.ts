@@ -34,7 +34,9 @@ export class ControlServer {
     this._sessionManager = opts.sessionManager;
     this._strategyLab = new StrategyLabBatchManager();
     this._liveReadiness = new LiveReadinessManager(this._strategyLab);
-    this._sessionManager.setPaperEvidenceRecorder((evidence) => this._liveReadiness.recordPaperEvidence(evidence));
+    this._sessionManager.setPaperEvidenceRecorder(async (evidence) => {
+      await this._liveReadiness.recordPaperEvidence(evidence);
+    });
     this._allowedOrigins = new Set(opts.allowedOrigins ?? [
       "http://localhost:3000",
       "http://127.0.0.1:3000",
