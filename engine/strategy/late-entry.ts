@@ -12,7 +12,7 @@ class RSI {
   private _seedLosses: number[] = [];
   private _value: number | null = null;
 
-  constructor(period = 14) {
+  constructor(period = 5) {
     this._period = period;
   }
 
@@ -66,7 +66,7 @@ class ATR {
   private _seedTrs: number[] = [];
   private _value: number | null = null;
 
-  constructor(period = 14) {
+  constructor(period = 5) {
     this._period = period;
   }
 
@@ -108,7 +108,7 @@ class RTV {
   private _prices: number[] = [];
   private _value: number | null = null;
 
-  constructor(window = 30) {
+  constructor(window = 10) {
     this._window = window;
   }
 
@@ -137,14 +137,14 @@ class RTV {
 }
 
 class Indicators {
-  private _rsi = new RSI(14);
-  private _atr = new ATR(14);
-  private _rtv = new RTV(30);
+  private _rsi = new RSI(5);
+  private _atr = new ATR(5);
+  private _rtv = new RTV(10);
   private _peakAbsGap = 0;
   private _lastUpdate = 0;
 
   tick(gap: number | null, btcPrice: number | undefined, now: number): void {
-    if (now - this._lastUpdate < 1000) return;
+    if (now - this._lastUpdate < 500) return;
     this._lastUpdate = now;
     if (gap !== null) {
       this._rsi.update(gap);
@@ -177,7 +177,7 @@ class Indicators {
   }
 
   gapSafety(gap: number): number | null {
-    if (!gap) return null;
+    if (!gap || this._atr.value === null) return null;
     return this._atr.gapSafety(gap);
   }
 }

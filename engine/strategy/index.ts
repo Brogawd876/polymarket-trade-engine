@@ -3,6 +3,7 @@ import { simulationStrategy } from "./simulation.ts";
 import { lateEntry, type LateEntryConfig } from "./late-entry.ts";
 import { lateEntryOptimized } from "./late-entry-optimized.ts";
 import { lateEntryAdaptive } from "./late-entry-adaptive.ts";
+import { hyperAggressive } from "./hyper-aggressive.ts";
 
 export type StrategyVariant = {
   id: string;
@@ -13,13 +14,18 @@ export type StrategyVariant = {
   paperEligible: boolean;
 };
 
-const LATE_ENTRY_DEFAULT: LateEntryConfig = {};
+const LATE_ENTRY_DEFAULT: LateEntryConfig = {
+  entryWindowSec: 240, // 4 minutes
+  certaintyPrice: 0.70, // Catch moves at 70c instead of 85c
+  minGapSafety: 20, // More sensitive BTC movement
+};
 
 export const strategies: Record<string, Strategy> = {
   "simulation": simulationStrategy,
   "late-entry": lateEntry,
   "late-entry-optimized": lateEntryOptimized,
   "late-entry-adaptive": lateEntryAdaptive,
+  "hyper-aggressive": hyperAggressive,
 };
 
 export const DEFAULT_STRATEGY = "simulation";
@@ -30,6 +36,14 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     label: "simulation",
     strategy: "simulation",
     description: "Baseline paper/replay strategy used to validate order lifecycle plumbing.",
+    config: {},
+    paperEligible: true,
+  },
+  "hyper-aggressive": {
+    id: "hyper-aggressive",
+    label: "hyper-aggressive",
+    strategy: "hyper-aggressive",
+    description: "EXTREME aggression for testing purposes.",
     config: {},
     paperEligible: true,
   },
