@@ -463,7 +463,7 @@ function checkStopLoss(
 // Strategy
 // ---------------------------------------------------------------------------
 
-export const lateEntry: Strategy = async (ctx) => {
+export async function lateEntry(ctx: StrategyContext, configOverride: LateEntryConfig = {}): Promise<void> {
   // ── Prod guard ────────────────────────────────────────────────────────────
   // This strategy is specially designed for simulation only. If you still
   // want to run it in production, remove this guard and make the necessary
@@ -497,7 +497,7 @@ export const lateEntry: Strategy = async (ctx) => {
     stopLossFired: false,
   };
   const indicators = new Indicators();
-  const config = resolveConfig(ctx.strategyConfig);
+  const config = resolveConfig({ ...ctx.strategyConfig, ...configOverride });
 
   const tickInterval = ctx.clock.setInterval(() => {
     const remaining = Math.floor((ctx.slotEndMs - ctx.clock.nowMs()) / 1000);
@@ -556,4 +556,4 @@ export const lateEntry: Strategy = async (ctx) => {
       checkStopLoss(ctx, state, remaining, gap, indicators.rsi, config);
     }
   }, 0);
-};
+}

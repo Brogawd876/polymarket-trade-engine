@@ -1,4 +1,4 @@
-import { lateEntry, type LateEntryConfig } from "./late-entry.ts";
+import { lateEntry } from "./late-entry.ts";
 import type { Strategy } from "./types.ts";
 
 export const hyperAggressive: Strategy = async (ctx) => {

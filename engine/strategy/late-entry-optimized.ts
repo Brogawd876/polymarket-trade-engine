@@ -1,4 +1,4 @@
-import type { Strategy, StrategyContext } from "./types.ts";
+import type { Strategy } from "./types.ts";
 import { lateEntry, type LateEntryConfig } from "./late-entry.ts";
 
 /**

@@ -1,4 +1,4 @@
-import type { Strategy, StrategyContext } from "./types.ts";
+import type { Strategy } from "./types.ts";
 import { lateEntry, type LateEntryConfig } from "./late-entry.ts";
 
 /**
@@ -21,7 +21,7 @@ import { lateEntry, type LateEntryConfig } from "./late-entry.ts";
  */
 
 export const lateEntryAdaptive: Strategy = async (ctx) => {
-    const aggregate = ctx.predictive.aggregate?.latest();
+    const aggregate = ctx.predictive?.aggregate?.latest();
     const divergence = aggregate?.divergenceAbs ?? 0;
     
     // --- Institutional Rule 1: Adaptive Sizing ---

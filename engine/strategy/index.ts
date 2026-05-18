@@ -45,7 +45,7 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     strategy: "hyper-aggressive",
     description: "EXTREME aggression for testing purposes.",
     config: {},
-    paperEligible: true,
+    paperEligible: false,
   },
   "late-entry-optimized": {
     id: "late-entry-optimized",
@@ -53,7 +53,7 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     strategy: "late-entry-optimized",
     description: "Institutional refinements (dynamic certainty, theta decay) for better signal capture.",
     config: {},
-    paperEligible: true,
+    paperEligible: false,
   },
   "late-entry-adaptive": {
     id: "late-entry-adaptive",
@@ -61,7 +61,7 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     strategy: "late-entry-adaptive",
     description: "Smart sizing and slippage buffering based on market divergence.",
     config: {},
-    paperEligible: true,
+    paperEligible: false,
   },
   "late-entry": {
     id: "late-entry",
