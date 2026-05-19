@@ -9,7 +9,7 @@ export type Resolution = {
   pnl: number;
 };
 
-export type Outcome = "win" | "loss" | "skip" | "incomplete";
+export type Outcome = "win" | "loss" | "skip" | "incomplete" | "rebate" | "flat";
 
 export type ParsedRun = {
   filename: string;

@@ -47,6 +47,9 @@ export class PolymarketVenueAdapter implements VenueDataAdapter {
   }
 
   latest(): VenueOrderBookEvent | null {
+    if (this.currentRound && this.orderBook.isReady()) {
+      this._latest = this.createEvent();
+    }
     return this._latest;
   }
 
@@ -97,7 +100,15 @@ export class PolymarketVenueAdapter implements VenueDataAdapter {
   }
 
   private emitEvent() {
-    if (!this.currentRound) return;
+    const venueEvent = this.createEvent();
+    if (!venueEvent) return;
+
+    this._latest = venueEvent;
+    this.notify(venueEvent);
+  }
+
+  private createEvent(): VenueOrderBookEvent | null {
+    if (!this.currentRound) return null;
 
     const clock = createEventClock({
       receivedAtMs: this._clock.nowMs(),
@@ -106,7 +117,7 @@ export class PolymarketVenueAdapter implements VenueDataAdapter {
     const snapshot = this.orderBook.getSnapshotData();
     const upId = this.orderBook.getTokenId("UP");
 
-    const venueEvent: VenueOrderBookEvent = {
+    return {
       id: `poly-clob-${clock.monotonicReceivedNs}`,
       role: "venue",
       source: this.source,
@@ -125,9 +136,6 @@ export class PolymarketVenueAdapter implements VenueDataAdapter {
       bestAskDown: this.orderBook.bestAskPrice("DOWN"),
       feeRateBps: upId ? this.orderBook.getFeeRate(upId) : undefined,
     };
-
-    this._latest = venueEvent;
-    this.notify(venueEvent);
   }
 
   private notify(event: VenueOrderBookEvent) {

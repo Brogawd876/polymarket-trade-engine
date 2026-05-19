@@ -33,11 +33,27 @@ export function parseAllJson(text: string): LogEntry[] {
   return results;
 }
 
-function deriveOutcome(resolution: Resolution | null): Outcome {
+function deriveOutcome(resolution: Resolution | null, entries: LogEntry[]): Outcome {
   if (!resolution) return "incomplete";
-  if (resolution.pnl > 0) return "win";
-  if (resolution.pnl < 0) return "loss";
-  return "skip";
+  
+  const fills = entries.filter(e => e.type === "order" && e.status === "filled");
+  if (fills.length === 0) return "skip";
+
+  // Check if we correctly predicted the market direction
+  const boughtUp = fills.some(f => f.side === "UP");
+  const boughtDown = fills.some(f => f.side === "DOWN");
+  
+  const isPredictiveWin = (boughtUp && resolution.direction === "UP") || (boughtDown && resolution.direction === "DOWN");
+
+  if (resolution.pnl > 0) {
+    return isPredictiveWin ? "win" : "rebate";
+  }
+  
+  if (resolution.pnl < 0) {
+    return "loss";
+  }
+
+  return "flat";
 }
 
 export function parseLog(filename: string, raw: string): ParsedRun | null {
@@ -86,7 +102,7 @@ export function parseLog(filename: string, raw: string): ParsedRun | null {
     endTime,
     resolution,
     spend,
-    outcome: deriveOutcome(resolution),
+    outcome: deriveOutcome(resolution, entries),
     raw: entries,
   };
 }

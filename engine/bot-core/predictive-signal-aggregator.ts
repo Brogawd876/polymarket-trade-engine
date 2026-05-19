@@ -4,6 +4,8 @@ import {
   type PredictivePriceEvent,
   type PredictiveAggregateSnapshot,
   type PredictiveSignalAggregator,
+  type ResolutionSourceAdapter,
+  type VenueDataAdapter,
   type Clock,
   RealClock,
 } from "./data-sources";
@@ -15,6 +17,8 @@ export type AggregatorOptions = {
   feedWeights?: Record<string, number>;
   /** Max divergence between feeds before marking disagreement. Default: 50 ($50 for BTC). */
   divergenceThresholdAbs?: number;
+  resolution?: ResolutionSourceAdapter;
+  venue?: VenueDataAdapter;
   clock?: Clock;
 };
 
@@ -26,6 +30,8 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
   private divergenceThresholdAbs: number;
   private feedWeights: Record<string, number>;
   private clock: Clock;
+  private resolution?: ResolutionSourceAdapter;
+  private venue?: VenueDataAdapter;
 
   constructor(opts: AggregatorOptions) {
     this.asset = opts.asset;
@@ -33,6 +39,8 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
     this.divergenceThresholdAbs = opts.divergenceThresholdAbs ?? 50;
     this.feedWeights = opts.feedWeights ?? {};
     this.clock = opts.clock ?? new RealClock();
+    this.resolution = opts.resolution;
+    this.venue = opts.venue;
 
     for (const [name, adapter] of Object.entries(this.feeds)) {
       adapter.subscribe((event) => {
@@ -44,15 +52,30 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
 
   latest(): PredictiveAggregateSnapshot {
     const snapshotFeeds: PredictiveAggregateSnapshot["feeds"] = {};
+    const predictiveFeeds: PredictiveAggregateSnapshot["predictiveTape"]["feeds"] = {};
     const healthyFeedNames: string[] = [];
     const now = this.clock.nowMs();
+    const resolution = this.resolution?.latest() ?? null;
+    const anchor = this.resolution?.latestAnchor() ?? null;
+    const settlementAnchorPrice = anchor?.priceToBeat ?? anchor?.price ?? resolution?.price ?? null;
 
     for (const [name, event] of this.latestEvents) {
+      const divergenceFromSettlementAbs =
+        settlementAnchorPrice === null ? null : event.price - settlementAnchorPrice;
+      const divergenceFromSettlementPct =
+        divergenceFromSettlementAbs !== null && settlementAnchorPrice !== null && settlementAnchorPrice !== 0
+          ? (divergenceFromSettlementAbs / settlementAnchorPrice) * 100
+          : null;
       snapshotFeeds[name] = {
         price: event.price,
         quality: event.quality,
         latestEventAgeMs: now - event.clock.receivedAtMs,
         arrivalDelayMs: event.freshnessMs,
+      };
+      predictiveFeeds[name] = {
+        ...snapshotFeeds[name]!,
+        divergenceFromSettlementAbs,
+        divergenceFromSettlementPct,
       };
 
       if (event.quality === "live") {
@@ -79,9 +102,9 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
         healthyPrices.push(p);
       }
       
-      price = weightedSum / totalWeight;
+      price = totalWeight > 0 ? weightedSum / totalWeight : null;
 
-      if (healthyPrices.length > 1) {
+      if (price !== null && healthyPrices.length > 1) {
         const max = Math.max(...healthyPrices);
         const min = Math.min(...healthyPrices);
         divergenceAbs = max - min;
@@ -96,10 +119,60 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
     } else {
       disagreement = true;
     }
+    const venue = this.venue?.latest() ?? null;
+    const yesSpread = venue?.bestBidUp != null && venue.bestAskUp != null
+      ? venue.bestAskUp - venue.bestBidUp
+      : null;
+    const noSpread = venue?.bestBidDown != null && venue.bestAskDown != null
+      ? venue.bestAskDown - venue.bestBidDown
+      : null;
+
+    const settlementIsStale =
+      !resolution ||
+      resolution.quality === "stale" ||
+      resolution.quality === "missing" ||
+      resolution.stalenessStatus === "stale" ||
+      resolution.stalenessStatus === "missing" ||
+      resolution.stalenessStatus === "degraded";
+
     return {
       asset: this.asset,
       timestampMs: now,
       price,
+      settlementAnchor: {
+        price: settlementAnchorPrice,
+        roundId: resolution?.roundId ?? null,
+        updatedAtMs: resolution?.chainUpdatedAtMs ?? resolution?.clock.sourceTimestampMs ?? null,
+        localReceivedAtMs: resolution?.localReceivedAtMs ?? resolution?.clock.receivedAtMs ?? null,
+        lagMs: resolution?.oracleLagMs ?? resolution?.lagMs ?? null,
+        isStale: settlementIsStale,
+        quality: resolution?.quality ?? null,
+        source: resolution?.source ?? null,
+        sourceType: resolution?.sourceType ?? null,
+      },
+      predictiveTape: {
+        compositePrice: price,
+        feeds: predictiveFeeds,
+        divergenceAbs,
+        divergencePct,
+        disagreement,
+      },
+      marketPrice: {
+        yesBestBid: venue?.bestBidUp ?? null,
+        yesBestAsk: venue?.bestAskUp ?? null,
+        yesMidpoint: venue?.bestBidUp != null && venue.bestAskUp != null
+          ? (venue.bestBidUp + venue.bestAskUp) / 2
+          : null,
+        noBestBid: venue?.bestBidDown ?? null,
+        noBestAsk: venue?.bestAskDown ?? null,
+        noMidpoint: venue?.bestBidDown != null && venue.bestAskDown != null
+          ? (venue.bestBidDown + venue.bestAskDown) / 2
+          : null,
+        yesSpread,
+        noSpread,
+        executable: venue?.bestBidUp != null && venue.bestAskUp != null && venue.bestBidDown != null && venue.bestAskDown != null,
+        source: venue?.source ?? null,
+      },
       feeds: snapshotFeeds,
       divergenceAbs,
       divergencePct,

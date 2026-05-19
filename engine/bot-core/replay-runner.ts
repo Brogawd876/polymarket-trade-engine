@@ -143,7 +143,9 @@ export class ReplayRunner {
       const nextTickTargetMs = this.clock.nowMs() + TICK_INTERVAL_MS;
 
       let targetNowMs: number;
-      if (nextEventTs !== null && nextEventTs < nextTickTargetMs) {
+      // If there's an event before our next tick, we jump to it exactly.
+      // This ensures the virtual clock is perfectly aligned with data received timestamps.
+      if (nextEventTs !== null && nextEventTs <= nextTickTargetMs) {
           targetNowMs = nextEventTs;
       } else {
           targetNowMs = nextTickTargetMs;
@@ -152,10 +154,10 @@ export class ReplayRunner {
       this.clock.setNowMs(targetNowMs);
       this.reader.advanceTo(targetNowMs);
 
+      // Only tick the bot logic if we've reached or passed a 100ms virtual interval.
       if (this.clock.nowMs() >= nextTickTargetMs - 1) {
           await this.bot.tickOnce();
           tickCount++;
-
           const isShuttingDown = this.bot.isShuttingDown;
 
           if (tickCount % 10 === 0) {

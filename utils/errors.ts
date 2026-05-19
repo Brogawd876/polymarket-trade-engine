@@ -11,7 +11,32 @@ export class TerminalAccessError extends Error {
 }
 
 /**
- * Heuristic check to see if a response body looks like a Cloudflare or 
+ * FatalEngineError is the base class for engine-stopping conditions
+ * that should be handled gracefully by the session manager or CLI.
+ */
+export class FatalEngineError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FatalEngineError";
+  }
+}
+
+export class InsufficientBalanceError extends FatalEngineError {
+  constructor(message: string) {
+    super(message);
+    this.name = "InsufficientBalanceError";
+  }
+}
+
+export class LossLimitExceededError extends FatalEngineError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LossLimitExceededError";
+  }
+}
+
+/**
+ * Heuristic check to see if a response body looks like a Cloudflare or
  * provider-level block page.
  */
 export function isBlockedBody(body: string): boolean {
@@ -24,3 +49,4 @@ export function isBlockedBody(body: string): boolean {
     lower.includes("cloudflare") && lower.includes("403")
   );
 }
+

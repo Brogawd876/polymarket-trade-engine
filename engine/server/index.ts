@@ -34,7 +34,9 @@ export class ControlServer {
     this._sessionManager = opts.sessionManager;
     this._strategyLab = new StrategyLabBatchManager();
     this._liveReadiness = new LiveReadinessManager(this._strategyLab);
-    this._sessionManager.setPaperEvidenceRecorder((evidence) => this._liveReadiness.recordPaperEvidence(evidence));
+    this._sessionManager.setPaperEvidenceRecorder(async (evidence) => {
+      await this._liveReadiness.recordPaperEvidence(evidence);
+    });
     this._allowedOrigins = new Set(opts.allowedOrigins ?? [
       "http://localhost:3000",
       "http://127.0.0.1:3000",
@@ -65,9 +67,9 @@ export class ControlServer {
           responseHeaders.set("Access-Control-Allow-Origin", origin);
           responseHeaders.set("Vary", "Origin");
         }
-        
+
         responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type");
+        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
         // Security: Origin validation
         if (origin && !allowedOrigins.has(origin)) {
@@ -78,6 +80,17 @@ export class ControlServer {
           return new Response(null, { status: 204, headers: responseHeaders });
         }
 
+        // Auth Token Validation (Optional but recommended for production)
+        const authToken = Env.get("OPERATOR_AUTH_TOKEN");
+        if (authToken && url.pathname.startsWith("/api/operator/")) {
+            const authHeader = req.headers.get("Authorization");
+            if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+                return new Response("Unauthorized: Invalid or missing Operator Token", { 
+                    status: 401, 
+                    headers: responseHeaders 
+                });
+            }
+        }
         // WebSocket Telemetry Path
         if (url.pathname === "/telemetry") {
           const success = server.upgrade(req, {
@@ -240,7 +253,7 @@ export class ControlServer {
             }
         }
 
-        if ((url.pathname === "/api/operator/tiny-live/unlock" || url.pathname === "/api/operator/operator/tiny-live/unlock") && req.method === "POST") {
+        if (url.pathname === "/api/operator/tiny-live/unlock" && req.method === "POST") {
             try {
                 const result = await this._liveReadiness.unlockTinyLive(await req.json() as any);
                 return Response.json(result, { status: result.success ? 200 : 400, headers: responseHeaders });

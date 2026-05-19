@@ -1,4 +1,5 @@
 import type { RiskDecision, RiskSnapshot } from "./bot-core/risk-gate.ts";
+import type { VenueOrderBookEvent } from "./bot-core/data-sources.ts";
 import type { StrategyIntent } from "./bot-core/strategy-intent.ts";
 import { stableConfigHash } from "./live-readiness.ts";
 
@@ -34,6 +35,13 @@ export type DecisionFeatureSnapshot = {
     targetLiquidity: number | null;
     slippageEstimatePct: number | null;
   };
+  flow: {
+    imbalance: number | null;
+    cvd10s: number | null;
+    cvd60s: number | null;
+    whaleCount: number;
+    sentiment: string | null;
+  };
   feeds: {
     predictivePrice: number | null;
     predictiveDisagreement: boolean | null;
@@ -42,6 +50,35 @@ export type DecisionFeatureSnapshot = {
     resolutionFreshnessMs: number | null;
     venueFreshnessMs: number | null;
     predictiveFreshnessMs: number | null;
+  };
+  settlementTruth: {
+    source: string | null;
+    sourceType: string | null;
+    settlementAnchorPrice: number | null;
+    roundId: string | null;
+    rawOracleAnswer: string | null;
+    updatedAtMs: number | null;
+    localReceivedAtMs: number | null;
+    oracleLagMs: number | null;
+    stalenessStatus: string | null;
+    contractAddress: string | null;
+  };
+  predictiveTape: {
+    compositePrice: number | null;
+    divergenceFromSettlementAbs: number | null;
+    divergenceFromSettlementPct: number | null;
+    inputs: Record<string, unknown>;
+  };
+  marketPrice: {
+    yesBestBid: number | null;
+    yesBestAsk: number | null;
+    noBestBid: number | null;
+    noBestAsk: number | null;
+    executable: boolean;
+  };
+  quant: {
+    probabilityUp: number | null;
+    sigma: number | null;
   };
   risk: {
     approved: boolean | null;
@@ -68,7 +105,7 @@ function gitCommit(): string {
 }
 
 function orderbookSide(snapshot: RiskSnapshot, side: "UP" | "DOWN" | undefined) {
-  const venue = snapshot.venue;
+  const venue = snapshot.venue?.role === "venue" ? snapshot.venue as VenueOrderBookEvent : null;
   if (!venue || !side) return { bid: null, ask: null, spread: null, targetLiquidity: null, slippageEstimatePct: null };
   const bid = side === "UP" ? venue.bestBidUp : venue.bestBidDown;
   const ask = side === "UP" ? venue.bestAskUp : venue.bestAskDown;
@@ -103,7 +140,18 @@ export function createDecisionFeatureSnapshot(params: {
   const openPrice = resolution && "priceToBeat" in resolution ? resolution.priceToBeat ?? null : null;
   const gap = currentPrice != null && openPrice != null ? parseFloat((currentPrice - openPrice).toFixed(4)) : null;
   const direction = gap == null ? null : gap > 0 ? "UP" : gap < 0 ? "DOWN" : "TIE";
-  const predictiveAges = predictive ? Object.values(predictive.feeds).map(feed => feed.latestEventAgeMs) : [];
+  const predictiveAges = predictive ? Object.values(predictive.feeds).map(feed => feed.latestEventAgeMs) : [];  
+  const flow = params.snapshot.orderFlow;
+  const settlementAnchorPrice = resolution?.role === "resolution" ? (resolution.priceToBeat ?? resolution.price) : null;
+  const predictiveCompositePrice = predictive?.predictiveTape.compositePrice ?? predictive?.price ?? null;
+  const divergenceFromSettlementAbs =
+    predictiveCompositePrice !== null && settlementAnchorPrice !== null
+      ? predictiveCompositePrice - settlementAnchorPrice
+      : null;
+  const divergenceFromSettlementPct =
+    divergenceFromSettlementAbs !== null && settlementAnchorPrice !== null && settlementAnchorPrice !== 0
+      ? (divergenceFromSettlementAbs / settlementAnchorPrice) * 100
+      : null;
 
   return {
     schemaVersion: 1,
@@ -133,6 +181,13 @@ export function createDecisionFeatureSnapshot(params: {
       side: side ?? null,
       ...book,
     },
+    flow: {
+      imbalance: side === "UP" ? flow?.imbalanceUp ?? null : side === "DOWN" ? flow?.imbalanceDown ?? null : null,
+      cvd10s: side === "UP" ? (flow?.cvd10s.up ?? 0) - (flow?.cvd10s.down ?? 0) : side === "DOWN" ? (flow?.cvd10s.down ?? 0) - (flow?.cvd10s.up ?? 0) : null,
+      cvd60s: side === "UP" ? (flow?.cvd60s.up ?? 0) - (flow?.cvd60s.down ?? 0) : side === "DOWN" ? (flow?.cvd60s.down ?? 0) - (flow?.cvd60s.up ?? 0) : null,
+      whaleCount: flow?.recentWhales.length ?? 0,
+      sentiment: flow?.sentiment ?? "neutral",
+    },
     feeds: {
       predictivePrice: predictive?.price ?? null,
       predictiveDisagreement: predictive?.disagreement ?? null,
@@ -142,7 +197,37 @@ export function createDecisionFeatureSnapshot(params: {
       venueFreshnessMs: params.snapshot.venue?.freshnessMs ?? null,
       predictiveFreshnessMs: predictiveAges.length > 0 ? Math.max(...predictiveAges) : null,
     },
+    settlementTruth: {
+      source: resolution?.source ?? null,
+      sourceType: resolution && "sourceType" in resolution ? resolution.sourceType ?? null : null,
+      settlementAnchorPrice,
+      roundId: resolution && "roundId" in resolution ? resolution.roundId ?? null : null,
+      rawOracleAnswer: resolution && "rawOracleAnswer" in resolution ? resolution.rawOracleAnswer ?? null : null,
+      updatedAtMs: resolution && "chainUpdatedAtMs" in resolution ? resolution.chainUpdatedAtMs ?? resolution.clock.sourceTimestampMs ?? null : resolution?.clock.sourceTimestampMs ?? null,
+      localReceivedAtMs: resolution && "localReceivedAtMs" in resolution ? resolution.localReceivedAtMs ?? resolution.clock.receivedAtMs : resolution?.clock.receivedAtMs ?? null,
+      oracleLagMs: resolution && "oracleLagMs" in resolution ? resolution.oracleLagMs ?? resolution.lagMs ?? null : resolution?.lagMs ?? null,
+      stalenessStatus: resolution && "stalenessStatus" in resolution ? resolution.stalenessStatus ?? null : null,
+      contractAddress: resolution && "metadata" in resolution ? resolution.metadata?.contractAddress ?? null : null,
+    },
+    predictiveTape: {
+      compositePrice: predictiveCompositePrice,
+      divergenceFromSettlementAbs,
+      divergenceFromSettlementPct,
+      inputs: predictive?.predictiveTape.feeds ?? predictive?.feeds ?? {},
+    },
+    marketPrice: {
+      yesBestBid: predictive?.marketPrice.yesBestBid ?? book.bid,
+      yesBestAsk: predictive?.marketPrice.yesBestAsk ?? book.ask,
+      noBestBid: predictive?.marketPrice.noBestBid ?? null,
+      noBestAsk: predictive?.marketPrice.noBestAsk ?? null,
+      executable: predictive?.marketPrice.executable ?? (book.bid !== null && book.ask !== null),
+    },
+    quant: {
+      probabilityUp: params.snapshot.probabilityUp ?? null,
+      sigma: params.snapshot.sigma ?? null,
+    },
     risk: {
+
       approved: params.decision?.approved ?? null,
       reasons: params.decision?.reasons ?? [],
     },

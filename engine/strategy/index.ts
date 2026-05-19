@@ -4,6 +4,7 @@ import { lateEntry, type LateEntryConfig } from "./late-entry.ts";
 import { lateEntryOptimized } from "./late-entry-optimized.ts";
 import { lateEntryAdaptive } from "./late-entry-adaptive.ts";
 import { hyperAggressive } from "./hyper-aggressive.ts";
+import { fairValueMaker } from "./fair-value-maker.ts";
 
 export type StrategyVariant = {
   id: string;
@@ -25,8 +26,10 @@ export const strategies: Record<string, Strategy> = {
   "late-entry": lateEntry,
   "late-entry-optimized": lateEntryOptimized,
   "late-entry-adaptive": lateEntryAdaptive,
-  "hyper-aggressive": hyperAggressive,
-};
+  hyperaggressive: hyperAggressive,
+  "fair-value-maker": fairValueMaker,
+  };
+
 
 export const DEFAULT_STRATEGY = "simulation";
 
@@ -108,6 +111,33 @@ export const strategyVariants: Record<string, StrategyVariant> = {
       minLiquidity: 30,
     },
     paperEligible: false,
+  },
+  "fair-value-maker": {
+    id: "fair-value-maker",
+    label: "Fair Value Maker (Institutional)",
+    strategy: "fair-value-maker",
+    description: "Mathematical fair-value quoting using Black-Scholes digital option pricing and inventory skew.",
+    config: {
+      shares: 5,
+      margin: 0.05,
+      inventorySkew: 0.1,
+      maxInventory: 50,
+    },
+    paperEligible: true,
+  },
+  "late-entry-flow-aware": {
+    id: "late-entry-flow-aware",
+    label: "late-entry (Flow Aware)",
+    strategy: "late-entry",
+    description: "Standard late-entry reinforced with Order Book Imbalance and Whale protection.",
+    config: {
+      ...LATE_ENTRY_DEFAULT,
+      certaintyPrice: 0.75,
+      minImbalance: 0.1,
+      minGapSafety: 20,
+      blockOnHostileWhale: true,
+    },
+    paperEligible: true,
   },
 };
 

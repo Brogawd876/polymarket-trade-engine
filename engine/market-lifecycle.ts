@@ -13,6 +13,8 @@ import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
 import { Env } from "../utils/config.ts";
+import { digitalCallProbability } from "../utils/math.ts";
+import type { MaintenanceTracker } from "../utils/maintenance.ts";
 import type { UserChannel } from "./user-channel.ts";
 import {
   type ResolutionSourceAdapter,
@@ -20,6 +22,8 @@ import {
   type PredictiveFeedAdapter,
   type PredictiveSignalAggregator,
   type LeadLagMonitor,
+  type OrderFlowMonitor,
+  type QuantMonitor,
   type RoundWindow,
   PolymarketVenueAdapter,
   AggregatedRiskGate,
@@ -106,8 +110,11 @@ type MarketLifecycleOptions = {
   coinbase?: PredictiveFeedAdapter;
   aggregator?: PredictiveSignalAggregator;
   leadLag?: LeadLagMonitor;
+  orderFlow?: OrderFlowMonitor;
+  quant?: QuantMonitor;
   venue?: VenueDataAdapter;
   riskGate?: RiskGate;
+  maintenance?: MaintenanceTracker;
   clock?: Clock;
   feedReadinessTimeoutMs?: number;
   feedReadinessPollMs?: number;
@@ -124,6 +131,7 @@ export class MarketLifecycle {
 
   private _clobTokenIds: [string, string] | null = null;
   private _conditionId: string | null = null;
+  private _userChannelConditionId: string | null = null;
 
   private _feeRate = 0;
   private _pendingOrders: PendingOrder[] = [];
@@ -156,6 +164,9 @@ export class MarketLifecycle {
   private readonly _coinbase?: PredictiveFeedAdapter;
   private readonly _aggregator?: PredictiveSignalAggregator;
   private readonly _leadLag?: LeadLagMonitor;
+  private readonly _orderFlow?: OrderFlowMonitor;
+  private readonly _quant?: QuantMonitor;
+  private readonly _maintenance?: MaintenanceTracker;
   private readonly _venue: VenueDataAdapter;
   private readonly _riskGate: RiskGate;
   private readonly _feedReadinessTimeoutMs: number;
@@ -182,6 +193,9 @@ export class MarketLifecycle {
     this._coinbase = opts.coinbase;
     this._aggregator = opts.aggregator;
     this._leadLag = opts.leadLag;
+    this._orderFlow = opts.orderFlow;
+    this._quant = opts.quant;
+    this._maintenance = opts.maintenance;
     this._riskGate = opts.riskGate ?? new AggregatedRiskGate();
     this._feedReadinessTimeoutMs =
       opts.feedReadinessTimeoutMs ??
@@ -354,6 +368,9 @@ export class MarketLifecycle {
         const downBid = this._orderBook.bestBidPrice("DOWN");
         const downAsk = this._orderBook.bestAskPrice("DOWN");
 
+        const prob = this._quant?.latest().probabilityUp;
+        const sigma = this._quant?.latest().sigma;
+
         this._telemetry.push({
           ts: this._clock.nowMs(),
           type: "MARKET_TICK",
@@ -372,8 +389,11 @@ export class MarketLifecycle {
             upAsk,
             downBid,
             downAsk,
-          }
-        });
+            probabilityUp: prob ?? null,
+            sigma: sigma ?? null,
+            },
+            });
+
         
         if (this._aggregator) {
             this._telemetry.push({
@@ -468,6 +488,26 @@ export class MarketLifecycle {
     // Start venue events
     await this._venue.start();
 
+    const round: RoundWindow = {
+      slug: this.slug,
+      asset: Env.get("MARKET_ASSET"),
+      window: Env.get("MARKET_WINDOW"),
+      startTimeMs: slot.startTime,
+      endTimeMs: slot.endTime,
+    };
+
+    if (this._resolution) {
+      await this._resolution.priceToBeat(round);
+    }
+
+    if (
+      this._conditionId &&
+      this._userChannelConditionId !== this._conditionId
+    ) {
+      this._userChannel.subscribe(this._conditionId);
+      this._userChannelConditionId = this._conditionId;
+    }
+
     if (!this._orderBook.isReady() || !this._userChannel.isReady()) {
       return;
     }
@@ -499,7 +539,6 @@ export class MarketLifecycle {
       return;
     }
 
-    this._userChannel.subscribe(this._conditionId!);
     this._marketLogger.setSnapshotProvider(() =>
       this._orderBook.getSnapshotData(),
     );
@@ -519,6 +558,24 @@ export class MarketLifecycle {
         ? parseFloat((assetPrice - data.openPrice).toFixed(2))
         : undefined;
       return { openPrice: data.openPrice, gap, priceToBeat: data.openPrice };
+    });
+    this._marketLogger.setResolutionProvider(() => {
+      const resolution = this._resolution?.latest();
+      if (!resolution) return null;
+      return {
+        source: resolution.source,
+        sourceType: resolution.sourceType,
+        price: resolution.price,
+        rawOracleAnswer: resolution.rawOracleAnswer,
+        roundId: resolution.roundId,
+        answeredInRound: resolution.answeredInRound,
+        chainUpdatedAtMs: resolution.chainUpdatedAtMs,
+        localReceivedAtMs: resolution.localReceivedAtMs ?? resolution.clock.receivedAtMs,
+        oracleLagMs: resolution.oracleLagMs ?? resolution.lagMs,
+        quality: resolution.quality,
+        stalenessStatus: resolution.stalenessStatus,
+        contractAddress: resolution.metadata?.contractAddress,
+      };
     });
     this._marketLogger.startSlot(
       this.slug,
@@ -571,6 +628,8 @@ export class MarketLifecycle {
         aggregate: this._aggregator,
         leadLag: this._leadLag,
       },
+      orderFlow: this._orderFlow,
+      quant: this._quant,
       clock: this._clock,
     };
 
@@ -701,6 +760,23 @@ export class MarketLifecycle {
    * Buys retry up to BUY_MAX_RETRIES times on balance errors; sells retry until slot end.
    */
   private _postOrders(requests: OrderRequest[]): void {
+    const maintenance = this._maintenance?.isActive(this._clock.nowMs());
+    if (maintenance?.active) {
+      const reason = `Polymarket matching engine maintenance: ${maintenance.reason ?? "active"}`;
+      this._log(
+        `[maintenance] Skipping order placement: ${maintenance.reason}`,
+        "yellow",
+      );
+      for (const item of requests) {
+        this._marketLogger.log(
+          this._createOrderEntry(item.req, "failed", { reason }),
+        );
+        this._emitOrderLifecycle(item.req, "failed", { error: reason });
+        item.onFailed?.(reason);
+      }
+      return;
+    }
+
     const buys = requests.filter(
       (o) => o.req.action === "buy" && !this._buyBlocked,
     );
@@ -1030,11 +1106,13 @@ export class MarketLifecycle {
           const p = placed[i];
           const item = remaining[i]!;
           if (!p || !p.orderId) {
+            this._log(`[placement] Order failed: ${p?.errorMsg}`, "red");
             if (
               p?.errorMsg?.includes("not enough balance") &&
               this._clock.nowMs() < this.slotEndMs &&
               retryCount < maxRetries
             ) {
+
               // Parse actual balance from CLOB error and adjust shares
               const balMatch = p.errorMsg.match(
                 /balance:\s*(\d+).*?order amount:\s*(\d+)/,
@@ -1321,9 +1399,11 @@ export class MarketLifecycle {
   }
 
   private _createRiskSnapshot(): RiskSnapshot {
+    const quant = this._quant?.latest();
     return {
       nowMs: this._clock.nowMs(),
       productionEnabled: Env.get("PROD"),
+      maintenance: this._maintenance?.isActive(this._clock.nowMs()) ?? null,
       resolution: this._resolution?.latest() ?? null,
       venue: this._venue.latest(),
       predictiveFeeds: [
@@ -1332,6 +1412,9 @@ export class MarketLifecycle {
       ].filter((event): event is NonNullable<typeof event> => event !== null),
       predictiveAggregate: this._aggregator?.latest() ?? null,
       leadLag: this._leadLag?.latest() ?? null,
+      orderFlow: this._orderFlow?.latest() ?? null,
+      probabilityUp: quant?.probabilityUp ?? null,
+      sigma: quant?.sigma ?? null,
       openExposureUsd: this._openExposureUsd(),
       sessionPnlUsd: this._pnl,
       clobTokenIds: this._clobTokenIds ?? undefined,
@@ -1387,12 +1470,21 @@ export class MarketLifecycle {
     if (event.quality === "stale" || event.quality === "missing") {
       reasons.push(`${label} feed quality is ${event.quality}`);
     }
-    const maxFreshnessMs =
+    const maxFeedFreshnessMs =
       DEFAULT_SIMULATION_RISK_LIMITS.maxFeedFreshnessMs;
-    if (event.freshnessMs !== null && event.freshnessMs > maxFreshnessMs) {
+    const maxSourceFreshnessMs =
+      label === "resolution"
+        ? DEFAULT_SIMULATION_RISK_LIMITS.maxOracleLagMs
+        : maxFeedFreshnessMs;
+    const maxReceivedAgeMs =
+      label === "resolution" ? Math.max(maxFeedFreshnessMs, 3_000) : maxFeedFreshnessMs;
+    if (
+      event.freshnessMs !== null &&
+      event.freshnessMs > maxSourceFreshnessMs
+    ) {
       reasons.push(`${label} feed is stale by freshness threshold`);
     }
-    if (nowMs - event.clock.receivedAtMs > maxFreshnessMs) {
+    if (nowMs - event.clock.receivedAtMs > maxReceivedAgeMs) {
       reasons.push(`${label} feed is stale by received age threshold`);
     }
   }

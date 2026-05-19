@@ -1,9 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
+import { pathToFileURL } from "url";
 import { tmpdir } from "os";
 
-const MODULE_PATH = resolve(import.meta.dir, "../../utils/process-lock.ts");
+const MODULE_PATH = pathToFileURL(
+  resolve(import.meta.dir, "../../utils/process-lock.ts"),
+).href;
 
 let tmpDir: string;
 

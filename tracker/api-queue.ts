@@ -1,6 +1,7 @@
-import { fetchWithRetry } from "../utils/fetch-retry";
+import { fetchWithRetry, MaintenanceError } from "../utils/fetch-retry";
 import { Env } from "../utils/config";
 import type { Slot } from "../utils/slot";
+import { MaintenanceTracker } from "../utils/maintenance";
 
 const variantMap: Record<string, string> = {
   "5m": "fiveminute",
@@ -40,6 +41,11 @@ export class APIQueue {
   private eventResponse: Map<string, EventResponse> = new Map();
   private _marketResult: Map<number, MarketData> = new Map();
   private _queuedSlots = new Set<number>();
+  private _maintenance?: MaintenanceTracker;
+
+  constructor(opts: { maintenance?: MaintenanceTracker } = {}) {
+    this._maintenance = opts.maintenance;
+  }
 
   get eventDetails() {
     return this.eventResponse;
@@ -52,6 +58,13 @@ export class APIQueue {
   async queueEventDetails(slug: string) {
     const res = await fetchWithRetry(
       `https://gamma-api.polymarket.com/events?slug=${slug}`,
+      {
+        onError: (e) => {
+          if (e instanceof MaintenanceError) {
+            this._maintenance?.record425();
+          }
+        },
+      },
     );
     const event: EventResponse = ((await res.json()) as any[])[0];
     this.eventResponse.set(slug, event);
@@ -84,6 +97,10 @@ export class APIQueue {
         if (!data.closePrice) throw new Error("Close price not set");
       },
       onError: (e: unknown) => {
+        if (e instanceof MaintenanceError) {
+          this._maintenance?.record425();
+          return;
+        }
         const code = (e as any)?.code;
         if (code === "ECONNRESET") {
           console.error(

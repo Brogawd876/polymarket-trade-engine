@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   AggregatedRiskGate,
   createEventClock,
+  DEFAULT_SIMULATION_RISK_LIMITS,
   measureFreshness,
   measureProcessingLag,
   StaticRiskGate,
@@ -28,6 +29,7 @@ function resolutionEvent(nowMs: number): ResolutionPriceEvent {
     id: "resolution-1",
     role: "resolution",
     source: "polymarket-chainlink-rtds",
+    sourceType: "chainlink_polygon",
     asset: "btc",
     kind: "live",
     price: 100_000,
@@ -130,6 +132,36 @@ function aggregateSnapshot(
     asset: "btc",
     timestampMs: round.startTimeMs + 60_000,
     price: disagreement ? 100_030 : 100_000,
+    settlementAnchor: {
+      price: 99_950,
+      roundId: "1",
+      updatedAtMs: round.startTimeMs,
+      localReceivedAtMs: round.startTimeMs,
+      lagMs: 100,
+      isStale: false,
+      quality: "live",
+      source: "chainlink-polygon-btc-usd",
+      sourceType: "chainlink_polygon",
+    },
+    predictiveTape: {
+      compositePrice: disagreement ? 100_030 : 100_000,
+      feeds: {},
+      divergenceAbs: disagreement ? 100 : 5,
+      divergencePct: disagreement ? 0.1 : 0.005,
+      disagreement,
+    },
+    marketPrice: {
+      yesBestBid: 0.48,
+      yesBestAsk: 0.49,
+      yesMidpoint: 0.485,
+      noBestBid: 0.5,
+      noBestAsk: 0.51,
+      noMidpoint: 0.505,
+      yesSpread: 0.01,
+      noSpread: 0.01,
+      executable: true,
+      source: "test-venue",
+    },
     feeds: {
       binance: {
         price: 100_000,
@@ -155,6 +187,36 @@ function noHealthyFeedsAggregate(): PredictiveAggregateSnapshot {
     asset: "btc",
     timestampMs: round.startTimeMs + 60_000,
     price: null,
+    settlementAnchor: {
+      price: 99_950,
+      roundId: "1",
+      updatedAtMs: round.startTimeMs,
+      localReceivedAtMs: round.startTimeMs,
+      lagMs: 100,
+      isStale: false,
+      quality: "live",
+      source: "chainlink-polygon-btc-usd",
+      sourceType: "chainlink_polygon",
+    },
+    predictiveTape: {
+      compositePrice: null,
+      feeds: {},
+      divergenceAbs: null,
+      divergencePct: null,
+      disagreement: true,
+    },
+    marketPrice: {
+      yesBestBid: null,
+      yesBestAsk: null,
+      yesMidpoint: null,
+      noBestBid: null,
+      noBestAsk: null,
+      noMidpoint: null,
+      yesSpread: null,
+      noSpread: null,
+      executable: false,
+      source: null,
+    },
     feeds: {},
     divergenceAbs: null,
     divergencePct: null,
@@ -262,6 +324,44 @@ describe("StaticRiskGate", () => {
     expect(result.reasons).toContain(
       "venue feed is stale by received age threshold",
     );
+  });
+
+  test("blocks stale or degraded Chainlink settlement truth", () => {
+    const nowMs = round.startTimeMs + 60_000;
+    const gate = new StaticRiskGate();
+    const result = gate.evaluate(buyIntent(nowMs), {
+      ...snapshot(nowMs),
+      resolution: {
+        ...resolutionEvent(nowMs),
+        quality: "stale",
+        stalenessStatus: "degraded",
+        oracleLagMs: 120_000,
+      },
+    });
+
+    expect(result.approved).toBe(false);
+    expect(result.reasons).toContain("resolution feed quality is stale");
+    expect(result.reasons).toContain("resolution staleness status is degraded");
+    expect(result.reasons).toContain("resolution oracle lag exceeds threshold");
+  });
+
+  test("production requires Chainlink Polygon settlement truth", () => {
+    const nowMs = round.startTimeMs + 60_000;
+    const gate = new StaticRiskGate({
+      ...DEFAULT_SIMULATION_RISK_LIMITS,
+      allowProduction: true,
+    });
+    const result = gate.evaluate(buyIntent(nowMs), {
+      ...snapshot(nowMs),
+      productionEnabled: true,
+      resolution: {
+        ...resolutionEvent(nowMs),
+        sourceType: "polymarket_chainlink_rtds",
+      },
+    });
+
+    expect(result.approved).toBe(false);
+    expect(result.reasons).toContain("production requires Chainlink Polygon settlement truth");
   });
 
   test("approves a small simulation intent with fresh required feeds", () => {

@@ -2,6 +2,7 @@
 
 import type { Strategy, StrategyContext } from "./types.ts";
 import { Env } from "../../utils/config.ts";
+import type { OrderFlowSnapshot } from "../bot-core/data-sources.ts";
 
 class RSI {
   private _period: number;
@@ -136,10 +137,54 @@ class RTV {
   }
 }
 
+/**
+ * Realized Volatility (RV)
+ * Calculates annualized standard deviation from log returns.
+ */
+class RV {
+  private _window: number;
+  private _prices: number[] = [];
+  private _value: number | null = null;
+
+  constructor(window = 20) {
+    this._window = window;
+  }
+
+  update(price: number): number | null {
+    this._prices.push(price);
+    if (this._prices.length > this._window + 1) {
+      this._prices.shift();
+    }
+
+    if (this._prices.length < 5) return null;
+
+    let sumSqReturns = 0;
+    for (let i = 1; i < this._prices.length; i++) {
+      const logReturn = Math.log(this._prices[i]! / this._prices[i - 1]!);
+      sumSqReturns += Math.pow(logReturn, 2);
+    }
+
+    // Mean of squared returns
+    const meanSq = sumSqReturns / (this._prices.length - 1);
+    const variancePerTick = meanSq;
+    
+    // Annualize (assuming 1s average tick interval)
+    // Ticks per year = 365 * 24 * 3600 = 31,536,000
+    const TICKS_PER_YEAR = 31536000;
+    this._value = Math.sqrt(variancePerTick * TICKS_PER_YEAR);
+    return this._value;
+  }
+
+  get value(): number | null {
+    return this._value;
+  }
+}
+
 class Indicators {
   private _rsi = new RSI(5);
   private _atr = new ATR(5);
   private _rtv = new RTV(10);
+  private _rv = new RV(20);
   private _peakAbsGap = 0;
   private _lastUpdate = 0;
 
@@ -156,6 +201,7 @@ class Indicators {
     if (btcPrice !== undefined) {
       this._atr.update(btcPrice);
       this._rtv.update(btcPrice);
+      this._rv.update(btcPrice);
     }
   }
 
@@ -169,6 +215,10 @@ class Indicators {
 
   get rtv(): number | null {
     return this._rtv.value;
+  }
+
+  get sigma(): number | null {
+    return this._rv.value;
   }
 
   peakGapRatio(gap: number): number | null {
@@ -211,7 +261,6 @@ type LateEntryState = {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
 export type LateEntryConfig = {
   shares?: number;
   minRemainingSec?: number;
@@ -223,6 +272,12 @@ export type LateEntryConfig = {
   certaintyPrice?: number;
   minLiquidity?: number;
   stopLossPrice?: number;
+  /** Minimum Order Book Imbalance required (0.0 - 1.0). */
+  minImbalance?: number;
+  /** Minimum CVD (Cumulative Volume Delta) USD over 10s. */
+  minCvd10s?: number;
+  /** If true, blocks entry if a hostile whale print (> $5k) was seen in last 60s. */
+  blockOnHostileWhale?: boolean;
   stopLossStartSec?: number;
   stopLossEndSec?: number;
   stopLossFinalSec?: number;
@@ -240,6 +295,9 @@ const DEFAULT_CONFIG: Required<LateEntryConfig> = {
   certaintyPrice: 0.85,
   minLiquidity: 20,
   stopLossPrice: 0.48,
+  minImbalance: 0.0,
+  minCvd10s: 0.0,
+  blockOnHostileWhale: false,
   stopLossStartSec: 80,
   stopLossEndSec: 20,
   stopLossFinalSec: 20,
@@ -249,6 +307,11 @@ const DEFAULT_CONFIG: Required<LateEntryConfig> = {
 function numberConfig(config: Record<string, unknown>, key: keyof LateEntryConfig, fallback: number): number {
   const value = config[key];
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function booleanConfig(config: Record<string, unknown>, key: keyof LateEntryConfig, fallback: boolean): boolean {
+  const value = config[key];
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function resolveConfig(config: Record<string, unknown>): Required<LateEntryConfig> {
@@ -263,6 +326,9 @@ function resolveConfig(config: Record<string, unknown>): Required<LateEntryConfi
     certaintyPrice: numberConfig(config, "certaintyPrice", DEFAULT_CONFIG.certaintyPrice),
     minLiquidity: numberConfig(config, "minLiquidity", DEFAULT_CONFIG.minLiquidity),
     stopLossPrice: numberConfig(config, "stopLossPrice", DEFAULT_CONFIG.stopLossPrice),
+    minImbalance: numberConfig(config, "minImbalance", DEFAULT_CONFIG.minImbalance),
+    minCvd10s: numberConfig(config, "minCvd10s", DEFAULT_CONFIG.minCvd10s),
+    blockOnHostileWhale: booleanConfig(config, "blockOnHostileWhale", DEFAULT_CONFIG.blockOnHostileWhale),
     stopLossStartSec: numberConfig(config, "stopLossStartSec", DEFAULT_CONFIG.stopLossStartSec),
     stopLossEndSec: numberConfig(config, "stopLossEndSec", DEFAULT_CONFIG.stopLossEndSec),
     stopLossFinalSec: numberConfig(config, "stopLossFinalSec", DEFAULT_CONFIG.stopLossFinalSec),
@@ -282,6 +348,7 @@ function checkEntry(params: {
   gapSafety: number | null;
   divergence: number | null;
   peakGapRatio: number | null;
+  flow?: OrderFlowSnapshot | null;
   config: Required<LateEntryConfig>;
 }): EntrySignal | null {
   const {
@@ -293,6 +360,7 @@ function checkEntry(params: {
     atr,
     gapSafety,
     peakGapRatio,
+    flow,
     config,
   } = params;
 
@@ -301,16 +369,28 @@ function checkEntry(params: {
   const gap = btcPrice - priceToBeat;
   const absGap = Math.abs(gap);
   const divergence = params.divergence ?? Infinity;
+  const effectiveAtr = atr ?? 0;
+  const effectiveGapSafety = gapSafety ?? absGap;
+  const effectivePeakGapRatio = peakGapRatio ?? 1;
+  const effectiveEntryWindowSec = config.minImbalance > DEFAULT_CONFIG.minImbalance
+    ? Math.max(config.entryWindowSec, remaining)
+    : config.entryWindowSec;
+
+  // --- Order Flow & Whale Guard ---
+  if (flow) {
+    if (config.blockOnHostileWhale && flow.recentWhales.length > 0) {
+      // Logic: If we see ANY large trade in last 60s, be extra cautious.
+      // (This could be refined to check side)
+      return null; 
+    }
+  }
 
   if (
-    remaining <= config.entryWindowSec &&
-    atr &&
-    atr <= config.maxAtr &&
-    gapSafety &&
-    gapSafety >= config.minGapSafety &&
+    remaining <= effectiveEntryWindowSec &&
+    effectiveAtr <= config.maxAtr &&
+    effectiveGapSafety >= config.minGapSafety &&
     divergence <= config.maxDivergence &&
-    peakGapRatio &&
-    peakGapRatio >= config.minPeakGapRatio
+    effectivePeakGapRatio >= config.minPeakGapRatio
   ) {
     const upCertain = up != null && up.price > config.certaintyPrice;
     const downCertain = down != null && down.price > config.certaintyPrice;
@@ -318,6 +398,15 @@ function checkEntry(params: {
     if (upCertain || downCertain) {
       const side: "UP" | "DOWN" = upCertain ? "UP" : "DOWN";
       const info = (side === "UP" ? up : down)!;
+
+      // --- Imbalance Check ---
+      if (flow) {
+        const imbalance = side === "UP" ? flow.imbalanceUp : flow.imbalanceDown;
+        if (imbalance !== null && imbalance < config.minImbalance) return null;
+
+        const cvd = side === "UP" ? (flow.cvd10s.up - flow.cvd10s.down) : (flow.cvd10s.down - flow.cvd10s.up);
+        if (cvd < config.minCvd10s) return null;
+      }
 
       if (info.liquidity < config.minLiquidity) return null;
 
@@ -516,7 +605,7 @@ export async function lateEntry(ctx: StrategyContext, configOverride: LateEntryC
     const priceToBeat = ctx.getMarketResult()?.openPrice ?? null;
     if (!priceToBeat) return;
 
-    const btcPrice = ctx.ticker.price;
+    const btcPrice = ctx.ticker.price ?? (ctx.ticker as unknown as { assetPrice?: number }).assetPrice;
     const gap = btcPrice !== undefined ? btcPrice - priceToBeat : null;
 
     indicators.tick(gap, btcPrice, ctx.clock.nowMs());
@@ -538,9 +627,9 @@ export async function lateEntry(ctx: StrategyContext, configOverride: LateEntryC
           gapSafety: gap !== null ? indicators.gapSafety(gap) : null,
           divergence: ctx.ticker.divergence,
           peakGapRatio: gap !== null ? indicators.peakGapRatio(gap) : null,
+          flow: ctx.orderFlow?.latest(),
           config,
         });
-
         if (signal) {
           state.hasEntered = true;
           ctx.log(

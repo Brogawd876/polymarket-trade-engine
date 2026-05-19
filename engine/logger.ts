@@ -22,6 +22,7 @@ type LogEntry =
     }
   | { type: "info"; msg: string; reason?: string }
   | { type: "decision_feature"; snapshot: DecisionFeatureSnapshot }
+  | { type: "chainlink_resolution"; [key: string]: unknown }
   | {
       type: "resolution";
       direction: "UP" | "DOWN";
@@ -65,6 +66,22 @@ export class Logger {
   private _marketResultProvider:
     | (() => { openPrice?: number; gap?: number; priceToBeat?: number })
     | null = null;
+  private _resolutionProvider:
+    | (() => {
+        source?: string;
+        sourceType?: string;
+        price?: number;
+        rawOracleAnswer?: string;
+        roundId?: string;
+        answeredInRound?: string;
+        chainUpdatedAtMs?: number | null;
+        localReceivedAtMs?: number;
+        oracleLagMs?: number | null;
+        quality?: string;
+        stalenessStatus?: string;
+        contractAddress?: string;
+      } | null)
+    | null = null;
   private _snapshotTimer: NodeJS.Timeout | null = null;
   private _slotEndMs: number = 0;
 
@@ -78,6 +95,25 @@ export class Logger {
     fn: () => { openPrice?: number; gap?: number; priceToBeat?: number },
   ) {
     this._marketResultProvider = fn;
+  }
+
+  setResolutionProvider(
+    fn: () => {
+      source?: string;
+      sourceType?: string;
+      price?: number;
+      rawOracleAnswer?: string;
+      roundId?: string;
+      answeredInRound?: string;
+      chainUpdatedAtMs?: number | null;
+      localReceivedAtMs?: number;
+      oracleLagMs?: number | null;
+      quality?: string;
+      stalenessStatus?: string;
+      contractAddress?: string;
+    } | null,
+  ) {
+    this._resolutionProvider = fn;
   }
 
   /** Inject an asset ticker provider — emits a ticker entry alongside each snapshot. */
@@ -167,6 +203,12 @@ export class Logger {
       const data = this._marketResultProvider();
       if (data.openPrice) {
         this._append({ type: "market_price", ...data });
+      }
+    }
+    if (this._resolutionProvider) {
+      const data = this._resolutionProvider();
+      if (data?.price !== undefined) {
+        this._append({ type: "chainlink_resolution", ...data });
       }
     }
   }

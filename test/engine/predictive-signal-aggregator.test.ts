@@ -1,6 +1,11 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { DefaultPredictiveAggregator } from "../../engine/bot-core/predictive-signal-aggregator.ts";
-import { type PredictivePriceEvent, createEventClock } from "../../engine/bot-core/data-sources";
+import {
+  type PredictivePriceEvent,
+  type ResolutionPriceEvent,
+  type VenueOrderBookEvent,
+  createEventClock,
+} from "../../engine/bot-core/data-sources";
 
 // Mock adapter
 class MockPredictiveAdapter {
@@ -11,6 +16,19 @@ class MockPredictiveAdapter {
   }
   emit(event: PredictivePriceEvent) {
     this.handler?.(event);
+  }
+}
+
+class StaticAdapter<T> {
+  constructor(private event: T | null) {}
+  subscribe() {
+    return () => {};
+  }
+  latest() {
+    return this.event;
+  }
+  latestAnchor() {
+    return this.event as any;
   }
 }
 
@@ -49,6 +67,50 @@ describe("DefaultPredictiveAggregator", () => {
       quality,
       freshnessMs: delayMs,
       lagMs: 0,
+    };
+  };
+
+  const resolutionEvent = (price: number): ResolutionPriceEvent => {
+    const now = Date.now();
+    return {
+      id: "chainlink-1",
+      role: "resolution",
+      source: "chainlink-polygon-btc-usd",
+      sourceType: "chainlink_polygon",
+      asset: "btc",
+      kind: "live",
+      price,
+      rawOracleAnswer: String(Math.round(price * 1e8)),
+      roundId: "1",
+      chainUpdatedAtMs: now - 100,
+      localReceivedAtMs: now,
+      oracleLagMs: 100,
+      clock: createEventClock({ sourceTimestampMs: now - 100, receivedAtMs: now }),
+      quality: "live",
+      stalenessStatus: "fresh",
+      freshnessMs: 100,
+      lagMs: 100,
+    };
+  };
+
+  const venueEvent = (): VenueOrderBookEvent => {
+    const now = Date.now();
+    return {
+      id: "venue-1",
+      role: "venue",
+      source: "polymarket-clob",
+      asset: "btc",
+      kind: "orderbook",
+      clock: createEventClock({ receivedAtMs: now }),
+      quality: "live",
+      freshnessMs: null,
+      lagMs: 0,
+      up: { bids: [[0.49, 10]], asks: [[0.51, 10]] },
+      down: { bids: [[0.48, 10]], asks: [[0.5, 10]] },
+      bestBidUp: 0.49,
+      bestAskUp: 0.51,
+      bestBidDown: 0.48,
+      bestAskDown: 0.5,
     };
   };
 
@@ -147,5 +209,29 @@ describe("DefaultPredictiveAggregator", () => {
     }
     
     expect(latest.disagreement).toBe(false); // One healthy feed remains
+  });
+
+  test("keeps settlement anchor, predictive tape, and market price separate", () => {
+    aggregator = new DefaultPredictiveAggregator({
+      asset: "btc",
+      feeds: {
+        binance: binance as any,
+        coinbase: coinbase as any,
+      },
+      resolution: new StaticAdapter(resolutionEvent(99_900)) as any,
+      venue: new StaticAdapter(venueEvent()) as any,
+    });
+
+    binance.emit(btcEvent("binance", 100_000));
+    coinbase.emit(btcEvent("coinbase", 100_020));
+
+    const latest = aggregator.latest();
+    expect(latest.settlementAnchor.price).toBe(99_900);
+    expect(latest.predictiveTape.compositePrice).toBe(100_010);
+    expect(latest.price).toBe(100_010);
+    expect(latest.predictiveTape.feeds.binance?.divergenceFromSettlementAbs).toBe(100);
+    expect(latest.marketPrice.yesBestBid).toBe(0.49);
+    expect(latest.marketPrice.yesBestAsk).toBe(0.51);
+    expect("referencePrice" in latest).toBe(false);
   });
 });

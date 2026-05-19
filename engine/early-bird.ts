@@ -8,6 +8,7 @@ import { loadState, saveState, type CompletedMarketState } from "./state.ts";
 import { getSlug } from "../utils/slot.ts";
 import { log } from "./log.ts";
 import { recover } from "./recovery.ts";
+import { MaintenanceTracker } from "../utils/maintenance.ts";
 import {
   DEFAULT_STRATEGY,
   type Strategy,
@@ -16,13 +17,15 @@ import {
 import { WalletTracker } from "./wallet-tracker.ts";
 import { TickerTracker } from "../tracker/ticker.ts";
 import { OrderBook } from "../tracker/orderbook.ts";
+import { TradeTapeTracker } from "../tracker/trade-tape.ts";
 import { Env } from "../utils/config.ts";
 import {
-  PolymarketResolutionAdapter,
+  ChainlinkResolutionAdapter,
   BinancePredictiveAdapter,
   CoinbasePredictiveAdapter,
   DefaultPredictiveAggregator,
   DefaultLeadLagMonitor,
+  DefaultQuantMonitor,
   ReplayLogReader,
   ReplayPredictiveAdapter,
   ReplayVenueAdapter,
@@ -37,7 +40,11 @@ import {
   type Clock,
   RealClock,
 } from "./bot-core/index.ts";
-import { TerminalAccessError } from "../utils/errors.ts";
+import { 
+  TerminalAccessError, 
+  InsufficientBalanceError, 
+  LossLimitExceededError 
+} from "../utils/errors.ts";
 import { 
   type TelemetrySink, 
   NullTelemetrySink, 
@@ -84,15 +91,19 @@ export class EarlyBird {
   private readonly _rounds: number | null; // null = unlimited
   private readonly _prod: boolean;
   private readonly _minSessionPnl: number;
+  private readonly _maxSessionProfit: number;
   private readonly _alwaysLog: boolean;
   private _roundsCreated = 0;
   private _tracker!: WalletTracker;
   private _ticker: TickerTracker;
+  private _tradeTape: TradeTapeTracker;
   private _resolution: ResolutionSourceAdapter;
   private _binance: PredictiveFeedAdapter;
   private _coinbase: PredictiveFeedAdapter;
   private _aggregator: DefaultPredictiveAggregator;
   private _leadLag: DefaultLeadLagMonitor;
+  private _quant: DefaultQuantMonitor;
+  private _maintenance: MaintenanceTracker;
   private _userChannelFactory: (() => UserChannel) | null = null;
   private _replayReader: ReplayLogReader | null = null;
   private _clock: Clock;
@@ -126,6 +137,7 @@ export class EarlyBird {
     this._slotOffset = slotOffset;
     this._alwaysLog = alwaysLog;
     this._minSessionPnl = parseFloat(process.env.MAX_SESSION_LOSS ?? "3");
+    this._maxSessionProfit = parseFloat(process.env.MAX_SESSION_PROFIT ?? "1000000");
     this._clock = runtime.clock ?? new RealClock();
     this._telemetry = runtime.telemetry ?? new NullTelemetrySink();
     const persistState = runtime.persistState ?? !replayFile;
@@ -139,7 +151,10 @@ export class EarlyBird {
       this._coinbase = new ReplayPredictiveAdapter("coinbase", this._replayReader);
     } else {
       this._ticker = new TickerTracker();
-      this._resolution = new PolymarketResolutionAdapter(this._clock, this._telemetry);
+      this._resolution = new ChainlinkResolutionAdapter({
+        clock: this._clock,
+        telemetry: this._telemetry,
+      });
       this._binance = new BinancePredictiveAdapter(this._clock, this._telemetry);
       this._coinbase = new CoinbasePredictiveAdapter(this._clock, this._telemetry);
     }
@@ -154,12 +169,27 @@ export class EarlyBird {
         binance: 0.7, // Institutional weight: Binance usually has 10x liquidity
         coinbase: 0.3,
       },
+      resolution: this._resolution,
       clock: this._clock,
     });
     this._leadLag = new DefaultLeadLagMonitor({
       asset: Env.get("MARKET_ASSET"),
       aggregator: this._aggregator,
       clock: this._clock,
+    });
+    this._quant = new DefaultQuantMonitor({
+      asset: Env.get("MARKET_ASSET"),
+      aggregator: this._aggregator,
+      resolution: this._resolution,
+      clock: this._clock,
+    });
+    this._tradeTape = new TradeTapeTracker({
+      asset: Env.get("MARKET_ASSET"),
+      clock: this._clock,
+    });
+    this._maintenance = new MaintenanceTracker();
+    this._apiQueue = new APIQueue({
+      maintenance: this._maintenance,
     });
 
     if (prod) {
@@ -248,11 +278,10 @@ export class EarlyBird {
         initialBalance = await this._client.getUSDCBalance();
         log.write(`[startup] On-chain balance: $${initialBalance.toFixed(2)}`);
         if (initialBalance === 0) {
-          console.error(
+          throw new InsufficientBalanceError(
             "Wallet balance is $0.00. Fund your funder wallet with pUSD before starting the engine.\n" +
-            "Run `bun scripts/pusd.ts wrap` to convert USDC.e → pUSD, or see docs/MIGRATE_V2.md.",
+            "Run `bun scripts/pusd.ts wrap` to convert USDC.e → pUSD, or see docs/MIGRATE_V2.md."
           );
-          process.exit(1);
         }
       } else {
         initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
@@ -276,13 +305,10 @@ export class EarlyBird {
           this._sessionLoss = state.sessionLoss ?? 0;
 
           if (Math.abs(this._sessionLoss) >= this._minSessionPnl) {
-            log.write(
-              `[startup] Session loss from previous session ($${this._sessionLoss.toFixed(2)}) already meets or exceeds the MAX_SESSION_LOSS threshold (-$${this._minSessionPnl.toFixed(2)}). ` +
-                `The engine would shut down immediately. ` +
-                `To start fresh, reset "sessionLoss" to 0 in ${this._statePath}, or increase MAX_SESSION_LOSS in your .env.`,
-              "red",
+            throw new LossLimitExceededError(
+              `Session loss from previous session ($${this._sessionLoss.toFixed(2)}) already meets or exceeds the MAX_SESSION_LOSS threshold (-$${this._minSessionPnl.toFixed(2)}). ` +
+              `To start fresh, reset "sessionLoss" to 0 in ${this._statePath}, or increase MAX_SESSION_LOSS in your .env.`
             );
-            process.exit(1);
           }
 
           // Sim recovery: replay order history to reconstruct balance
@@ -436,8 +462,8 @@ export class EarlyBird {
           : undefined;
 
         const orderBook = this._replayReader
-          ? new ReplayOrderBook(this._replayReader, this._clock)
-          : new OrderBook(this._clock);
+          ? new ReplayOrderBook(this._replayReader, this._clock, this._tradeTape)
+          : new OrderBook(this._clock, this._tradeTape);
 
         this._lifecycles.set(
           slug,
@@ -452,18 +478,20 @@ export class EarlyBird {
             presetId: this._presetId,
             tracker: this._tracker,
             ticker: this._ticker,
-            alwaysLog: this._alwaysLog,
             userChannel: this._userChannelFactory!(),
             resolution: this._resolution,
             binance: this._binance,
             coinbase: this._coinbase,
             aggregator: this._aggregator,
             leadLag: this._leadLag,
+            quant: this._quant,
+            maintenance: this._maintenance,
             venue,
             orderBook,
             clock: this._clock,
             telemetry: this._telemetry,
-          }),
+            }),
+
         );
         this._roundsCreated++;
       }
@@ -519,6 +547,12 @@ export class EarlyBird {
       if (Math.abs(this._sessionLoss) >= this._minSessionPnl) {
         this._startShutdown(
           `Session loss limit reached (total losses: $${this._sessionLoss.toFixed(2)}, threshold: -$${this._minSessionPnl.toFixed(2)}).`,
+        );
+      }
+
+      if (this._sessionPnl >= this._maxSessionProfit) {
+        this._startShutdown(
+          `Session profit target reached (total PnL: +$${this._sessionPnl.toFixed(2)}, target: +$${this._maxSessionProfit.toFixed(2)}).`,
         );
       }
     }
