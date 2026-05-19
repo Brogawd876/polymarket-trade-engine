@@ -459,7 +459,6 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
     const envApiPassphrase = process.env.POLY_API_PASSPHRASE || (this._signatureType === 3 ? process.env.BUILDER_PASSPHRASE : undefined);
 
     let creds: { key: string; secret: string; passphrase: string };
-    let useProxySignerForClob = false;
 
     if (envApiKey && envApiSecret && envApiPassphrase) {
       creds = {
@@ -467,7 +466,6 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
         secret: envApiSecret,
         passphrase: envApiPassphrase,
       };
-      useProxySignerForClob = true;
     } else {
       creds = await new ClobClient({
         host: this._host,
@@ -482,15 +480,11 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
     this.clob = new ClobClient({
       host: this._host,
       chain: Chain.POLYGON,
-      signer: useProxySignerForClob ? activeSigner : this._signer,
+      signer: this._signer,
       creds,
       signatureType: this._signatureType as any,
       funderAddress: this._funder,
     });
-
-    if (this._signatureType === 3 && this._funder) {
-      (this.clob.orderBuilder as any).signer = activeSigner;
-    }
   }
 
   getApiCreds(): { key: string; secret: string; passphrase: string } {

@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { TerminalAccessError, isBlockedBody } from "./errors";
 
 const CURL =
@@ -12,6 +13,10 @@ async function curlFetch(
   headers?: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<Response> {
+  if (!existsSync(CURL)) {
+    throw new Error(`Critical dependency missing: curl not found at ${CURL}. Please ensure curl is installed and accessible at this path.`);
+  }
+
   const args = ["-s", "-L"];
   for (const [key, value] of Object.entries(headers ?? {})) {
     args.push("-H", `${key}: ${value}`);

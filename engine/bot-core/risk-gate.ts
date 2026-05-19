@@ -83,18 +83,16 @@ export const DEFAULT_SIMULATION_RISK_LIMITS: StaticRiskLimits = {
 };
 
 export const DEFAULT_EXECUTION_QUALITY_LIMITS: ExecutionQualityLimits = {
-  /** 
-   * Deployed defaults are kept permissive to avoid breaking legacy simulation 
-   * tests which often use static/stale fixtures. Production configs must
-   * override these with strict values (e.g. 0.05 / 500ms / 1.0 / 1.0% / true).
+  /**
+   * Deployed defaults are tightened to professional levels to prevent
+   * accidental execution during extreme volatility or stale feed windows.
    */
-  maxSpreadUsd: 1.0, 
-  maxVenueAgeMs: 60000, // 1 minute
+  maxSpreadUsd: 0.1,
+  maxVenueAgeMs: 5000, // 5 seconds
   minTargetLiquidity: 0,
-  maxSlippagePct: 100.0,
+  maxSlippagePct: 1.0,
   requireProfitability: false,
 };
-
 export class StaticRiskGate implements RiskGate {
   constructor(
     private readonly limits: StaticRiskLimits = DEFAULT_SIMULATION_RISK_LIMITS,

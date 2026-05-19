@@ -142,7 +142,7 @@ export class MarketLifecycle {
   private _inFlight = 0;
   private _strategyLocks = 0;
   private _marketLogger = new Logger();
-  private _marketOpenTimer: any = null;
+  private _marketOpenTimer: unknown = null;
   private _marketPriceHandle: { cancel: () => void } | null = null;
   private _strategyCleanup: (() => void) | null = null;
   private _feedReadinessDeadlineMs: number | null = null;

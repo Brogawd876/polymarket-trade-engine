@@ -1,26 +1,26 @@
 export interface Clock {
   nowMs(): number;
-  setTimeout(handler: () => void, delayMs: number): any;
-  clearTimeout(handle: any): void;
-  setInterval(handler: () => void, intervalMs: number): any;
-  clearInterval(handle: any): void;
+  setTimeout(handler: () => void, delayMs: number): unknown;
+  clearTimeout(handle: unknown): void;
+  setInterval(handler: () => void, intervalMs: number): unknown;
+  clearInterval(handle: unknown): void;
 }
 
 export class RealClock implements Clock {
   nowMs(): number {
     return Date.now();
   }
-  setTimeout(handler: () => void, delayMs: number): any {
+  setTimeout(handler: () => void, delayMs: number): unknown {
     return setTimeout(handler, delayMs);
   }
-  clearTimeout(handle: any): void {
-    clearTimeout(handle);
+  clearTimeout(handle: unknown): void {
+    clearTimeout(handle as any);
   }
-  setInterval(handler: () => void, intervalMs: number): any {
+  setInterval(handler: () => void, intervalMs: number): unknown {
     return setInterval(handler, intervalMs);
   }
-  clearInterval(handle: any): void {
-    clearInterval(handle);
+  clearInterval(handle: unknown): void {
+    clearInterval(handle as any);
   }
 }
 

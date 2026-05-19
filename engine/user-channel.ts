@@ -267,7 +267,9 @@ export class PolymarketUserChannel extends UserChannelBase {
             this.processOrderEvent(msg as OrderEvent);
           else if (msg.event_type === "trade")
             this.processTradeEvent(msg as TradeEvent);
-        } catch {}
+        } catch (err) {
+          console.warn(`[UserChannel] Failed to parse message: ${raw}`, err);
+        }
       },
       isTerminal: (event) => {
         if (event.code === 4003 || event.reason.toLowerCase().includes("forbidden")) {
