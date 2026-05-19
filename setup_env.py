@@ -37,6 +37,7 @@ DEFAULTS = {
     "OPERATOR_AUTH_TOKEN": "",
     "FORCE_PROD": "false",
     "MAX_SESSION_LOSS": "3",
+    "MAX_SESSION_PROFIT": "0.50",
     "WALLET_BALANCE": "50",
     "CHAINLINK_BTC_5M_REFERENCE_VERIFIED": "false",
 }
@@ -55,6 +56,7 @@ HELP = {
     "OPERATOR_AUTH_TOKEN": "Optional local control-panel password. Hidden.",
     "FORCE_PROD": "Keep false so live runs still ask for confirmation.",
     "MAX_SESSION_LOSS": "Session loss cap in dollars.",
+    "MAX_SESSION_PROFIT": "Session profit target in dollars. Bot will exit once reached.",
     "WALLET_BALANCE": "Paper/simulation wallet balance.",
     "CHAINLINK_BTC_5M_REFERENCE_VERIFIED": "Keep false until BTC 5m settlement reference is verified.",
 }
@@ -178,6 +180,7 @@ class EnvSetupApp(tk.Tk):
         row = self._field(form, row, "OPERATOR_AUTH_TOKEN", secret=True)
         row = self._choice(form, row, "FORCE_PROD", ("false", "true"))
         row = self._field(form, row, "MAX_SESSION_LOSS")
+        row = self._field(form, row, "MAX_SESSION_PROFIT")
         row = self._field(form, row, "WALLET_BALANCE")
         row = self._choice(
             form,
@@ -316,6 +319,7 @@ BUILDER_PASSPHRASE={self._normalized("BUILDER_PASSPHRASE")}
 OPERATOR_AUTH_TOKEN={self._normalized("OPERATOR_AUTH_TOKEN")}
 FORCE_PROD={self._normalized("FORCE_PROD")}
 MAX_SESSION_LOSS={self._normalized("MAX_SESSION_LOSS")}
+MAX_SESSION_PROFIT={self._normalized("MAX_SESSION_PROFIT")}
 WALLET_BALANCE={self._normalized("WALLET_BALANCE")}
 
 CHAINLINK_BTC_5M_REFERENCE_VERIFIED={self._normalized("CHAINLINK_BTC_5M_REFERENCE_VERIFIED")}
