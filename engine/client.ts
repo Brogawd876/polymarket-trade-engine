@@ -454,9 +454,9 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       });
     }
 
-    const envApiKey = process.env.POLY_API_KEY || process.env.BUILDER_KEY;
-    const envApiSecret = process.env.POLY_API_SECRET || process.env.BUILDER_SECRET;
-    const envApiPassphrase = process.env.POLY_API_PASSPHRASE || process.env.BUILDER_PASSPHRASE;
+    const envApiKey = process.env.POLY_API_KEY || (this._signatureType === 3 ? process.env.BUILDER_KEY : undefined);
+    const envApiSecret = process.env.POLY_API_SECRET || (this._signatureType === 3 ? process.env.BUILDER_SECRET : undefined);
+    const envApiPassphrase = process.env.POLY_API_PASSPHRASE || (this._signatureType === 3 ? process.env.BUILDER_PASSPHRASE : undefined);
 
     let creds: { key: string; secret: string; passphrase: string };
     let useProxySignerForClob = false;
