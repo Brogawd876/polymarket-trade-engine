@@ -24,6 +24,10 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Install UI dependencies
+        working-directory: ui
+        run: bun install
+
       - name: Run isolated orderbook tests
         run: bun test --max-concurrency=1 test/tracker/orderbook.test.ts
 
