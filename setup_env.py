@@ -31,6 +31,9 @@ DEFAULTS = {
     "PRIVATE_KEY": "",
     "POLY_FUNDER_ADDRESS": "",
     "POLY_SIGNATURE_TYPE": "0",
+    "POLY_API_KEY": "",
+    "POLY_API_SECRET": "",
+    "POLY_API_PASSPHRASE": "",
     "BUILDER_KEY": "",
     "BUILDER_SECRET": "",
     "BUILDER_PASSPHRASE": "",
@@ -50,6 +53,9 @@ HELP = {
     "PRIVATE_KEY": "Private key for the dedicated MetaMask bot account. Hidden.",
     "POLY_FUNDER_ADDRESS": "Public address for the same account if using signature type 0.",
     "POLY_SIGNATURE_TYPE": "Use 0 for a normal MetaMask wallet.",
+    "POLY_API_KEY": "Optional custom Polymarket API key to bypass L1 derivation. Hidden.",
+    "POLY_API_SECRET": "Optional custom Polymarket API secret. Hidden.",
+    "POLY_API_PASSPHRASE": "Optional custom Polymarket API passphrase. Hidden.",
     "BUILDER_KEY": "Optional Polymarket Builder Code key.",
     "BUILDER_SECRET": "Optional Polymarket Builder Code secret. Hidden.",
     "BUILDER_PASSPHRASE": "Optional Polymarket Builder Code passphrase. Hidden.",
@@ -60,6 +66,7 @@ HELP = {
     "WALLET_BALANCE": "Paper/simulation wallet balance.",
     "CHAINLINK_BTC_5M_REFERENCE_VERIFIED": "Keep false until BTC 5m settlement reference is verified.",
 }
+
 
 
 def parse_env_file() -> dict[str, str]:
@@ -170,6 +177,10 @@ class EnvSetupApp(tk.Tk):
                 if item.startswith(value)
             ),
         )
+        row = self._field(form, row, "POLY_API_KEY", secret=True)
+        row = self._field(form, row, "POLY_API_SECRET", secret=True)
+        row = self._field(form, row, "POLY_API_PASSPHRASE", secret=True)
+
 
         row = self._section(form, row, "Builder Codes Optional")
         row = self._field(form, row, "BUILDER_KEY", secret=True)
@@ -312,6 +323,10 @@ PRIVATE_KEY={self._normalized("PRIVATE_KEY")}
 POLY_FUNDER_ADDRESS={self._normalized("POLY_FUNDER_ADDRESS")}
 POLY_SIGNATURE_TYPE={self._normalized("POLY_SIGNATURE_TYPE")}
 
+POLY_API_KEY={self._normalized("POLY_API_KEY")}
+POLY_API_SECRET={self._normalized("POLY_API_SECRET")}
+POLY_API_PASSPHRASE={self._normalized("POLY_API_PASSPHRASE")}
+
 BUILDER_KEY={self._normalized("BUILDER_KEY")}
 BUILDER_SECRET={self._normalized("BUILDER_SECRET")}
 BUILDER_PASSPHRASE={self._normalized("BUILDER_PASSPHRASE")}
@@ -324,6 +339,7 @@ WALLET_BALANCE={self._normalized("WALLET_BALANCE")}
 
 CHAINLINK_BTC_5M_REFERENCE_VERIFIED={self._normalized("CHAINLINK_BTC_5M_REFERENCE_VERIFIED")}
 """
+
         ENV_PATH.write_text(env_text, encoding="utf-8")
         messagebox.showinfo(
             "Saved",
