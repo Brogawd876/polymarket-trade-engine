@@ -427,11 +427,18 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   }
 
   async init(): Promise<void> {
+    const apiKeyNonceRaw = process.env.POLY_API_KEY_NONCE ?? "";
+    const apiKeyNonce =
+      apiKeyNonceRaw === "" ? undefined : Number.parseInt(apiKeyNonceRaw, 10);
+    if (apiKeyNonce !== undefined && Number.isNaN(apiKeyNonce)) {
+      throw new Error("POLY_API_KEY_NONCE must be an integer when set.");
+    }
+
     const creds = await new ClobClient({
       host: this._host,
       chain: Chain.POLYGON,
       signer: this._signer,
-    }).createOrDeriveApiKey();
+    }).createOrDeriveApiKey(apiKeyNonce);
     this._creds = creds;
     this.clob = new ClobClient({
       host: this._host,
@@ -474,12 +481,7 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       }),
     );
 
-    const resp: Array<{
-      orderID: string;
-      status: string;
-      success: boolean;
-      errorMsg: string;
-    }> = await this.clob.postOrders(
+    const resp = await this.clob.postOrders(
       signed.map((order, i) => ({
         order,
         orderType:
@@ -488,7 +490,26 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
             : ClobOrderType.GTC,
       })),
     );
-    return resp.map((r) => ({
+
+    if (!Array.isArray(resp)) {
+      const message =
+        typeof resp === "object" && resp !== null && "error" in resp
+          ? String((resp as { error?: unknown }).error)
+          : `unexpected postOrders response: ${JSON.stringify(resp)}`;
+      return orders.map(() => ({
+        orderId: "",
+        status: "failed",
+        success: false,
+        errorMsg: message,
+      }));
+    }
+
+    return (resp as Array<{
+      orderID: string;
+      status: string;
+      success: boolean;
+      errorMsg: string;
+    }>).map((r) => ({
       orderId: r.orderID,
       status: r.status,
       success: r.success,

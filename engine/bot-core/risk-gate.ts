@@ -156,10 +156,18 @@ export class StaticRiskGate implements RiskGate {
     if (event.quality === "stale" || event.quality === "missing") {
       reasons.push(`${label} feed quality is ${event.quality}`);
     }
-    if (event.freshnessMs !== null && event.freshnessMs > this.limits.maxFeedFreshnessMs) {
+    const maxSourceFreshnessMs =
+      label === "resolution"
+        ? this.limits.maxOracleLagMs
+        : this.limits.maxFeedFreshnessMs;
+    const maxReceivedAgeMs =
+      label === "resolution"
+        ? Math.max(this.limits.maxFeedFreshnessMs, 3_000)
+        : this.limits.maxFeedFreshnessMs;
+    if (event.freshnessMs !== null && event.freshnessMs > maxSourceFreshnessMs) {
       reasons.push(`${label} feed is stale by freshness threshold`);
     }
-    if (snapshot.nowMs - event.clock.receivedAtMs > this.limits.maxFeedFreshnessMs) {
+    if (snapshot.nowMs - event.clock.receivedAtMs > maxReceivedAgeMs) {
       reasons.push(`${label} feed is stale by received age threshold`);
     }
     if (label === "resolution") {

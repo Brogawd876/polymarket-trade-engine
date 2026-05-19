@@ -146,8 +146,11 @@ if (opts.idle) {
       await sessionManager.startSimulation({
         strategy: opts.strategy,
         rounds: opts.rounds,
-        alwaysLog: opts.alwaysLog
+        alwaysLog: opts.alwaysLog,
+        prod: Boolean(opts.prod),
+        slotOffset: opts.slotOffset
       });
+
       // Monitor for completion
       setInterval(() => {
           if (sessionManager.getStatus().sessionState === "completed" || sessionManager.getStatus().sessionState === "failed") {

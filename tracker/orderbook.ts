@@ -93,12 +93,7 @@ export class OrderBook {
           JSON.stringify({
             type: "market",
             assets_ids: this.assetIds,
-          }),
-        );
-        ws.send(
-          JSON.stringify({
-            type: "trades",
-            assets_ids: this.assetIds,
+            custom_feature_enabled: true,
           }),
         );
       },

@@ -131,6 +131,7 @@ export class MarketLifecycle {
 
   private _clobTokenIds: [string, string] | null = null;
   private _conditionId: string | null = null;
+  private _userChannelConditionId: string | null = null;
 
   private _feeRate = 0;
   private _pendingOrders: PendingOrder[] = [];
@@ -499,6 +500,14 @@ export class MarketLifecycle {
       await this._resolution.priceToBeat(round);
     }
 
+    if (
+      this._conditionId &&
+      this._userChannelConditionId !== this._conditionId
+    ) {
+      this._userChannel.subscribe(this._conditionId);
+      this._userChannelConditionId = this._conditionId;
+    }
+
     if (!this._orderBook.isReady() || !this._userChannel.isReady()) {
       return;
     }
@@ -530,7 +539,6 @@ export class MarketLifecycle {
       return;
     }
 
-    this._userChannel.subscribe(this._conditionId!);
     this._marketLogger.setSnapshotProvider(() =>
       this._orderBook.getSnapshotData(),
     );
@@ -1462,12 +1470,21 @@ export class MarketLifecycle {
     if (event.quality === "stale" || event.quality === "missing") {
       reasons.push(`${label} feed quality is ${event.quality}`);
     }
-    const maxFreshnessMs =
+    const maxFeedFreshnessMs =
       DEFAULT_SIMULATION_RISK_LIMITS.maxFeedFreshnessMs;
-    if (event.freshnessMs !== null && event.freshnessMs > maxFreshnessMs) {
+    const maxSourceFreshnessMs =
+      label === "resolution"
+        ? DEFAULT_SIMULATION_RISK_LIMITS.maxOracleLagMs
+        : maxFeedFreshnessMs;
+    const maxReceivedAgeMs =
+      label === "resolution" ? Math.max(maxFeedFreshnessMs, 3_000) : maxFeedFreshnessMs;
+    if (
+      event.freshnessMs !== null &&
+      event.freshnessMs > maxSourceFreshnessMs
+    ) {
       reasons.push(`${label} feed is stale by freshness threshold`);
     }
-    if (nowMs - event.clock.receivedAtMs > maxFreshnessMs) {
+    if (nowMs - event.clock.receivedAtMs > maxReceivedAgeMs) {
       reasons.push(`${label} feed is stale by received age threshold`);
     }
   }

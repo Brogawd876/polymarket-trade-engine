@@ -56,7 +56,16 @@ export class SessionManager {
     };
   }
 
-  async startSimulation(config: { strategy: string; rounds?: number; alwaysLog?: boolean; maxSessionLoss?: number; strategyConfigOverride?: Record<string, unknown>; presetContext?: ActivePresetContext }): Promise<void> {
+  async startSimulation(config: { 
+    strategy: string; 
+    rounds?: number; 
+    alwaysLog?: boolean; 
+    maxSessionLoss?: number; 
+    prod?: boolean;
+    slotOffset?: number;
+    strategyConfigOverride?: Record<string, unknown>; 
+    presetContext?: ActivePresetContext 
+  }): Promise<void> {
     if (this._sessionState === "running" || this._sessionState === "starting") {
       throw new Error("Session is already active");
     }
@@ -75,9 +84,10 @@ export class SessionManager {
       const clock = new RealClock();
       this._bot = new EarlyBird(
         config.strategy,
-        1, // slotOffset
-        false, // prod
+        config.slotOffset ?? 1,
+        config.prod ?? false,
         config.rounds ?? null,
+
         config.alwaysLog ?? false,
         undefined, // replayFile
         {
