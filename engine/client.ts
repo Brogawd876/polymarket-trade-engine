@@ -434,20 +434,63 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       throw new Error("POLY_API_KEY_NONCE must be an integer when set.");
     }
 
-    const creds = await new ClobClient({
-      host: this._host,
-      chain: Chain.POLYGON,
-      signer: this._signer,
-    }).createOrDeriveApiKey(apiKeyNonce);
+    let activeSigner: any = this._signer;
+    if ((this._signatureType === 2 || this._signatureType === 3) && this._funder) {
+      const funderAddr = this._funder;
+      activeSigner = new Proxy(this._signer, {
+        get(target, prop, receiver) {
+          if (prop === "getAddress") {
+            return async () => funderAddr;
+          }
+          if (prop === "address") {
+            return funderAddr;
+          }
+          const value = Reflect.get(target, prop, receiver);
+          if (typeof value === "function") {
+            return value.bind(target);
+          }
+          return value;
+        }
+      });
+    }
+
+    const envApiKey = process.env.POLY_API_KEY || process.env.BUILDER_KEY;
+    const envApiSecret = process.env.POLY_API_SECRET || process.env.BUILDER_SECRET;
+    const envApiPassphrase = process.env.POLY_API_PASSPHRASE || process.env.BUILDER_PASSPHRASE;
+
+    let creds: { key: string; secret: string; passphrase: string };
+    let useProxySignerForClob = false;
+
+    if (envApiKey && envApiSecret && envApiPassphrase) {
+      creds = {
+        key: envApiKey,
+        secret: envApiSecret,
+        passphrase: envApiPassphrase,
+      };
+      useProxySignerForClob = true;
+    } else {
+      creds = await new ClobClient({
+        host: this._host,
+        chain: Chain.POLYGON,
+        signer: this._signer,
+        signatureType: this._signatureType as any,
+        funderAddress: this._funder,
+      }).createOrDeriveApiKey(apiKeyNonce);
+    }
     this._creds = creds;
+
     this.clob = new ClobClient({
       host: this._host,
       chain: Chain.POLYGON,
-      signer: this._signer,
+      signer: useProxySignerForClob ? activeSigner : this._signer,
       creds,
       signatureType: this._signatureType as any,
       funderAddress: this._funder,
     });
+
+    if ((this._signatureType === 2 || this._signatureType === 3) && this._funder) {
+      (this.clob.orderBuilder as any).signer = activeSigner;
+    }
   }
 
   getApiCreds(): { key: string; secret: string; passphrase: string } {
