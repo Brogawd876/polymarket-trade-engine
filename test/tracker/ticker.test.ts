@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 
-// Binance blocks WebSocket connections from cloud/datacenter IPs (e.g. GitHub Actions / AWS).
-const isCI = !!process.env.CI;
+const runLiveNetworkTests = process.env.RUN_LIVE_TESTS === "true";
 import { TickerTracker } from "../../tracker/ticker.ts";
 
 describe("TickerTracker", () => {
@@ -28,7 +27,7 @@ describe("TickerTracker", () => {
     else process.env.MARKET_WINDOW = savedWindow;
   });
 
-  test.skipIf(isCI)(
+  test.skipIf(!runLiveNetworkTests)(
     "Binance ticker streams a price",
     async () => {
       process.env.TICKER = "binance";
@@ -41,7 +40,7 @@ describe("TickerTracker", () => {
     10_000,
   );
 
-  test(
+  test.skipIf(!runLiveNetworkTests)(
     "Coinbase ticker streams a price",
     async () => {
       process.env.TICKER = "coinbase";
@@ -84,7 +83,7 @@ describe("TickerTracker", () => {
     expect(tracker.isWhaleDump).toBe(false); // 60 < 150 (0.15% of 100k)
   });
 
-  test.skipIf(isCI)(
+  test.skipIf(!runLiveNetworkTests)(
     "OKX ticker streams a price",
     async () => {
       process.env.TICKER = "okx";
@@ -97,7 +96,7 @@ describe("TickerTracker", () => {
     15_000,
   );
 
-  test.skipIf(isCI)(
+  test.skipIf(!runLiveNetworkTests)(
     "ByBit ticker streams a price",
     async () => {
       process.env.TICKER = "bybit";
@@ -110,7 +109,7 @@ describe("TickerTracker", () => {
     15_000,
   );
 
-  test(
+  test.skipIf(!runLiveNetworkTests)(
     "Polymarket ticker streams a price",
     async () => {
       process.env.TICKER = "polymarket";

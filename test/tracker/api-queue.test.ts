@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { APIQueue } from "../../tracker/api-queue.ts";
 
+const runLiveNetworkTests = process.env.RUN_LIVE_TESTS === "true";
+
 function waitFor(fn: () => boolean, timeout = 3000): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -59,7 +61,7 @@ describe("APIQueue", () => {
 
   // --- Integration tests (real Polymarket API) ---
 
-  test(
+  test.skipIf(!runLiveNetworkTests)(
     "queueEventDetails fetches event data for a known slug",
     async () => {
       const slug = "btc-updown-5m-1776491100";
@@ -75,7 +77,7 @@ describe("APIQueue", () => {
     15_000,
   );
 
-  test(
+  test.skipIf(!runLiveNetworkTests)(
     "queueMarketPrice fetches complete data for a past slot",
     async () => {
       const slot = { startTime: 1776491100000, endTime: 1776491400000 };

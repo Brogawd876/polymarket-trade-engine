@@ -13,6 +13,11 @@ vi.mock('lightweight-charts', () => ({
     LineSeries: 'LineSeries',
     LineStyle: { Dashed: 2 },
     createChart: () => ({
+        addLineSeries: () => ({
+            setData,
+            createPriceLine,
+            removePriceLine,
+        }),
         addSeries: () => ({
             setData,
             createPriceLine,
