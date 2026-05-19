@@ -27,6 +27,14 @@ jobs:
       - name: Run isolated orderbook tests
         run: bun test --max-concurrency=1 test/tracker/orderbook.test.ts
 
-      - name: Run remaining tests
-        run: |
-          bun test --max-concurrency=1 $(git ls-files '*test.ts' '*test.tsx' | grep -v '^test/tracker/orderbook.test.ts$')
+      - name: Run engine tests
+        run: bun test --max-concurrency=1 $(git ls-files 'test/engine/*.test.ts')
+
+      - name: Run tracker tests
+        run: bun test --max-concurrency=1 test/tracker/api-queue.test.ts test/tracker/ticker.test.ts
+
+      - name: Run utility tests
+        run: bun test --max-concurrency=1 $(git ls-files 'utils/*.test.ts' 'test/utils/*.test.ts')
+
+      - name: Run UI tests
+        run: bun test --max-concurrency=1 $(git ls-files 'ui/src/pages/__tests__/*.tsx' 'ui/src/store/__tests__/*.ts' 'ui/src/components/LiveMonitor/__tests__/*.tsx')
