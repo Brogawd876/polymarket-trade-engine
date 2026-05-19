@@ -488,7 +488,7 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       funderAddress: this._funder,
     });
 
-    if ((this._signatureType === 2 || this._signatureType === 3) && this._funder) {
+    if (this._signatureType === 3 && this._funder) {
       (this.clob.orderBuilder as any).signer = activeSigner;
     }
   }
