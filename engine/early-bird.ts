@@ -50,6 +50,10 @@ import {
   NullTelemetrySink, 
   type TelemetryEvent 
 } from "./telemetry/index.ts";
+import {
+  NdjsonEventWriter,
+  type EventWriter,
+} from "./event-store/writer.ts";
 
 const SAVE_INTERVAL_MS = 5000;
 
@@ -60,6 +64,7 @@ export type EarlyBirdRuntimeOptions = {
   strategyConfigOverride?: Record<string, unknown>;
   presetId?: string;
   orderBookFactory?: (clock: Clock, tradeTape: TradeTapeTracker) => OrderBook;
+  eventWriter?: EventWriter;
 };
 
 export type EngineStatus = {
@@ -110,6 +115,8 @@ export class EarlyBird {
   private _clock: Clock;
   private _persistState = true;
   private _telemetry: TelemetrySink;
+  private _eventWriter: EventWriter;
+  private _runCompletedEventEmitted = false;
   private _tickInterval: unknown = null;
   private readonly _orderBookFactory?: (
     clock: Clock,
@@ -145,6 +152,12 @@ export class EarlyBird {
     this._maxSessionProfit = parseFloat(process.env.MAX_SESSION_PROFIT ?? "1000000");
     this._clock = runtime.clock ?? new RealClock();
     this._telemetry = runtime.telemetry ?? new NullTelemetrySink();
+    this._eventWriter =
+      runtime.eventWriter ??
+      new NdjsonEventWriter({
+        runId: `early-bird-${replayFile ? "replay" : prod ? "live" : "sim"}-${crypto.randomUUID()}`,
+        nowMs: () => this._clock.nowMs(),
+      });
     this._orderBookFactory = runtime.orderBookFactory;
     const persistState = runtime.persistState ?? !replayFile;
 
@@ -225,6 +238,16 @@ export class EarlyBird {
         mode: replayFile ? "replay" : (prod ? "live" : "sim"),
         strategy: this._strategyName
       }
+    });
+    void this._eventWriter.append({
+      eventType: "run_started",
+      source: "early-bird",
+      strategyId: this._strategyName,
+      payload: {
+        mode: replayFile ? "replay" : (prod ? "live" : "sim"),
+        status: "started",
+        commitSha: process.env.GIT_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || "local",
+      },
     });
   }
 
@@ -453,6 +476,7 @@ export class EarlyBird {
     this._resolution.stop();
     this._binance.stop();
     this._coinbase.stop();
+    await this._emitRunCompleted("canceled");
     log.write("[early-bird] Stopped all adapters", "dim");
   }
 
@@ -502,6 +526,7 @@ export class EarlyBird {
             clock: this._clock,
             telemetry: this._telemetry,
             alwaysLog: this._alwaysLog,
+            eventWriter: this._eventWriter,
             }),
 
         );
@@ -578,6 +603,7 @@ export class EarlyBird {
     }
 
     if (this._shuttingDown && this._lifecycles.size === 0) {
+      await this._emitRunCompleted("completed");
       if (!this._replayReader) {
         log.write("[shutdown] All settled. Exiting.", "dim");
         if (this._persistState) this._saveState();
@@ -588,6 +614,27 @@ export class EarlyBird {
         this._coinbase.stop();
       }
     }
+  }
+
+  private async _emitRunCompleted(status: "completed" | "failed" | "canceled"): Promise<void> {
+    if (this._runCompletedEventEmitted) return;
+    this._runCompletedEventEmitted = true;
+    await this._eventWriter.append({
+      eventType: "run_completed",
+      source: "early-bird",
+      strategyId: this._strategyName,
+      payload: {
+        status,
+        mode: this._replayReader ? "replay" : (this._prod ? "live" : "sim"),
+        reason: this._shuttingDown ? "shutdown" : undefined,
+      },
+    }).catch((error) => {
+      log.write(`[event-store] failed to write run_completed: ${error}`, "red");
+      throw error;
+    });
+    await this._eventWriter.close().catch((error) => {
+      log.write(`[event-store] failed to close writer: ${error}`, "red");
+    });
   }
 
   private _startShutdown(reason: string): void {

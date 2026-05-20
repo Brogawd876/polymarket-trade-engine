@@ -40,6 +40,8 @@ import {
   NullTelemetrySink 
 } from "./telemetry/index.ts";
 import { createDecisionFeatureSnapshot } from "./decision-features.ts";
+import type { EventWriter } from "./event-store/writer.ts";
+import type { ProfitEventPayload, ProfitEventType } from "./event-store/events.ts";
 
 const DEFAULT_FEED_READINESS_TIMEOUT_MS = 5000;
 const DEFAULT_FEED_READINESS_POLL_MS = 100;
@@ -119,6 +121,7 @@ type MarketLifecycleOptions = {
   feedReadinessTimeoutMs?: number;
   feedReadinessPollMs?: number;
   telemetry?: TelemetrySink;
+  eventWriter?: EventWriter;
 };
 
 export class MarketLifecycle {
@@ -128,6 +131,7 @@ export class MarketLifecycle {
   private _userChannel: UserChannel;
   private _clock: Clock;
   private _telemetry: TelemetrySink;
+  private _eventWriter?: EventWriter;
 
   private _clobTokenIds: [string, string] | null = null;
   private _conditionId: string | null = null;
@@ -186,6 +190,7 @@ export class MarketLifecycle {
     this._alwaysLog = opts.alwaysLog ?? false;
     this._clock = opts.clock ?? new RealClock();
     this._telemetry = opts.telemetry ?? new NullTelemetrySink();
+    this._eventWriter = opts.eventWriter;
     this._orderBook = opts.orderBook ?? new OrderBook(this._clock);
     this._userChannel = opts.userChannel;
     this._resolution = opts.resolution;
@@ -393,6 +398,7 @@ export class MarketLifecycle {
             sigma: sigma ?? null,
             },
             });
+        this._emitSpreadDepthSnapshot();
 
         
         if (this._aggregator) {
@@ -497,7 +503,26 @@ export class MarketLifecycle {
     };
 
     if (this._resolution) {
-      await this._resolution.priceToBeat(round);
+      const anchor = await this._resolution.priceToBeat(round);
+      if (anchor) {
+        this._appendEvent("resolution_anchor", "market-lifecycle", {
+          price: anchor.price,
+          priceToBeat: anchor.priceToBeat ?? anchor.price,
+          roundId: anchor.roundId ?? null,
+          rawOracleAnswer: anchor.rawOracleAnswer ?? null,
+          chainUpdatedAtMs: anchor.chainUpdatedAtMs ?? anchor.clock.sourceTimestampMs ?? null,
+          localReceivedAtMs: anchor.localReceivedAtMs ?? anchor.clock.receivedAtMs,
+          oracleLagMs: anchor.oracleLagMs ?? anchor.lagMs ?? null,
+          quality: anchor.quality,
+          sourceType: anchor.sourceType ?? null,
+          contractAddress: anchor.metadata?.contractAddress ?? null,
+        });
+        this._appendEvent("price_to_beat", "market-lifecycle", {
+          priceToBeat: anchor.priceToBeat ?? anchor.price,
+          price: anchor.price,
+          sourceType: anchor.sourceType ?? null,
+        });
+      }
     }
 
     if (
@@ -1024,6 +1049,15 @@ export class MarketLifecycle {
               intent,
             },
           });
+          this._appendEvent("order_intent", "market-lifecycle", {
+            intentId: intent.id,
+            tokenId: item.req.tokenId,
+            side: this._side(item.req.tokenId),
+            action: item.req.action,
+            price: item.req.price,
+            shares: item.req.shares,
+            orderType: item.req.orderType,
+          }, intent.id);
 
           const decision = this._riskGate.evaluate(intent, this._createRiskSnapshot());
           
@@ -1037,6 +1071,12 @@ export class MarketLifecycle {
                 intent
             }
           });
+          this._appendEvent("risk_gate_decision", "market-lifecycle", {
+            intent,
+            decision,
+            approved: decision.approved,
+            reasons: decision.reasons,
+          }, intent.id);
 
           this._emitDecisionFeature(decision.approved ? "consider" : "blocked", {
             snapshot: this._createRiskSnapshot(),
@@ -1163,6 +1203,17 @@ export class MarketLifecycle {
             orderId: p.orderId,
             intentId: intents.get(item)?.id,
           });
+          this._appendEvent("order_submitted", "market-lifecycle", {
+            orderId: p.orderId,
+            intentId: intents.get(item)?.id,
+            tokenId: item.req.tokenId,
+            side: this._side(item.req.tokenId),
+            action: item.req.action,
+            price: item.req.price,
+            shares: item.req.shares,
+            orderType: item.req.orderType ?? "GTC",
+            status: p.status,
+          }, intents.get(item)?.id);
 
           // Wrap the OrderRequest with fill accounting and register with the user channel.
           // The channel calls wrapped.onFilled when the order is fully settled on-chain.
@@ -1299,6 +1350,28 @@ export class MarketLifecycle {
         error: opts.error,
       },
     });
+    const eventType = status === "filled"
+      ? "order_filled"
+      : status === "partial_filled"
+        ? "partial_fill"
+        : status === "canceled"
+          ? "order_canceled"
+          : status === "expired"
+            ? "order_expired"
+            : status === "placed"
+              ? "order_acknowledged"
+              : "order_acknowledged";
+    this._appendEvent(eventType, "market-lifecycle", {
+      orderId: opts.orderId,
+      intentId: opts.intentId,
+      tokenId: order.tokenId,
+      side: this._side(order.tokenId),
+      action: order.action,
+      price: order.price,
+      shares: opts.shares ?? order.shares,
+      status,
+      error: opts.error,
+    }, opts.intentId);
     this._emitDecisionFeature(status === "filled" ? "filled" : status === "placed" ? "placed" : status === "failed" ? "failed" : "consider", {
       snapshot: this._createRiskSnapshot(),
       intent,
@@ -1365,6 +1438,19 @@ export class MarketLifecycle {
       type: "DECISION_FEATURE_SNAPSHOT",
       payload: snapshot,
     });
+    this._appendEvent("strategy_decision", "market-lifecycle", {
+      decisionFeature: snapshot,
+      intent: params.intent,
+      decision: params.decision,
+      approved: params.decision?.approved ?? null,
+      reasons: params.decision?.reasons ?? [],
+      probability: snapshot.quant.probabilityUp,
+      impliedProbability: snapshot.intent?.price ?? null,
+      noTradeReason:
+        snapshot.risk.reasons.length > 0
+          ? snapshot.risk.reasons.join("; ")
+          : null,
+    }, params.intent?.id);
     this._marketLogger.log({ type: "decision_feature", snapshot });
   }
 
@@ -1643,6 +1729,18 @@ export class MarketLifecycle {
       else held.set(o.tokenId, cur - o.shares);
     }
 
+    for (const [tokenId, shares] of held) {
+      if (shares < -1e-9) {
+        const reason = `negative inventory at settlement for ${tokenId}: ${shares}`;
+        this._appendEvent("operator_action", "market-lifecycle", {
+          action: "settlement_invariant_violation",
+          reason,
+          status: "failed",
+        });
+        throw new Error(`position invariant violation: ${reason}`);
+      }
+    }
+
     const slot = slotFromSlug(this.slug).startTime;
     const data = this.apiQueue.marketResult.get(slot);
 
@@ -1687,6 +1785,13 @@ export class MarketLifecycle {
           direction: resolvedUp ? "UP" : "DOWN",
         },
       });
+      this._appendEvent("settlement_result", "market-lifecycle", {
+        openPrice: data.openPrice,
+        closePrice: data.closePrice,
+        direction: resolvedUp ? "UP" : "DOWN",
+        payout,
+        pnl: this._pnl,
+      });
       this._emitDecisionFeature("settled", {
         snapshot: this._createRiskSnapshot(),
         pnl: this._pnl,
@@ -1704,6 +1809,59 @@ export class MarketLifecycle {
       ts: this._clock.nowMs(),
       type: "ROUND_PNL",
       payload: { slug: this.slug, pnl: this._pnl }
+    });
+  }
+
+  private _emitSpreadDepthSnapshot(): void {
+    const venue = this._venue.latest();
+    if (!venue) return;
+    const spreadUp =
+      venue.bestBidUp !== null && venue.bestAskUp !== null
+        ? parseFloat((venue.bestAskUp - venue.bestBidUp).toFixed(6))
+        : null;
+    const spreadDown =
+      venue.bestBidDown !== null && venue.bestAskDown !== null
+        ? parseFloat((venue.bestAskDown - venue.bestBidDown).toFixed(6))
+        : null;
+    const depth = (levels: Array<[number, number]> | undefined) =>
+      levels?.slice(0, 5).reduce((sum, [price, size]) => sum + price * size, 0) ?? null;
+    this._appendEvent("spread_depth_snapshot", "market-lifecycle", {
+      conditionId: this._conditionId,
+      clobTokenIds: this._clobTokenIds,
+      side: "BOTH",
+      bestBidUp: venue.bestBidUp,
+      bestAskUp: venue.bestAskUp,
+      bestBidDown: venue.bestBidDown,
+      bestAskDown: venue.bestAskDown,
+      spreadUp,
+      spreadDown,
+      depthUpUsd:
+        venue.up ? parseFloat(((depth(venue.up.bids) ?? 0) + (depth(venue.up.asks) ?? 0)).toFixed(6)) : null,
+      depthDownUsd:
+        venue.down ? parseFloat(((depth(venue.down.bids) ?? 0) + (depth(venue.down.asks) ?? 0)).toFixed(6)) : null,
+      feeRateBps: venue.feeRateBps ?? null,
+    });
+  }
+
+  private _appendEvent(
+    eventType: ProfitEventType,
+    source: string,
+    payload: ProfitEventPayload,
+    intentId?: string,
+  ): void {
+    if (!this._eventWriter) return;
+    void this._eventWriter.append({
+      eventType,
+      source,
+      slug: this.slug,
+      roundId: this.slug,
+      strategyId: this._strategyName,
+      payload,
+      eventId: intentId ? `${eventType}-${intentId}-${this._clock.nowMs()}` : undefined,
+      receivedTsMs: this._clock.nowMs(),
+      processedTsMs: this._clock.nowMs(),
+    }).catch((error) => {
+      this._log(`[event-store] failed to write ${eventType}: ${error}`, "red");
     });
   }
 }

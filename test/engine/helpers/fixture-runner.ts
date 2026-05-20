@@ -26,6 +26,7 @@ import {
   type RoundWindow,
 } from "../../../engine/bot-core/index.ts";
 import type { TelemetrySink } from "../../../engine/telemetry/index.ts";
+import type { EventWriter } from "../../../engine/event-store/writer.ts";
 
 export { UP_TOKEN, DOWN_TOKEN, FIXTURE_SLUG };
 
@@ -51,6 +52,7 @@ type FixtureRunnerOptions = {
   log?: (msg: string, color?: LogColor) => void;
   riskGate?: RiskGate;
   telemetry?: TelemetrySink;
+  eventWriter?: EventWriter;
 };
 
 function loadFixtureEvents(): LogEvent[] {
@@ -205,6 +207,7 @@ export class FixtureRunner {
       resolution: makeResolutionAdapter(this.simTicker),
       riskGate: this.opts.riskGate,
       telemetry: this.opts.telemetry,
+      eventWriter: this.opts.eventWriter,
     });
 
     // Apply the first real snapshot (second line has non-null data at LOG_START_TS + 1001ms)
