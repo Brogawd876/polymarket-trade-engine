@@ -26,5 +26,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "exclude": ["analysis", "ui", "test"]
+  "exclude": ["analysis", "ui", "test", "scripts/archive"]
 }

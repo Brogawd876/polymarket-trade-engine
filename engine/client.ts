@@ -434,49 +434,19 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       throw new Error("POLY_API_KEY_NONCE must be an integer when set.");
     }
 
-    let activeSigner: any = this._signer;
-    if ((this._signatureType === 2 || this._signatureType === 3) && this._funder) {
-      const funderAddr = this._funder;
-      activeSigner = new Proxy(this._signer, {
-        get(target, prop, receiver) {
-          if (prop === "getAddress") {
-            return async () => funderAddr;
-          }
-          if (prop === "address") {
-            return funderAddr;
-          }
-          const value = Reflect.get(target, prop, receiver);
-          if (typeof value === "function") {
-            return value.bind(target);
-          }
-          return value;
-        }
-      });
-    }
-
-    const envApiKey = process.env.POLY_API_KEY || (this._signatureType === 3 ? process.env.BUILDER_KEY : undefined);
-    const envApiSecret = process.env.POLY_API_SECRET || (this._signatureType === 3 ? process.env.BUILDER_SECRET : undefined);
-    const envApiPassphrase = process.env.POLY_API_PASSPHRASE || (this._signatureType === 3 ? process.env.BUILDER_PASSPHRASE : undefined);
-
     let creds: { key: string; secret: string; passphrase: string };
 
-    if (envApiKey && envApiSecret && envApiPassphrase) {
-      creds = {
-        key: envApiKey,
-        secret: envApiSecret,
-        passphrase: envApiPassphrase,
-      };
-    } else {
-      creds = await new ClobClient({
-        host: this._host,
-        chain: Chain.POLYGON,
-        signer: this._signer,
-        signatureType: this._signatureType as any,
-        funderAddress: this._funder,
-      }).createOrDeriveApiKey(apiKeyNonce);
-    }
+    // Always derive CLOB API credentials from the owner signer. Static
+    // POLY_API_* / BUILDER_* values are intentionally ignored for CLOB auth.
+    const authClient = new ClobClient({
+      host: this._host,
+      chain: Chain.POLYGON,
+      signer: this._signer,
+    });
+    creds = await authClient.createOrDeriveApiKey(apiKeyNonce || 1);
     this._creds = creds;
 
+    // 2. Initialize the trading ClobClient with the EOA signer + Type 3 parameters
     this.clob = new ClobClient({
       host: this._host,
       chain: Chain.POLYGON,

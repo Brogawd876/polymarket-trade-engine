@@ -436,3 +436,18 @@
 
 - 2026-05-19: Resolved wallet connection issues (Signature Type 2 + client bug). Confirmed $8.00 CLOB balance. Executed Surgical Hardening Plan: fixed silent WebSocket failures, enforced timer type safety, and tightened default risk gates to industrial standards (1% slippage). Verified UI in Operator Cockpit.
 
+## 2026-05-20T04:45:00-04:00
+
+- Agent used: Codex
+- Task attempted: Persist the proven Type 3 POLY_1271 deposit-wallet correction, repair final acceptance testing, and prove the live BTC 5-minute order path end to end.
+- Outcome:
+  - Corrected `POLY_FUNDER_ADDRESS` to the officially derived deposit wallet `0x9bB7C3aafCeb82665293f9cd784F61112fFa4c51` for owner `0x3528764a45bB13eC6BD8Deb1a73b5034742E6329`.
+  - Kept CLOB auth on fresh owner-derived credentials and ignored static `POLY_API_*` / `BUILDER_*` CLOB credentials.
+  - Fixed `scripts/final-acceptance-test.ts` and made it use the canonical BTC 5-minute slot/Gamma/CLOB discovery path.
+  - Ran final live post-only GTC order test on `btc-updown-5m-1779266400`; accepted order `0xcd265e048093af8a07f4a5aa323d80698d4a99a1f0dab747cde7575196690028`, canceled immediately, and verified open orders returned to `0`.
+- Validation:
+  - `npm run check` passed.
+  - `bun run scripts/check-balance.ts` showed USDC.e `0`, pUSD `5`, CLOB balance `5`.
+  - `bun run scripts/check-clob.ts` authenticated and reported open-order count `0`.
+  - `bun run scripts/verify-raw-order.ts` passed with maker/signer set to the corrected deposit wallet and `signatureType=3`.
+
