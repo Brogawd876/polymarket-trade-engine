@@ -126,6 +126,40 @@ describe("Telemetry & Control Plane Hardening", () => {
     }
   });
 
+  test("ControlServer forwards replay strategy to SessionManager", async () => {
+    const originalToken = process.env.OPERATOR_AUTH_TOKEN;
+    delete process.env.OPERATOR_AUTH_TOKEN;
+
+    const bus = new TelemetryBus();
+    const sessionManager = new SessionManager(bus);
+    const calls: Array<{ file: string; config: { strategy?: string } }> = [];
+    (sessionManager as any).startReplay = async (file: string, config: { strategy?: string } = {}) => {
+      calls.push({ file, config });
+    };
+
+    const server = new ControlServer({ port: 3009, telemetryBus: bus, sessionManager });
+    server.start();
+
+    try {
+      const response = await fetch("http://127.0.0.1:3009/api/operator/replay/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: "logs/captured-round.log", strategy: "late-entry" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ success: true });
+      expect(calls).toEqual([{ file: "logs/captured-round.log", config: { strategy: "late-entry" } }]);
+    } finally {
+      server.stop();
+      if (originalToken === undefined) {
+        delete process.env.OPERATOR_AUTH_TOKEN;
+      } else {
+        process.env.OPERATOR_AUTH_TOKEN = originalToken;
+      }
+    }
+  });
+
   test("Replay telemetry integration", async () => {
     const logPath = join(import.meta.dir, "..", "fixtures", "replay", "expired-order.log");
     const clock = new VirtualClock();

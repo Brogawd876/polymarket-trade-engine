@@ -153,10 +153,14 @@ export default function ReplayLab() {
         clearAllTelemetry();
 
         try {
+            const payload = {
+                file: selectedFixture.path,
+                ...(selectedFixture.strategy ? { strategy: selectedFixture.strategy } : {}),
+            };
             const response = await fetch(`${API_BASE}/replay/start`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ file: selectedFixture.path }),
+                body: JSON.stringify(payload),
             });
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || 'Replay start failed');
@@ -273,6 +277,7 @@ export default function ReplayLab() {
                                         {selectedFixture.replayable ? 'Structured market log ready for replay' : selectedFixture.reason || 'This log cannot be replayed'}
                                     </div>
                                     {selectedFixture.slug && <div className="text-xs text-slate-500 mt-2 font-mono truncate">{selectedFixture.slug}</div>}
+                                    {selectedFixture.strategy && <div className="text-xs text-slate-500 mt-1 font-mono truncate">strategy: {selectedFixture.strategy}</div>}
                                 </div>
                             </div>
                         </div>

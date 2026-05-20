@@ -140,7 +140,10 @@ export class ControlServer {
             try {
                 const config = await req.json() as any;
                 if (!config.file) throw new Error("Replay file required");
-                await this._sessionManager.startReplay(config.file);
+                const strategy = typeof config.strategy === "string" && config.strategy.trim().length > 0
+                    ? config.strategy
+                    : undefined;
+                await this._sessionManager.startReplay(config.file, { strategy });
                 return Response.json({ success: true }, { headers: responseHeaders });
             } catch (e: any) {
                 return Response.json({ success: false, error: e.message }, { status: 400, headers: responseHeaders });
