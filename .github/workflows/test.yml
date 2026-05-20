@@ -28,6 +28,12 @@ jobs:
         working-directory: ui
         run: bun install
 
+      - name: Typecheck backend
+        run: bun run check
+
+      - name: Run data foundation tests
+        run: bun test --max-concurrency=1 test/engine/event-store.test.ts test/engine/markout.test.ts test/engine/fill-model.test.ts test/engine/wallet-tracker.test.ts
+
       - name: Run isolated orderbook tests
         run: bun test --max-concurrency=1 test/tracker/orderbook.test.ts
 
