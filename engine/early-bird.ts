@@ -501,6 +501,7 @@ export class EarlyBird {
             orderBook,
             clock: this._clock,
             telemetry: this._telemetry,
+            alwaysLog: this._alwaysLog,
             }),
 
         );

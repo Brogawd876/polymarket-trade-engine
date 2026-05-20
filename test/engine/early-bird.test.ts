@@ -126,6 +126,7 @@ type Harness = {
 type HarnessOpts = {
   rounds?: number | null;
   slotOffset?: number;
+  alwaysLog?: boolean;
   maxSessionLoss?: number;
   apiQueue?: MockAPIQueue;
 };
@@ -155,7 +156,7 @@ function makeHarness(opts: HarnessOpts = {}): Harness {
     opts.slotOffset ?? 1,
     /*prod=*/ false,
     opts.rounds !== undefined ? opts.rounds : null,
-    false,
+    opts.alwaysLog ?? false,
     undefined,
     {
       orderBookFactory: () => new MockOrderBook() as any,
@@ -243,6 +244,20 @@ describe("EarlyBird — rounds", () => {
 
       expect((h.eb as any)._shuttingDown).toBe(true);
       // Removed expect(h.exitStub.calledWith(0)) because EarlyBird no longer exits the process
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "passes alwaysLog into created lifecycles",
+    async () => {
+      h = makeHarness({ rounds: 1, alwaysLog: true });
+      await h.eb.start();
+
+      await (h.eb as any)._tick();
+
+      const lc = (h.eb as any)._lifecycles.get(FIXTURE_SLUG)!;
+      expect((lc as any)._alwaysLog).toBe(true);
     },
     TEST_TIMEOUT,
   );
