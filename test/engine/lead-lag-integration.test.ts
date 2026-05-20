@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { EarlyBird } from "../../engine/early-bird.ts";
 import { TickerTracker } from "../../tracker/ticker";
 import { PolymarketResolutionAdapter } from "../../engine/bot-core/polymarket-resolution-adapter.ts";
@@ -18,6 +18,14 @@ import type {
   RoundWindow
 } from "../../engine/bot-core/data-sources.ts";
 import { createEventClock } from "../../engine/bot-core/data-sources.ts";
+
+const originalOrderBookSubscribe = OrderBook.prototype.subscribe;
+const originalOrderBookWaitForReady = OrderBook.prototype.waitForReady;
+
+afterEach(() => {
+  expect(OrderBook.prototype.subscribe).toBe(originalOrderBookSubscribe);
+  expect(OrderBook.prototype.waitForReady).toBe(originalOrderBookWaitForReady);
+});
 
 function makeRound(slug: string): RoundWindow {
   const startTimeMs = Number(slug.split("-").at(-1)) * 1000;
@@ -142,10 +150,6 @@ describe("LeadLag Runtime Integration", () => {
     };
 
     let strategyInvoked = false;
-
-    // Mock OrderBook to avoid hanging on waitForReady
-    spyOn(OrderBook.prototype, "waitForReady").mockImplementation(async () => {});
-    spyOn(OrderBook.prototype, "subscribe").mockImplementation(() => {});
 
     const slug = "btc-updown-5m-1778898900";
     const round = makeRound(slug);

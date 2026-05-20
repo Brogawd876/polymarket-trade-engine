@@ -9,8 +9,12 @@ import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
 import type { UserChannel } from "./user-channel.ts";
+import type { Clock } from "./bot-core/index.ts";
+import type { OrderBook } from "../tracker/orderbook.ts";
+import type { TradeTapeTracker } from "../tracker/trade-tape.ts";
 
 type LogFn = (msg: string, color?: LogColor) => void;
+type OrderBookFactory = (clock: Clock, tradeTape: TradeTapeTracker) => OrderBook;
 
 /**
  * Rebuild lifecycle state from a persisted snapshot.
@@ -31,6 +35,9 @@ export async function recover(
   tracker: WalletTracker,
   ticker: TickerTracker,
   userChannelFactory: () => UserChannel,
+  orderBookFactory?: OrderBookFactory,
+  clock?: Clock,
+  tradeTape?: TradeTapeTracker,
 ): Promise<Map<string, MarketLifecycle>> {
   const lifecycles = new Map<string, MarketLifecycle>();
 
@@ -43,6 +50,9 @@ export async function recover(
       tracker,
       ticker,
       userChannelFactory,
+      orderBookFactory,
+      clock,
+      tradeTape,
     );
     if (lifecycle) lifecycles.set(market.slug, lifecycle);
   }
@@ -58,6 +68,9 @@ async function recoverMarket(
   tracker: WalletTracker,
   ticker: TickerTracker,
   userChannelFactory: () => UserChannel,
+  orderBookFactory?: OrderBookFactory,
+  clock?: Clock,
+  tradeTape?: TradeTapeTracker,
 ): Promise<MarketLifecycle | null> {
   let resolvedStrategy: ReturnType<typeof resolveStrategySelection>;
   try {
@@ -173,6 +186,9 @@ async function recoverMarket(
     tracker,
     ticker,
     userChannel: userChannelFactory(),
+    orderBook: orderBookFactory && clock && tradeTape
+      ? orderBookFactory(clock, tradeTape)
+      : undefined,
     recovery: {
       state: "STOPPING",
       conditionId: market.conditionId,

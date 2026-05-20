@@ -59,6 +59,7 @@ export type EarlyBirdRuntimeOptions = {
   telemetry?: TelemetrySink;
   strategyConfigOverride?: Record<string, unknown>;
   presetId?: string;
+  orderBookFactory?: (clock: Clock, tradeTape: TradeTapeTracker) => OrderBook;
 };
 
 export type EngineStatus = {
@@ -110,6 +111,10 @@ export class EarlyBird {
   private _persistState = true;
   private _telemetry: TelemetrySink;
   private _tickInterval: unknown = null;
+  private readonly _orderBookFactory?: (
+    clock: Clock,
+    tradeTape: TradeTapeTracker,
+  ) => OrderBook;
 
   constructor(
     strategyName: string | undefined,
@@ -140,6 +145,7 @@ export class EarlyBird {
     this._maxSessionProfit = parseFloat(process.env.MAX_SESSION_PROFIT ?? "1000000");
     this._clock = runtime.clock ?? new RealClock();
     this._telemetry = runtime.telemetry ?? new NullTelemetrySink();
+    this._orderBookFactory = runtime.orderBookFactory;
     const persistState = runtime.persistState ?? !replayFile;
 
     if (replayFile) {
@@ -330,6 +336,9 @@ export class EarlyBird {
             this._tracker,
             this._ticker,
             this._userChannelFactory!,
+            this._orderBookFactory,
+            this._clock,
+            this._tradeTape,
           );
           for (const [slug, lifecycle] of recovered) {
             this._lifecycles.set(slug, lifecycle);
@@ -463,7 +472,9 @@ export class EarlyBird {
 
         const orderBook = this._replayReader
           ? new ReplayOrderBook(this._replayReader, this._clock, this._tradeTape)
-          : new OrderBook(this._clock, this._tradeTape);
+          : this._orderBookFactory
+            ? this._orderBookFactory(this._clock, this._tradeTape)
+            : new OrderBook(this._clock, this._tradeTape);
 
         this._lifecycles.set(
           slug,

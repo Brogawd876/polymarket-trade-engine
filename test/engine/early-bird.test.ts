@@ -28,21 +28,6 @@ await mocker.mock("../../engine/strategy/index.ts", () => ({
   DEFAULT_STRATEGY: "test-strategy",
 }));
 
-await mocker.mock("../../tracker/orderbook.ts", () => ({
-  OrderBook: class {
-    subscribe() {}
-    destroy() {}
-    async waitForReady() {}
-    bestAskInfo() { return null; }
-    bestBidInfo() { return null; }
-    bestBidPrice() { return null; }
-    getSnapshotData() { return null; }
-    getTickSize() { return "0.01"; }
-    getFeeRate() { return 1000; }
-    getTokenId(_: "UP" | "DOWN") { return ""; }
-  },
-}));
-
 await mocker.mock("../../engine/bot-core/chainlink-resolution-adapter.ts", () => ({
   ChainlinkResolutionAdapter: class {
     readonly role = "resolution";
@@ -78,6 +63,19 @@ await mocker.mock("../../engine/bot-core/chainlink-resolution-adapter.ts", () =>
     async closePrice() { return this.latest(); }
   },
 }));
+
+class MockOrderBook {
+  subscribe() {}
+  destroy() {}
+  async waitForReady() {}
+  bestAskInfo() { return null; }
+  bestBidInfo() { return null; }
+  bestBidPrice() { return null; }
+  getSnapshotData() { return null; }
+  getTickSize() { return "0.01"; }
+  getFeeRate() { return 1000; }
+  getTokenId(_: "UP" | "DOWN") { return ""; }
+}
 
 beforeAll(() => {
   process.env.SIM_DELAY_MS = "0";
@@ -157,6 +155,11 @@ function makeHarness(opts: HarnessOpts = {}): Harness {
     opts.slotOffset ?? 1,
     /*prod=*/ false,
     opts.rounds !== undefined ? opts.rounds : null,
+    false,
+    undefined,
+    {
+      orderBookFactory: () => new MockOrderBook() as any,
+    },
   );
 
   (eb as any)._ticker = new SimTickerTracker();
@@ -391,7 +394,9 @@ describe("EarlyBird — recovery", () => {
         completedMarkets: [],
       };
 
-      const eb = new EarlyBird("test-strategy", 1, false, null);
+      const eb = new EarlyBird("test-strategy", 1, false, null, false, undefined, {
+        orderBookFactory: () => new MockOrderBook() as any,
+      });
       (eb as any)._ticker = new SimTickerTracker();
       (eb as any)._apiQueue = new MockAPIQueue();
 
@@ -441,7 +446,9 @@ describe("EarlyBird — recovery", () => {
         completedMarkets: [],
       };
 
-      const eb = new EarlyBird("test-strategy", 1, false, null);
+      const eb = new EarlyBird("test-strategy", 1, false, null, false, undefined, {
+        orderBookFactory: () => new MockOrderBook() as any,
+      });
       (eb as any)._ticker = new SimTickerTracker();
       (eb as any)._apiQueue = new MockAPIQueue();
 
