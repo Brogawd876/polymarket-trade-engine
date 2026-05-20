@@ -81,7 +81,10 @@ export class DefaultQuantMonitor implements QuantMonitor {
 
     const sigma = this._calculateSigma();
     const resolution = this.resolution.latest();
-    const anchor = this.resolution.latestAnchor();
+    const anchor =
+      typeof this.resolution.latestAnchor === "function"
+        ? this.resolution.latestAnchor()
+        : null;
 
     const settlementIsStale =
       !anchor ||

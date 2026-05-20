@@ -3,6 +3,7 @@ import { PolymarketEarlyBirdClient } from "../engine/client.ts";
 import { Env } from "../utils/config.ts";
 import { resolveTradableBtc5mMarket } from "./btc-5m-market.ts";
 import { Wallet } from "@ethersproject/wallet";
+import { extractOrderId, responseError } from "../utils/clob-response.ts";
 
 const EXPECTED_OWNER = "0x3528764a45bB13eC6BD8Deb1a73b5034742E6329";
 const EXPECTED_FUNDER = "0x9bB7C3aafCeb82665293f9cd784F61112fFa4c51";
@@ -12,23 +13,6 @@ const ORDER_VERSION = 2;
 
 function sameAddress(a: string | undefined, b: string): boolean {
   return (a ?? "").toLowerCase() === b.toLowerCase();
-}
-
-function responseError(resp: any): string | null {
-  if (!resp) return "empty response";
-  if (typeof resp.status === "number" && resp.status >= 400) {
-    return JSON.stringify(resp);
-  }
-  if (resp.error) return JSON.stringify(resp);
-  if (resp.success === false || resp.errorMsg) {
-    return resp.errorMsg ? String(resp.errorMsg) : JSON.stringify(resp);
-  }
-  return null;
-}
-
-function extractOrderId(resp: any): string | null {
-  const id = resp?.orderID ?? resp?.orderId ?? resp?.id;
-  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 async function main() {

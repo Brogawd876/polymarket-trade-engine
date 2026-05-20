@@ -169,7 +169,6 @@ export class EarlyBird {
         binance: 0.7, // Institutional weight: Binance usually has 10x liquidity
         coinbase: 0.3,
       },
-      divergenceThresholdAbs: 150, // Relaxed from $50 to $150 for high-volatility sessions
       resolution: this._resolution,
       clock: this._clock,
     });

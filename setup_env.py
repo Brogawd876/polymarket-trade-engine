@@ -30,10 +30,7 @@ DEFAULTS = {
     "MARKET_WINDOW": "5m",
     "PRIVATE_KEY": "",
     "POLY_FUNDER_ADDRESS": "",
-    "POLY_SIGNATURE_TYPE": "0",
-    "POLY_API_KEY": "",
-    "POLY_API_SECRET": "",
-    "POLY_API_PASSPHRASE": "",
+    "POLY_SIGNATURE_TYPE": "3",
     "BUILDER_KEY": "",
     "BUILDER_SECRET": "",
     "BUILDER_PASSPHRASE": "",
@@ -51,11 +48,8 @@ HELP = {
     "MARKET_ASSET": "Default is btc.",
     "MARKET_WINDOW": "Default is 5m.",
     "PRIVATE_KEY": "Private key for the dedicated MetaMask bot account. Hidden.",
-    "POLY_FUNDER_ADDRESS": "Public address for the same account if using signature type 0.",
-    "POLY_SIGNATURE_TYPE": "Use 0 for a normal MetaMask wallet.",
-    "POLY_API_KEY": "Optional custom Polymarket API key to bypass L1 derivation. Hidden.",
-    "POLY_API_SECRET": "Optional custom Polymarket API secret. Hidden.",
-    "POLY_API_PASSPHRASE": "Optional custom Polymarket API passphrase. Hidden.",
+    "POLY_FUNDER_ADDRESS": "Type 3 deposit wallet derived from the PRIVATE_KEY owner; do not copy between owners.",
+    "POLY_SIGNATURE_TYPE": "Use 3 for the proven POLY_1271 deposit-wallet flow.",
     "BUILDER_KEY": "Optional Polymarket Builder Code key.",
     "BUILDER_SECRET": "Optional Polymarket Builder Code secret. Hidden.",
     "BUILDER_PASSPHRASE": "Optional Polymarket Builder Code passphrase. Hidden.",
@@ -129,7 +123,7 @@ class EnvSetupApp(tk.Tk):
 
         subtitle = ttk.Label(
             root,
-            text="Defaults are already set for BTC 5-minute trading. Fill wallet fields, add Builder Codes if you have them, then Save .env.",
+            text="Defaults are already set for BTC 5-minute Type 3 trading. Fill the owner key and its derived deposit wallet, add Builder Codes only for wrap/unwrap/redeem, then Save .env.",
             wraplength=700,
         )
         subtitle.pack(anchor="w", pady=(4, 12))
@@ -177,11 +171,6 @@ class EnvSetupApp(tk.Tk):
                 if item.startswith(value)
             ),
         )
-        row = self._field(form, row, "POLY_API_KEY", secret=True)
-        row = self._field(form, row, "POLY_API_SECRET", secret=True)
-        row = self._field(form, row, "POLY_API_PASSPHRASE", secret=True)
-
-
         row = self._section(form, row, "Builder Codes Optional")
         row = self._field(form, row, "BUILDER_KEY", secret=True)
         row = self._field(form, row, "BUILDER_SECRET", secret=True)
@@ -322,10 +311,6 @@ MARKET_WINDOW={self._normalized("MARKET_WINDOW")}
 PRIVATE_KEY={self._normalized("PRIVATE_KEY")}
 POLY_FUNDER_ADDRESS={self._normalized("POLY_FUNDER_ADDRESS")}
 POLY_SIGNATURE_TYPE={self._normalized("POLY_SIGNATURE_TYPE")}
-
-POLY_API_KEY={self._normalized("POLY_API_KEY")}
-POLY_API_SECRET={self._normalized("POLY_API_SECRET")}
-POLY_API_PASSPHRASE={self._normalized("POLY_API_PASSPHRASE")}
 
 BUILDER_KEY={self._normalized("BUILDER_KEY")}
 BUILDER_SECRET={self._normalized("BUILDER_SECRET")}

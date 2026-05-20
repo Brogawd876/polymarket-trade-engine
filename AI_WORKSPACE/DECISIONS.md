@@ -509,3 +509,23 @@ Browser-based Polymarket logins utilize Gnosis Safe smart contract wallets. Prev
 - **Safety**: The bot now enforces a 1% slippage cap and 5s data freshness by default, refusing to trade in degraded market conditions.
 - **Observability**: WebSocket parsing errors are now logged, eliminating the 'idle bot' mystery when the exchange sends unexpected data.
 
+---
+
+### 2026-05-20
+
+### Decision
+
+Supersede the Type 2/Gnosis and signer-proxy theories with the officially derived Type 3 POLY_1271 deposit-wallet model.
+
+### Reason
+
+The accepted live BTC 5-minute order proved the real root cause was an incorrect `POLY_FUNDER_ADDRESS`, not a need to switch away from Type 3. Using `@polymarket/builder-relayer-client@0.0.9` and `deriveDepositWallet(owner, DepositWalletFactory, DepositWalletImplementation)`, owner `0x3528764a45bB13eC6BD8Deb1a73b5034742E6329` derives deposit wallet `0x9bB7C3aafCeb82665293f9cd784F61112fFa4c51`. With that funder and fresh owner-derived CLOB credentials, a real Type 3 BTC 5-minute order was accepted, canceled, and open orders returned to zero.
+
+### Alternatives Rejected
+
+Continuing to use `0xbcbae6BE8cE9AD38C4FFD71254202f2aA27a30CF` or `0x609df252DF1371DBABD7aA234e028ACe9EAd90A2` as the live funder; reviving Type 2/Gnosis as the primary account model for this owner; preferring static `POLY_API_*` credentials over owner-derived CLOB credentials.
+
+### Implications
+
+The production client must keep deriving CLOB credentials from the owner signer and must build Type 3 orders with maker/signer equal to `0x9bB7C3aafCeb82665293f9cd784F61112fFa4c51`, `signatureType=3`, and order version `2`. The 2026-05-19 Type 2/Gnosis decision is historical incident context only and is no longer active guidance.
+

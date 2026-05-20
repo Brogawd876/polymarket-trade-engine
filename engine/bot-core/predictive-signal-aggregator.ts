@@ -56,7 +56,10 @@ export class DefaultPredictiveAggregator implements PredictiveSignalAggregator {
     const healthyFeedNames: string[] = [];
     const now = this.clock.nowMs();
     const resolution = this.resolution?.latest() ?? null;
-    const anchor = this.resolution?.latestAnchor() ?? null;
+    const anchor =
+      typeof this.resolution?.latestAnchor === "function"
+        ? this.resolution.latestAnchor()
+        : null;
     const settlementAnchorPrice = anchor?.priceToBeat ?? anchor?.price ?? resolution?.price ?? null;
 
     for (const [name, event] of this.latestEvents) {
