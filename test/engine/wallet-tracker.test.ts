@@ -110,6 +110,18 @@ describe("lockForSell / unlockSell", () => {
     t.unlockSell("s1", "test");
     expect(t.availableShares(UP)).toBe(6);
   });
+
+  test("rejects sell reservations larger than available shares", () => {
+    const t = makeTracker(10);
+    t.lockForBuy("o1", 0.5, 6, "test");
+    t.onBuyFilled("o1", UP, 0.5, 6);
+    t.lockForSell("s1", UP, 4, "test");
+
+    expect(() => t.lockForSell("s2", UP, 3, "test")).toThrow(
+      /cannot reserve 3 shares/,
+    );
+    expect(t.availableShares(UP)).toBe(2);
+  });
 });
 
 describe("onSellFilled", () => {
@@ -122,6 +134,17 @@ describe("onSellFilled", () => {
     t.onSellFilled("s1", UP, 0.64, 6);
     expect(t.availableShares(UP)).toBe(0);
     expect(t.balance).toBeCloseTo(balanceBefore + 0.64 * 6);
+  });
+
+  test("rejects sell fills that exceed held shares instead of clamping negative inventory", () => {
+    const t = makeTracker(10);
+    t.lockForBuy("o1", 0.5, 2, "test");
+    t.onBuyFilled("o1", UP, 0.5, 2);
+
+    expect(() => t.onSellFilled("s1", UP, 0.64, 3)).toThrow(
+      /sell fill exceeds held shares/,
+    );
+    expect(t.availableShares(UP)).toBe(2);
   });
 });
 
@@ -146,5 +169,12 @@ describe("onResolution", () => {
     t.onResolution(held, 0); // $0 payout
     expect(t.availableShares(DOWN)).toBe(0);
     expect(t.balance).toBeCloseTo(balanceBefore);
+  });
+
+  test("rejects negative held shares at resolution", () => {
+    const t = makeTracker(10);
+    expect(() => t.onResolution(new Map([[UP, -1]]), 0)).toThrow(
+      /negative held shares/,
+    );
   });
 });

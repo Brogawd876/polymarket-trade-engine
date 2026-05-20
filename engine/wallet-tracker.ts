@@ -1,4 +1,5 @@
 type ReservedSell = { tokenId: string; count: number };
+const EPSILON = 1e-9;
 
 export class WalletTracker {
   private _balance: number;
@@ -86,6 +87,12 @@ export class WalletTracker {
   // -- Sell lifecycle --
 
   lockForSell(orderId: string, tokenId: string, shares: number, label: string): void {
+    const available = this.availableShares(tokenId);
+    if (shares > available + EPSILON) {
+      throw new Error(
+        `wallet invariant violation: cannot reserve ${shares} shares for sell; available=${available}`,
+      );
+    }
     this._reservedForSells.set(orderId, { tokenId, count: shares });
     this._log(
       `[wallet] lockSell ${label}: -${shares} shares | availShares=${this.availableShares(tokenId)}`,
@@ -108,16 +115,22 @@ export class WalletTracker {
     sellPrice: number,
     shareCount: number,
   ): void {
+    const current = this._shares.get(tokenId) ?? 0;
+    if (shareCount > current + EPSILON) {
+      throw new Error(
+        `wallet invariant violation: sell fill exceeds held shares for ${tokenId}: held=${current}, fill=${shareCount}`,
+      );
+    }
     this._reservedForSells.delete(orderId);
 
-    const current = this._shares.get(tokenId) ?? 0;
-    this._shares.set(tokenId, Math.max(0, current - shareCount));
+    const next = Math.max(0, current - shareCount);
+    this._shares.set(tokenId, next);
 
     const proceeds = sellPrice * shareCount;
     this._balance += proceeds;
 
     this._log(
-      `[wallet] sellFill(${orderId}): ${tokenId.slice(0, 8)}... shares: ${current} - ${shareCount} = ${Math.max(0, current - shareCount)}, ` +
+      `[wallet] sellFill(${orderId}): ${tokenId.slice(0, 8)}... shares: ${current} - ${shareCount} = ${next}, ` +
         `balance=$${this._balance.toFixed(2)}`,
     );
   }
@@ -139,6 +152,11 @@ export class WalletTracker {
   /** Called when a market resolves: credits USDC payout and clears held shares. */
   onResolution(held: Map<string, number>, payout: number): void {
     for (const [tokenId, shares] of held) {
+      if (shares < -EPSILON) {
+        throw new Error(
+          `wallet invariant violation: negative held shares at resolution for ${tokenId}: ${shares}`,
+        );
+      }
       if (shares > 0) this._shares.set(tokenId, 0);
     }
     if (payout > 0) {
