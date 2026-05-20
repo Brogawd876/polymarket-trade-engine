@@ -3,6 +3,15 @@ import { ReplayRunner, VirtualClock, type TelemetryEvent, type TelemetrySink } f
 import { listStrategyVariants, resolveStrategySelection, type StrategyVariant } from "./strategy/index.ts";
 import { validateReplayFixture } from "./server/helpers/replay-fixtures.ts";
 import { calculateBrierScore, calculateLogLoss } from "../utils/math.ts";
+import {
+  appendSettlementReference,
+  calculateMarkouts,
+  extractReferencePricesFromReplayEvents,
+  summarizeMarkouts,
+  type FillForMarkout,
+  type MarkoutSummary,
+  type ReferencePricePoint,
+} from "./replay/markout.ts";
 
 export type StrategyLabBatchState = "queued" | "running" | "completed" | "failed" | "canceled";
 export type StrategyLabRunStatus = "queued" | "running" | "completed" | "failed" | "canceled";
@@ -55,6 +64,9 @@ export type ExecutionQualitySummary = {
     fiveSecond: number | null;
     thirtySecond: number | null;
     settlement: number | null;
+    samples: number;
+    unavailableCount: number;
+    unavailableReasons: Record<string, number>;
   };
 };
 
@@ -84,7 +96,12 @@ export type StrategyLabVariantSummary = {
   logLoss: number | null;
   avgFillRate: number | null;
   avgCancelRate: number | null;
+  avgMarkout1s: number | null;
+  avgMarkout5s: number | null;
+  avgMarkout30s: number | null;
   avgSettlementMarkout: number | null;
+  markoutSampleCount: number;
+  markoutUnavailableCount: number;
   avgTurnover: number | null;
   score: number;
 };
@@ -157,6 +174,9 @@ const EMPTY_EXECUTION_SUMMARY: ExecutionQualitySummary = {
     fiveSecond: null,
     thirtySecond: null,
     settlement: null,
+    samples: 0,
+    unavailableCount: 0,
+    unavailableReasons: {},
   },
 };
 
@@ -187,7 +207,11 @@ function emptySummary(totalRuns: number): StrategyLabBatchSummary {
   };
 }
 
-function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEvent[]): StrategyLabRunResult {
+function deriveResultFromEvents(
+  base: StrategyLabRunResult,
+  events: TelemetryEvent[],
+  replayReferences: ReferencePricePoint[] = [],
+): StrategyLabRunResult {
   const result: StrategyLabRunResult = {
     ...base,
     counts: { ...EMPTY_COUNTS },
@@ -201,10 +225,12 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
 
   const forecasts: number[] = [];
   const filledSides: Array<"UP" | "DOWN"> = [];
+  const fillsForMarkout: FillForMarkout[] = [];
   let placedOrders = 0;
   let terminalCancels = 0;
   let turnover = 0;
   let runningLowPnl = 0;
+  let settlementTsMs: number | null = null;
 
   for (const event of events) {
     switch (event.type) {
@@ -231,6 +257,13 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
           result.counts.fills += 1;
           filledSides.push(event.payload.side);
           turnover += event.payload.price * event.payload.shares;
+          fillsForMarkout.push({
+            orderId: event.payload.orderId ?? event.payload.intentId ?? `${event.payload.slug}-${event.ts}-${result.counts.fills}`,
+            tsMs: event.ts,
+            side: event.payload.side,
+            action: event.payload.action,
+            price: event.payload.price,
+          });
         }
         if (event.payload.status === "failed" || event.payload.status === "canceled" || event.payload.status === "expired") {
           result.counts.problems += 1;
@@ -242,6 +275,7 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
         result.direction = event.payload.direction;
         result.openPrice = event.payload.openPrice;
         result.closePrice = event.payload.closePrice;
+        settlementTsMs = event.ts;
         break;
       case "ROUND_PNL":
         result.slug = event.payload.slug;
@@ -264,6 +298,14 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
   }
 
   const pnl = result.pnl ?? 0;
+  const referencesWithSettlement =
+    result.direction !== null && settlementTsMs !== null
+      ? appendSettlementReference(replayReferences, { tsMs: settlementTsMs, direction: result.direction })
+      : replayReferences;
+  const markoutResults = fillsForMarkout.flatMap((fill) =>
+    calculateMarkouts(fill, referencesWithSettlement),
+  );
+  const markoutSummary: MarkoutSummary = summarizeMarkouts(markoutResults);
 
   const wasPredictiveWin = result.direction !== null && filledSides.some(side => side === result.direction);
   const hadWrongDirectionalFill = result.direction !== null && filledSides.some(side => side !== result.direction);
@@ -277,10 +319,13 @@ function deriveResultFromEvents(base: StrategyLabRunResult, events: TelemetryEve
     turnover: parseFloat(turnover.toFixed(4)),
     maxDrawdown: parseFloat(Math.abs(runningLowPnl).toFixed(4)),
     markouts: {
-      oneSecond: null,
-      fiveSecond: null,
-      thirtySecond: null,
-      settlement: result.counts.fills > 0 ? parseFloat(pnl.toFixed(4)) : null,
+      oneSecond: markoutSummary.oneSecond,
+      fiveSecond: markoutSummary.fiveSecond,
+      thirtySecond: markoutSummary.thirtySecond,
+      settlement: markoutSummary.settlement,
+      samples: markoutSummary.samples,
+      unavailableCount: markoutSummary.unavailableCount,
+      unavailableReasons: markoutSummary.unavailableReasons,
     },
   };
 
@@ -344,7 +389,12 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
       const avgLogLoss = brierRuns.length > 0 ? brierRuns.reduce((sum, run) => sum + run.logLoss!, 0) / brierRuns.length : null;
       const avgFillRate = average(completed.map(run => run.execution.fillRate));
       const avgCancelRate = average(completed.map(run => run.execution.cancelRate));
+      const avgMarkout1s = average(completed.map(run => run.execution.markouts.oneSecond));
+      const avgMarkout5s = average(completed.map(run => run.execution.markouts.fiveSecond));
+      const avgMarkout30s = average(completed.map(run => run.execution.markouts.thirtySecond));
       const avgSettlementMarkout = average(completed.map(run => run.execution.markouts.settlement));
+      const markoutSampleCount = completed.reduce((sum, run) => sum + run.execution.markouts.samples, 0);
+      const markoutUnavailableCount = completed.reduce((sum, run) => sum + run.execution.markouts.unavailableCount, 0);
       const avgTurnover = average(completed.map(run => run.execution.turnover));
 
       const tradeRate = completed.length > 0 ? tradeCount / completed.length : null;
@@ -389,7 +439,12 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
         logLoss: avgLogLoss !== null ? parseFloat(avgLogLoss.toFixed(6)) : null,
         avgFillRate,
         avgCancelRate,
+        avgMarkout1s,
+        avgMarkout5s,
+        avgMarkout30s,
         avgSettlementMarkout,
+        markoutSampleCount,
+        markoutUnavailableCount,
         avgTurnover,
         score,
       };
@@ -618,6 +673,7 @@ export class StrategyLabBatchManager {
         this.currentBots.set(batchId, bot);
         const reader = bot.replayReader;
         if (!reader) throw new Error("Replay reader not initialized");
+        const replayReferences = extractReferencePricesFromReplayEvents([...reader.allEvents]);
 
         const runner = new ReplayRunner(reader, bot, clock, sink);
         await runner.run();
@@ -626,7 +682,7 @@ export class StrategyLabBatchManager {
         await new Promise(resolve => setTimeout(resolve, 0));
 
         if ((run.status as StrategyLabRunStatus) !== "canceled") {
-          Object.assign(run, deriveResultFromEvents(run, sink.events));
+          Object.assign(run, deriveResultFromEvents(run, sink.events, replayReferences));
         }
       } catch (error) {
         if ((run.status as StrategyLabRunStatus) !== "canceled") {

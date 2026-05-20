@@ -65,6 +65,14 @@ describe("StrategyLabBatchManager", () => {
     expect(typeof completed.runs[0]!.pnl).toBe("number");
     expect(completed.runs[0]!.counts.intents).toBeGreaterThan(0);
     expect(completed.runs[0]!.counts.fills).toBeGreaterThan(0);
+    expect(completed.runs[0]!.execution.markouts.samples).toBeGreaterThan(0);
+    expect(completed.runs[0]!.execution.markouts.oneSecond).not.toBeNull();
+    expect(completed.runs[0]!.execution.markouts.unavailableCount).toBeGreaterThan(0);
+    expect(
+      Object.keys(completed.runs[0]!.execution.markouts.unavailableReasons).length,
+    ).toBeGreaterThan(0);
+    expect(completed.summary.byStrategy[0]!.markoutSampleCount).toBeGreaterThan(0);
+    expect(completed.summary.byStrategy[0]!.avgMarkout1s).not.toBeNull();
   });
 
   test("runs two strategies across multiple fixtures and produces aggregate summary", async () => {
@@ -100,6 +108,21 @@ describe("StrategyLabBatchManager", () => {
     expect(completed.summary.byStrategy[0]!.score).toBeGreaterThanOrEqual(completed.summary.byStrategy[1]!.score);
     expect(completed.summary.recommendation?.strategy).toBe(completed.summary.byStrategy[0]!.strategy);
     expect(completed.runs.every(run => run.variantLabel.length > 0)).toBe(true);
+  });
+
+  test("preserves unavailable markout reasons and does not fake no-trade markouts", async () => {
+    const manager = new StrategyLabBatchManager();
+    const batch = await manager.createBatch({
+      strategies: ["late-entry"],
+      files: [join(FIXTURES_DIR, "filled-order.log")],
+    });
+
+    const completed = await waitForBatch(manager, batch.id);
+    expect(completed.state).toBe("completed");
+    expect(completed.runs[0]!.counts.fills).toBe(0);
+    expect(completed.runs[0]!.execution.markouts.samples).toBe(0);
+    expect(completed.runs[0]!.execution.markouts.oneSecond).toBeNull();
+    expect(completed.runs[0]!.execution.markouts.settlement).toBeNull();
   });
 
   test("failed fixture produces a failed row without killing the batch", async () => {

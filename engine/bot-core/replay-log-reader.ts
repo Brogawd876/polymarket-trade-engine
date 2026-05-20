@@ -71,6 +71,10 @@ export class ReplayLogReader {
     return this.events.length;
   }
 
+  get allEvents(): readonly ReplayEvent[] {
+    return this.events;
+  }
+
   get processedEventCount(): number {
     return this.cursor;
   }
