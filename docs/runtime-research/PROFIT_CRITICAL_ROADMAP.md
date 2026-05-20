@@ -24,6 +24,8 @@ Why it matters for profit: PnL from optimistic replay fills is not evidence. Mar
 
 Files/modules: `engine/replay/fill-model.ts`, `engine/replay/markout.ts`, `engine/strategy-lab.ts`.
 
+Phase 8B status: Strategy Lab now reports markouts where replay token-side observations support them. Markout values are measurement-only and do not change ranking/scoring yet. Sparse replay fixtures can still produce unavailable horizons, and that is intentional.
+
 Acceptance: Strategy Lab reports pessimistic fills and markouts without fake values.
 
 Stop if: captured logs cannot support queue or markout reconstruction.
