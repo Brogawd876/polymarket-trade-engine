@@ -116,7 +116,7 @@ export class SessionManager {
     }
   }
 
-  async startReplay(file: string): Promise<void> {
+  async startReplay(file: string, config: { strategy?: string } = {}): Promise<void> {
     if (this._sessionState === "running" || this._sessionState === "starting") {
       throw new Error("Session is already active");
     }
@@ -130,7 +130,7 @@ export class SessionManager {
     try {
       const clock = new VirtualClock();
       this._bot = new EarlyBird(
-        undefined, // strategy (defaults)
+        config.strategy,
         1,
         false,
         1,

@@ -139,4 +139,18 @@ describe("Session Lifecycle Integration", () => {
     expect(finalStatus.blockReason).toBeNull();
     expect(["completed", "idle"]).toContain(finalStatus.sessionState);
   }, 10000);
+
+  test("Replay session honors explicit strategy selection", async () => {
+    const bus = new TelemetryBus();
+    const sessionManager = new SessionManager(bus);
+    const fixture = join(import.meta.dir, "..", "fixtures", "replay", "filled-order.log");
+
+    await sessionManager.startReplay(fixture, { strategy: "late-entry" });
+
+    const status = sessionManager.getStatus();
+    expect(status.engineMode).toBe("replay");
+    expect(status.engineStatus?.strategy).toBe("late-entry");
+
+    await sessionManager.stopSession();
+  }, 10000);
 });

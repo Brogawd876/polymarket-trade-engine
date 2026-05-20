@@ -133,7 +133,7 @@ if (opts.idle) {
   console.log("Engine running in idle mode. Waiting for control plane commands.");
 } else {
   if (opts.replay) {
-    await sessionManager.startReplay(opts.replay);
+    await sessionManager.startReplay(opts.replay, { strategy: opts.strategy });
     // When started from CLI without idle, we exit when completed
     setInterval(() => {
         if (sessionManager.getStatus().sessionState === "completed" || sessionManager.getStatus().sessionState === "failed") {
