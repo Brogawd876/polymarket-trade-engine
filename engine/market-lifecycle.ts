@@ -132,6 +132,7 @@ export class MarketLifecycle {
   private _clock: Clock;
   private _telemetry: TelemetrySink;
   private _eventWriter?: EventWriter;
+  private _lastSpreadDepthEventMs = Number.NEGATIVE_INFINITY;
 
   private _clobTokenIds: [string, string] | null = null;
   private _conditionId: string | null = null;
@@ -1813,6 +1814,10 @@ export class MarketLifecycle {
   }
 
   private _emitSpreadDepthSnapshot(): void {
+    const nowMs = this._clock.nowMs();
+    if (nowMs - this._lastSpreadDepthEventMs < 1000) return;
+    this._lastSpreadDepthEventMs = nowMs;
+
     const venue = this._venue.latest();
     if (!venue) return;
     const spreadUp =

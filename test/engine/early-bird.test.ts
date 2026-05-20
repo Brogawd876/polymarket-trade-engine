@@ -11,6 +11,7 @@ import {
 } from "./helpers/mock-api-queue.ts";
 import { SimTickerTracker } from "./helpers/sim-ticker.ts";
 import { ModuleMocker } from "../helpers/mock-module.ts";
+import type { EventWriter } from "../../engine/event-store/writer.ts";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
@@ -129,6 +130,7 @@ type HarnessOpts = {
   alwaysLog?: boolean;
   maxSessionLoss?: number;
   apiQueue?: MockAPIQueue;
+  eventWriter?: EventWriter;
 };
 
 function makeHarness(opts: HarnessOpts = {}): Harness {
@@ -160,6 +162,7 @@ function makeHarness(opts: HarnessOpts = {}): Harness {
     undefined,
     {
       orderBookFactory: () => new MockOrderBook() as any,
+      eventWriter: opts.eventWriter,
     },
   );
 
@@ -179,6 +182,16 @@ function makeHarness(opts: HarnessOpts = {}): Harness {
       delete process.env.MAX_SESSION_LOSS;
     },
   };
+}
+
+class FailingEventWriter implements EventWriter {
+  readonly runId = "failing-run";
+  readonly sessionId = "failing-session";
+  async append(): Promise<never> {
+    throw new Error("synthetic event-store failure");
+  }
+  async flush(): Promise<void> {}
+  async close(): Promise<void> {}
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -258,6 +271,16 @@ describe("EarlyBird — rounds", () => {
 
       const lc = (h.eb as any)._lifecycles.get(FIXTURE_SLUG)!;
       expect((lc as any)._alwaysLog).toBe(true);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "event-store write failures do not crash shutdown",
+    async () => {
+      h = makeHarness({ eventWriter: new FailingEventWriter() });
+      await h.eb.start();
+      await expect(h.eb.stop()).resolves.toBeUndefined();
     },
     TEST_TIMEOUT,
   );

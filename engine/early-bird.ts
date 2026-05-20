@@ -248,6 +248,8 @@ export class EarlyBird {
         status: "started",
         commitSha: process.env.GIT_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || "local",
       },
+    }).catch((error) => {
+      log.write(`[event-store] failed to write run_started: ${error}`, "red");
     });
   }
 
@@ -630,7 +632,6 @@ export class EarlyBird {
       },
     }).catch((error) => {
       log.write(`[event-store] failed to write run_completed: ${error}`, "red");
-      throw error;
     });
     await this._eventWriter.close().catch((error) => {
       log.write(`[event-store] failed to close writer: ${error}`, "red");
