@@ -116,7 +116,9 @@ export class ConservativeFillScorer {
     let high = sorted.length - 1;
     while (low <= high) {
       const mid = (low + high) >>> 1;
-      const ts = sorted[mid].processedTsMs ?? sorted[mid].receivedTsMs ?? 0;
+      const midEvent = sorted[mid];
+      if (!midEvent) break;
+      const ts = midEvent.processedTsMs ?? midEvent.receivedTsMs ?? 0;
       if (ts < opts.placedTsMs) {
         low = mid + 1;
       } else {
@@ -128,6 +130,7 @@ export class ConservativeFillScorer {
 
     for (let i = startIndex; i < sorted.length; i++) {
       const evt = sorted[i];
+      if (!evt) continue;
 
       // ── Book events ────────────────────────────────────────────────────────
       if (evt.eventType === "market_book_snapshot" || evt.eventType === "market_book_delta") {
