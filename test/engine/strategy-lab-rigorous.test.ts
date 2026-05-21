@@ -115,11 +115,25 @@ describe("StrategyLab Rigorous Fill Evidence", () => {
     expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
   });
 
-  test("CLOB order ID must not be mistaken for intent ID -> ambiguous_intent_mapping", () => {
+  test("orderId must not be mistaken for intentId, even if an intent with the same ID exists elsewhere", () => {
     const res = runScorer([
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "different-intent", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
-      { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "another-intent", tokenId: "TOKEN_A", createdAtMs: 1002 } as any } },
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-a", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
+      { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-2000", intent: { id: "clob-order-123", tokenId: "TOKEN_WRONG", createdAtMs: 1002 } as any } },
       { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "clob-order-123", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+    ], [
+      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
+    ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(1);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
+    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
+    expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping).toBeUndefined();
+  });
+
+  test("multiple intents same slug, no intentId -> ambiguous_intent_mapping", () => {
+    const res = runScorer([
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-1", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
+      { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-2", tokenId: "TOKEN_B", createdAtMs: 1002 } as any } },
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "clob-order-456", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
     ], [
       { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
     ]);
@@ -135,10 +149,10 @@ describe("StrategyLab Rigorous Fill Evidence", () => {
       { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i3", tokenId: "T3", createdAtMs: 1001 } as any } }, // unknown_insufficient_data
       // i4 missing token id -> missing_token_id (unavailable)
       { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i4", createdAtMs: 1001 } as any } },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i2", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i3", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i4", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", intentId: "i1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", intentId: "i2", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", intentId: "i3", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", intentId: "i4", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
     ], [
       { eventType: "market_trade", processedTsMs: 1002, payload: { tokenId: "T1", price: 0.49, shares: 10 } }, // trade_through
       { eventType: "market_book_snapshot", processedTsMs: 1002, payload: { tokenId: "T2", side: "UP", bestBid: 0.50, bestAsk: 0.52 } }, // touch

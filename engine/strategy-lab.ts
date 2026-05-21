@@ -444,22 +444,17 @@ export function deriveResultFromEvents(
         intent = intentsById.get(fill.intentId);
       }
       
-      // 2. If no intentId, use orderId only if there is a real explicit orderId -> intent mapping (which we store in intentsById via intent.id)
-      if (!intent && !fill.intentId && fill.orderId) {
-        intent = intentsById.get(fill.orderId);
-      }
-
-      // 3. If no usable ID mapping: fallback to slug only if exactly one intent exists for that slug.
+      // 2. If no intent mapping via intentId: fallback to slug only if exactly one intent exists for that slug.
       if (!intent) {
         const slugIntents = intentsBySlug.get(fill.slug) ?? [];
         if (slugIntents.length === 1) {
           intent = slugIntents[0];
         } else if (slugIntents.length > 1) {
-          // 4. If multiple intents exist for the same slug and no unambiguous ID link exists: do not score it.
+          // 3. If multiple intents exist for the same slug and no unambiguous ID link exists: do not score it.
           cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping = (cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping ?? 0) + 1;
           continue;
         } else {
-          // 5. If no intent exists: increment missing_intent_mapping
+          // 4. If no intent exists: increment missing_intent_mapping
           cFill.conservativeFillUnavailableReasons.missing_intent_mapping = (cFill.conservativeFillUnavailableReasons.missing_intent_mapping ?? 0) + 1;
           continue;
         }
