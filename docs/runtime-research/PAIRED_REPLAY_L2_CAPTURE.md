@@ -35,7 +35,7 @@ Running a successful capture generates three key artifacts:
 - `rawL2LogPath`: Path to the raw L2 log.
 - `coverageVerdict`: `"complete" | "partial" | "missing"`. Valid pairs must be "complete" (L2 data must strictly lead and tail the replay events).
 - `pairValidity`: `"valid" | "invalid"`. Tracks if the pair passed basic checks, coverage bounds, and Strategy Lab evaluation without internal execution failure. No-fill runs can still be marked valid.
-- `strategyLabEvidenceVerdict`: Evaluates whether Strategy Lab was able to use the capture (`usable`, `unavailable_no_fills`, etc).
+- `strategyLabEvidenceVerdict`: Evaluates whether Strategy Lab was able to use the capture (`usable`, `unavailable_no_fills`, `unavailable_insufficient_data`, etc).
 
 ## Safety Restrictions & Boundaries
 

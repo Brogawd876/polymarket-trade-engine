@@ -4,7 +4,7 @@ import { StrategyLabBatchManager } from "../strategy-lab.ts";
 
 export interface PairValidationOptions {
   metadata?: Partial<PairManifest>;
-  testStrategyLabVerdict?: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed";
+  testStrategyLabVerdict?: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "unavailable_insufficient_data" | "failed";
   testStrategyLabError?: string;
 }
 
@@ -150,7 +150,7 @@ export async function validatePair(
     }
   }
 
-  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed" = "failed";
+  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "unavailable_insufficient_data" | "failed" = "failed";
 
   if (validationErrors.length === 0 && parseErrors.length === 0) {
     if (options.testStrategyLabVerdict || options.testStrategyLabError) {
@@ -193,8 +193,11 @@ export async function validatePair(
               validationWarnings.push("Fills occurred but mapping was incomplete or ambiguous.");
             } else if (cFill.usableEvidenceCount > 0) {
               strategyLabEvidenceVerdict = "usable";
+            } else if (cFill.eligibleFillCount > 0 && cFill.evaluatedFillCount > 0) {
+              strategyLabEvidenceVerdict = "unavailable_insufficient_data";
             } else {
-              strategyLabEvidenceVerdict = "usable";
+              // Should not really be hit given the prior conditions, but fallback safely
+              strategyLabEvidenceVerdict = "failed";
             }
           } else if (run && run.status === "failed") {
             // @ts-ignore - we don't have full type definition but it might have an error property

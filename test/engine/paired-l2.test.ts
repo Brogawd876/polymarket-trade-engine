@@ -143,6 +143,22 @@ describe("Pair Validator", () => {
     expect(manifest.strategyLabEvidenceVerdict).toBe("usable");
   });
 
+  test("valid pair manifest (complete + insufficient data)", async () => {
+    const replayLog = path.join(tmpDir, "complete_insufficient.log");
+    const l2Log = path.join(tmpDir, "complete_insufficient.ndjson");
+    
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      testStrategyLabVerdict: "unavailable_insufficient_data"
+    });
+    
+    expect(manifest.coverageVerdict).toBe("complete");
+    expect(manifest.pairValidity).toBe("valid");
+    expect(manifest.strategyLabEvidenceVerdict).toBe("unavailable_insufficient_data");
+  });
+
   test("valid pair manifest (complete + no fills)", async () => {
     const replayLog = path.join(tmpDir, "complete3.log");
     const l2Log = path.join(tmpDir, "complete3.ndjson");
