@@ -730,7 +730,10 @@ export class MarketLifecycle {
           this._removePendingOrder(id);
         }
       }
-      await this._waitForResolution();
+      
+      const isResolved = this._checkResolutionSync();
+      if (!isResolved) return; // Wait for next tick
+
       this._computePnl();
       await this._autoRedeem();
       this._setState("DONE");
@@ -742,7 +745,8 @@ export class MarketLifecycle {
 
     if (this._pendingOrders.length === 0 && this._inFlight === 0) {
       if (this._hasUnfilledPositions()) {
-        await this._waitForResolution();
+        const isResolved = this._checkResolutionSync();
+        if (!isResolved) return; // Wait for next tick
         this._computePnl();
         await this._autoRedeem();
       } else {
@@ -1694,28 +1698,21 @@ export class MarketLifecycle {
     }
   }
 
-  private async _waitForResolution(): Promise<void> {
-    const slot = slotFromSlug(this.slug).startTime;
+  private _resolutionWaitStartMs: number | null = null;
+  private _checkResolutionSync(): boolean {
+    const slot = slotFromSlug(this.slug);
     if (!this._marketPriceHandle) {
-      this._marketPriceHandle = this.apiQueue.queueMarketPrice(slotFromSlug(this.slug));
+      this._marketPriceHandle = this.apiQueue.queueMarketPrice(slot);
     }
 
-    const timeoutMs = 15000; // 15s timeout
-    const startMs = this._clock.nowMs();
+    const data = this.apiQueue.marketResult.get(slot.startTime);
+    if (data?.closePrice) return true;
 
-    while (true) {
-      const data = this.apiQueue.marketResult.get(slot);
-      if (data?.closePrice) return;
-
-      if (this._clock.nowMs() - startMs > timeoutMs) {
-        this._log(`[${this.slug}] Timed out waiting for resolution after ${timeoutMs}ms.`, "yellow");
-        return;
-      }
-
-      await new Promise<void>((resolve) =>
-        this._clock.setTimeout(() => resolve(), 1000),
-      );
+    if (this._resolutionWaitStartMs === null) {
+      this._resolutionWaitStartMs = this._clock.nowMs();
     }
+
+    return false;
   }
 
   private _computePnl(): void {

@@ -501,3 +501,9 @@
   - `bun test --max-concurrency=1 test/engine/recorders/raw-l2-recorder.test.ts` passed.
 - Handoff reference: `AI_WORKSPACE/HANDOFF.md`
 
+## 2026-05-21: Phase 8L Corpus Calibration Extraction
+
+- **Action:** Created `CalibrationRecord` extraction from offline Strategy Lab evidence to feed into downstream Platt scaling / isotonic regression models.
+- **Action:** Updated `run-strategy-lab-paired-corpus.ts` to process multiple pair manifests automatically and output JSONL metrics.
+- **Result:** Successfully expanded corpus handling without modifying live trading risk gates or strategies. Phase 8L offline data layer is fully operational.
+

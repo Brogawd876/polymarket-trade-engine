@@ -1,7 +1,8 @@
-import { readdirSync, readFileSync, existsSync } from "fs";
+import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import * as path from "path";
 import { type PairManifest } from "../engine/replay/pair-manifest.ts";
 import { StrategyLabBatchManager } from "../engine/strategy-lab.ts";
+import { extractCalibrationRecords } from "../engine/replay/calibration-extractor.ts";
 
 import { shouldTimeout } from "./paired-corpus-utils.ts";
 
@@ -12,10 +13,18 @@ async function main() {
   let timeoutMs = 120000;
   let allowPartial = false;
 
+  let outJson = "";
+  let outCalibrationJsonl = "";
+  const directPairs: string[] = [];
+
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--pairs") pairsDir = args[++i] || pairsDir;
+    else if (args[i] === "--pairs-dir") pairsDir = args[++i] || pairsDir;
+    else if (args[i] === "--pair") directPairs.push(args[++i] || "");
     else if (args[i] === "--timeout-ms") timeoutMs = parseInt(args[++i] || String(timeoutMs), 10);
     else if (args[i] === "--allow-partial") allowPartial = true;
+    else if (args[i] === "--out-json") outJson = args[++i] || outJson;
+    else if (args[i] === "--out-calibration-jsonl") outCalibrationJsonl = args[++i] || outCalibrationJsonl;
     else if (args[i] === "--variants") {
       variants = [];
       while (i + 1 < args.length && !args[i + 1]!.startsWith("--")) {
@@ -29,18 +38,44 @@ async function main() {
     process.exit(1);
   }
 
-  const files = readdirSync(pairsDir).filter(f => f.endsWith(".pair.json"));
   const validManifests: PairManifest[] = [];
+  const allManifests = new Map<string, PairManifest>();
+  let validCount = 0;
+  let invalidCount = 0;
 
-  for (const file of files) {
+  if (existsSync(pairsDir)) {
+    const files = readdirSync(pairsDir).filter(f => f.endsWith(".pair.json"));
+    for (const file of files) {
+      try {
+        const content = readFileSync(path.join(pairsDir, file), "utf-8");
+        const manifest = JSON.parse(content) as PairManifest;
+        allManifests.set(manifest.slug, manifest);
+        if (manifest.pairValidity === "valid") {
+          validManifests.push(manifest);
+          validCount++;
+        } else {
+          invalidCount++;
+        }
+      } catch (e) {
+        console.error(`Failed to read/parse ${file}:`, e);
+      }
+    }
+  }
+
+  for (const p of directPairs) {
+    if (!p) continue;
     try {
-      const content = readFileSync(path.join(pairsDir, file), "utf-8");
+      const content = readFileSync(p, "utf-8");
       const manifest = JSON.parse(content) as PairManifest;
-      if (manifest.pairValidity === "valid") {
+      allManifests.set(manifest.slug, manifest);
+      if (manifest.pairValidity === "valid" && !validManifests.some(m => m.slug === manifest.slug)) {
         validManifests.push(manifest);
+        validCount++;
+      } else if (manifest.pairValidity !== "valid") {
+        invalidCount++;
       }
     } catch (e) {
-      console.error(`Failed to read/parse ${file}:`, e);
+      console.error(`Failed to read/parse pair ${p}:`, e);
     }
   }
 
@@ -65,10 +100,15 @@ async function main() {
   let batch = initialBatch;
   const startMs = Date.now();
   let timedOut = false;
+  let internalMismatch = false;
 
   while (batch.state === "queued" || batch.state === "running") {
+
     if (shouldTimeout(startMs, timeoutMs)) {
       timedOut = true;
+      if (batch.progress.completedRuns === batch.progress.totalRuns && batch.progress.totalRuns > 0 && batch.state === "running") {
+        internalMismatch = true;
+      }
       manager.cancelBatch(batch.id);
       batch = manager.getBatch(batch.id) ?? batch;
       break;
@@ -78,14 +118,30 @@ async function main() {
     process.stdout.write(`\r[Strategy Lab] ${batch.progress.completedRuns} / ${batch.progress.totalRuns} runs completed...`);
   }
 
+  let finalExitCode = 0;
+  let finalStatus: string = batch.state;
   if (timedOut) {
-    console.log(`\n\n[ERROR] Strategy Lab Batch Timed Out!`);
-    console.log(`Completed runs: ${batch.progress.completedRuns} / ${batch.progress.totalRuns}`);
-    if (!allowPartial) process.exit(1);
+    if (internalMismatch) {
+      console.log(`\n\n[ERROR] Strategy Lab Batch internal state mismatch! Completed ${batch.progress.totalRuns} runs but hung in running state.`);
+      finalStatus = "internal_state_mismatch";
+      finalExitCode = 1;
+    } else {
+      console.log(`\n\n[ERROR] Strategy Lab Batch Timed Out!`);
+      console.log(`Completed runs: ${batch.progress.completedRuns} / ${batch.progress.totalRuns}`);
+      console.log(`Status: timed_out`);
+      finalStatus = "timed_out";
+      if (!allowPartial) finalExitCode = 1;
+    }
   } else {
-    console.log(`\n\nStrategy Lab Batch Completed. State: ${batch.state}`);
+    console.log(`\n\nStrategy Lab Batch Completed. State: ${finalStatus}`);
+    if (finalStatus === "failed") finalExitCode = 1;
   }
   
+  console.log(`\n--- Corpus Summary ---`);
+  console.log(`Loaded ${allManifests.size} total pair manifests.`);
+  console.log(`Valid Pairs: ${validCount}`);
+  console.log(`Invalid Pairs: ${invalidCount}`);
+
   console.log(`\n--- Aggregate Summary ---`);
   console.log(`Total Runs: ${batch.summary.totalRuns}`);
   console.log(`Total PnL: $${batch.summary.totalPnl}`);
@@ -103,6 +159,42 @@ async function main() {
     console.log(`    Markout 5s Avg: ${vSummary.conservativeFill.avgMarkout5s ?? "N/A"}`);
     console.log(`    Adverse Selection Rate: ${vSummary.conservativeFill.adverseSelectionRate ? (vSummary.conservativeFill.adverseSelectionRate * 100).toFixed(1) + "%" : "N/A"}`);
   }
+
+  if (outCalibrationJsonl) {
+    const records = extractCalibrationRecords(batch, allManifests);
+    if (records.length > 0) {
+      mkdirSync(path.dirname(outCalibrationJsonl), { recursive: true });
+      const jsonl = records.map(r => JSON.stringify(r)).join("\n");
+      writeFileSync(outCalibrationJsonl, jsonl, "utf-8");
+      console.log(`\nCalibration records written to: ${outCalibrationJsonl} (${records.length} records)`);
+    } else {
+      console.log(`\nNo calibration records extracted to write.`);
+    }
+  }
+
+  if (outJson) {
+    const records = outCalibrationJsonl ? extractCalibrationRecords(batch, allManifests) : [];
+    mkdirSync(path.dirname(outJson), { recursive: true });
+    writeFileSync(outJson, JSON.stringify({
+      status: finalStatus,
+      totalRuns: batch.summary.totalRuns,
+      completedRuns: batch.summary.completed,
+      failedRuns: batch.summary.failed,
+      canceledRuns: batch.summary.canceled,
+      validPairs: validCount,
+      invalidPairs: invalidCount,
+      calibrationRecordCount: records.length,
+      timedOut: timedOut,
+      usedForcedCompletion: false,
+      summary: batch.summary
+    }, null, 2), "utf-8");
+    console.log(`\nSummary JSON written to: ${outJson}`);
+  }
+
+  process.exit(finalExitCode);
 }
 
-main().catch(console.error);
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

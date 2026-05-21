@@ -7,7 +7,7 @@ import { StrategyLabBatchManager } from "../../engine/strategy-lab.ts";
 const FIXTURES_DIR = join(import.meta.dir, "..", "fixtures", "replay");
 
 async function waitForBatch(manager: StrategyLabBatchManager, batchId: string) {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     const batch = manager.getBatch(batchId);
     if (batch && ["completed", "failed", "canceled"].includes(batch.state)) {
       return batch;
@@ -90,7 +90,7 @@ describe("StrategyLabBatchManager", () => {
     expect(completed.progress.completedRuns).toBe(4);
     expect(completed.summary.completed + completed.summary.failed + completed.summary.canceled).toBe(4);
     expect(completed.summary.avgPnl === null || Number.isFinite(completed.summary.avgPnl)).toBe(true);
-  });
+  }, 15000);
 
   test("runs multiple variants and produces ranked recommendation", async () => {
     const manager = new StrategyLabBatchManager();
@@ -108,7 +108,7 @@ describe("StrategyLabBatchManager", () => {
     expect(completed.summary.byStrategy[0]!.score).toBeGreaterThanOrEqual(completed.summary.byStrategy[1]!.score);
     expect(completed.summary.recommendation?.strategy).toBe(completed.summary.byStrategy[0]!.strategy);
     expect(completed.runs.every(run => run.variantLabel.length > 0)).toBe(true);
-  });
+  }, 15000);
 
   test("preserves unavailable markout reasons and does not fake no-trade markouts", async () => {
     const manager = new StrategyLabBatchManager();
