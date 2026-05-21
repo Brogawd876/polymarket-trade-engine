@@ -31,6 +31,14 @@ Markout notes:
 - BTC ticker or generic market price events are not used as token markout prices.
 - Strategy Lab still does not prove profitability; it now exposes a better adverse-selection diagnostic.
 
+Phase 8H update:
+
+- Paired Strategy Lab corpus execution and zero-fill-evidence diagnosis completed on `feat/paired-corpus-zero-fill-diagnostics`.
+- Clean late-entry paired captures produce no eligible fills, so `unavailable_no_fills` is correct for those runs.
+- All inspected raw L2 captures contain book events and `last_trade_price`, but zero `market_trade` events.
+- Active Strategy Lab variants can produce candidate fills, but replay token IDs currently default to `replay-up` / `replay-down` while raw L2 uses real CLOB token IDs. This prevents conservative scorer token matching.
+- Strategy Lab replay can append generated output back into source slug replay logs, so corpus inputs must be protected before more paired execution.
+
 Next exact task:
 
-Integrate conservative fill-model outputs into Strategy Lab scoring, or proceed to capture a larger corpus of L2 data for validation. Do not tune strategies yet.
+First make Strategy Lab replay execution immutable-safe and pass real paired CLOB token IDs into replay venue metadata. Then add a synthetic fill-bearing paired fixture with `market_trade` evidence before larger corpus capture or strategy tuning. Do not tune strategies yet.

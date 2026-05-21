@@ -1,40 +1,33 @@
-# Handoff: Type 3 Deposit Wallet Corrected
+# Handoff: Phase 8H Zero Fill Evidence Diagnostic
 
 ## Current Status
-- **Authentication:** Type 3 POLY_1271 flow is the active account model.
-- **Owner signer:** `0x3528764a45bB13eC6BD8Deb1a73b5034742E6329`
-- **Correct POLY_FUNDER_ADDRESS:** `0x9bB7C3aafCeb82665293f9cd784F61112fFa4c51`
-- **Account Balance:** Corrected deposit wallet shows approximately **$5.00 pUSD / CLOB balance**.
-- **CLOB Credentials:** Static `POLY_API_*` and `BUILDER_*` values are ignored for CLOB auth; credentials are freshly derived from the owner signer.
-- **Engine State:** Surgical Hardening Plan executed and verified. Engine is running in background (`--idle`) at port 3000.
-- **UI State:** Operator Cockpit is running in background at port 5173.
 
-## Completed Work
-1. **Bug Fixes:**
-   - Corrected `.env` to use the officially derived Type 3 deposit wallet.
-   - Kept `engine/client.ts` on fresh owner-derived CLOB credentials; stale static CLOB creds are not used.
-2. **Surgical Hardening:**
-   - Added WebSocket error logging in `UserChannel` (preventing silent parser failures).
-   - Removed `any` from timers in `EarlyBird` and `MarketLifecycle` for better type safety.
-   - Tightened `DEFAULT_EXECUTION_QUALITY_LIMITS` (1% slippage, 5s venue age) for industrial safety.
-   - Added environment diagnostics for `curl` in `fetch-retry.ts`.
-3. **Verification:**
-   - Latest acceptance run should use `npm run check`.
-   - `bun test` passed (except for 15 pre-existing `OrderBook` failures).
-   - Visual verification of UI completed via browser snapshot.
+Branch: `feat/paired-corpus-zero-fill-diagnostics`
 
-## Pending Tasks
-1. Build future live-trading work on the corrected Type 3 account model.
-2. Keep final acceptance tests as a preflight before additional order-posting changes.
+Phase 8H completed the paired Strategy Lab corpus execution and diagnosis without changing strategy logic, scoring, ranking weights, readiness gates, or live trading behavior.
 
-## Final Acceptance Evidence
-- `npm run check` passed.
-- Fresh owner-derived CLOB API key ID: `36054297-494c-54d3-c706-cd34749dfbc5`.
-- Balance checks: USDC.e `0`, pUSD `5`, CLOB balance `5`.
-- Raw order verification: maker/signer `0x9bB7C3aafCeb82665293f9cd784F61112fFa4c51`, `signatureType=3`, order version `2`.
-- Live BTC 5-minute market `btc-updown-5m-1779266400` accepted test order `0xcd265e048093af8a07f4a5aa323d80698d4a99a1f0dab747cde7575196690028`.
-- Cancellation succeeded and open orders returned to `0`.
+## Findings
 
-## Processes
-- [PID 9808] `bun run index.ts --idle --always-log --port 3000`
-- [PID 8892] `npm run dev` (UI)
+- Late-entry paired captures currently yield `eligibleFillCount = 0`, so `unavailable_no_fills` is the correct Strategy Lab verdict for clean late-entry runs.
+- Every raw L2 capture inspected has `market_trade = 0`. The files contain book snapshots, book deltas, `last_trade_price`, and raw messages, but no trade-through input.
+- Strategy Lab accepted `l2Files`; fair-value-maker produced 31 evaluated candidate fills over the current valid pairs, but all were `unknown_insufficient_data`.
+- The fair-value-maker insufficiency is caused by replay token ID mismatch: `ReplayVenueAdapter` defaults to `replay-up` / `replay-down`, while raw L2 events use real CLOB token IDs.
+- Re-running Strategy Lab can append generated replay output to source `logs/early-bird-<slug>.log` files via `engine/logger.ts`, contaminating corpus inputs. Two pair manifests became partial/invalid on re-validation after appended output extended replay timestamps beyond raw L2 coverage.
+
+## Added Artifact
+
+- `scripts/diagnose-replay-fill-evidence.ts`
+- `AI_WORKSPACE/PHASE8H_ZERO_FILL_DIAGNOSTIC.md`
+
+## Validation
+
+- `bun run check` passed.
+- `bun test --max-concurrency=1 test/engine/paired-corpus.test.ts` passed.
+- `bun test --max-concurrency=1 test/engine/paired-l2.test.ts` passed.
+
+## Next Exact Task
+
+1. Make Strategy Lab replay logging immutable-safe by redirecting or disabling slug-file market logging during batch runs.
+2. Pass real paired CLOB token IDs from raw L2 or pair manifests into replay venue metadata.
+3. Add a fill-bearing synthetic paired fixture with a real token ID and `market_trade` to prove conservative fill evidence reaches `trade_through_fill`.
+4. Only then capture more corpus or evaluate active benchmark strategies.

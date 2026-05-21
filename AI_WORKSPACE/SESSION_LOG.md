@@ -451,3 +451,20 @@
   - `bun run scripts/check-clob.ts` authenticated and reported open-order count `0`.
   - `bun run scripts/verify-raw-order.ts` passed with maker/signer set to the corrected deposit wallet and `signatureType=3`.
 
+## 2026-05-21T10:45:00-04:00
+
+- Agent used: Codex
+- Task attempted: Phase 8H paired Strategy Lab corpus execution and zero-fill-evidence diagnosis.
+- Outcome:
+  - Verified starting `master` and `origin/master` at `34e4bef39e78e0c8c4c100c35586c9a40b046f12`, then branched to `feat/paired-corpus-zero-fill-diagnostics`.
+  - Added `scripts/diagnose-replay-fill-evidence.ts` for read-only replay/raw-L2 evidence inventory.
+  - Confirmed clean late-entry replay pairs have no order/fill/intent telemetry, so Strategy Lab `unavailable_no_fills` is correct for those runs.
+  - Confirmed all current raw L2 captures have book data and zero `market_trade` events.
+  - Confirmed Strategy Lab accepts paired `l2Files`, but active fair-value-maker fills cannot map to raw L2 because replay uses synthetic token IDs while raw L2 uses real CLOB token IDs.
+  - Found a runner data-mutation defect: Strategy Lab replay can append generated output into source slug replay logs, contaminating corpus inputs and invalidating coverage on re-validation.
+- Validation:
+  - `bun run check` passed.
+  - `bun test --max-concurrency=1 test/engine/paired-corpus.test.ts` passed.
+  - `bun test --max-concurrency=1 test/engine/paired-l2.test.ts` passed.
+- Handoff reference: `AI_WORKSPACE/HANDOFF.md`
+
