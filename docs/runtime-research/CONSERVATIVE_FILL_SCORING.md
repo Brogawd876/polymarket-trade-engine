@@ -146,6 +146,17 @@ Those IDs are passed into replay venue metadata, so generated `ORDER_INTENT` and
 
 This mapping fix does not loosen conservative scoring. `market_trade` is still required for `trade_through_fill`; book-only evidence remains `touch_only`.
 
+## Trade-Print Source Rules
+
+Phase 8J identified complete Polymarket market WebSocket `last_trade_price` messages as the public trade-print source. The recorder converts them into `market_trade` only when they contain:
+
+- real CLOB token ID,
+- finite price,
+- finite size,
+- finite source timestamp.
+
+Incomplete last-trade data and CLOB last-trade-price snapshots remain weak reference data. They must not be counted as `trade_through_fill` because they do not prove size and time at the simulated order's placement horizon. Book touches remain `touch_only`.
+
 ---
 
 ## How This Prevents Fake Maker PnL

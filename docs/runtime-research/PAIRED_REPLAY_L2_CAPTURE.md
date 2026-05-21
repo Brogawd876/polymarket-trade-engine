@@ -52,6 +52,26 @@ Token mapping source order:
 
 If ordering is missing or ambiguous, the mapping fails closed as `token_mapping_missing` or `token_mapping_ambiguous`.
 
+## Trade-Print Capture Semantics
+
+Phase 8J confirmed that Polymarket market WebSocket `last_trade_price` messages are the public trade-print source for BTC 5-minute captures when complete.
+
+The raw L2 recorder now writes:
+
+- `last_trade_price` for every last-trade message, preserving weak reference data.
+- `market_trade` in addition to `last_trade_price` only when the message includes token ID, finite price, finite size, and finite source timestamp.
+
+This means fresh paired captures can contain trade-through evidence. Older captures that only contain normalized `last_trade_price` and zero `market_trade` remain book-touch/weak-reference datasets and should not be used to claim realistic maker fill quality.
+
+Current source hierarchy:
+
+| Tier | Source | Use |
+|---|---|---|
+| 1 | Market WebSocket complete `last_trade_price` normalized as `market_trade` | Conservative trade-through evidence |
+| 2 | Authenticated user fills | Own fill audit only |
+| 3 | CLOB last-trade-price snapshot or incomplete last-trade data | Weak reference, not trade-through proof |
+| 4 | Book touch | Touch-only evidence |
+
 ## Safety Restrictions & Boundaries
 
 - **No Live Trading**: The orchestrator absolutely forbids using `--prod`, `--live`, or matching environment variables. It enforces `NODE_ENV=development` and fail-closes if it detects live flags.

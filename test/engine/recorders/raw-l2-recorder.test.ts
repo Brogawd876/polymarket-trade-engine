@@ -192,7 +192,7 @@ describe("RawL2Recorder", () => {
     expect(lastEvt.eventType).toBe("feed_decode_error");
   });
 
-  it("normalizes last_trade_price without contaminating trades", async () => {
+  it("keeps incomplete last_trade_price separate from market_trade evidence", async () => {
     await recorder.start("btc-updown-test");
     mockWsOpts.onopen(mockWsInstance);
     
@@ -216,11 +216,57 @@ describe("RawL2Recorder", () => {
       tokenId: "down456",
       side: "DOWN",
       price: 0.45,
-      raw: { fee_rate_bps: "200" }
+      raw: { fee_rate_bps: "200", event_type: "last_trade_price" }
     });
     
-    // Ensure no 'market_trade' got logged for this
+    // Ensure incomplete last_trade_price does not become fill evidence.
     const trades = writer.events.filter(e => e.eventType === "market_trade");
     expect(trades.length).toBe(0);
+  });
+
+  it("normalizes complete last_trade_price trade prints into market_trade evidence", async () => {
+    await recorder.start("btc-updown-test");
+    mockWsOpts.onopen(mockWsInstance);
+
+    const wsMsg = {
+      data: JSON.stringify({
+        event_type: "last_trade_price",
+        asset_id: "down456",
+        market: "0xcond",
+        price: "0.45",
+        size: "12.5",
+        side: "BUY",
+        fee_rate_bps: "200",
+        timestamp: "1779294600123"
+      })
+    };
+
+    const preLength = writer.events.length;
+    mockWsOpts.onmessage(wsMsg);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const lastTrade = writer.events[preLength]!;
+    const marketTrade = writer.events[preLength + 1]!;
+    expect(lastTrade.eventType).toBe("last_trade_price");
+    expect(lastTrade.sourceTsMs).toBe(1779294600123);
+    expect(lastTrade.payload).toMatchObject({
+      tokenId: "down456",
+      side: "DOWN",
+      action: "buy",
+      price: 0.45,
+      shares: 12.5,
+    });
+    expect(marketTrade.eventType).toBe("market_trade");
+    expect(marketTrade.sourceTsMs).toBe(1779294600123);
+    expect(marketTrade.payload).toMatchObject({
+      tokenId: "down456",
+      side: "DOWN",
+      action: "buy",
+      price: 0.45,
+      shares: 12.5,
+      makerTaker: "unknown",
+      tradePrintSource: "clob_market_last_trade_price",
+    });
   });
 });

@@ -1,26 +1,26 @@
 # Active Task
 
-**Status:** phase_8i_replay_immutability_token_mapping_completed
+**Status:** phase_8j_trade_print_source_audit_completed
 
 ## Current Objective
 
-Repair paired Strategy Lab evaluation trust by making replay inputs immutable and mapping paired raw L2 real CLOB token IDs into replay venue metadata.
+Prove where reliable Polymarket BTC 5-minute trade-print evidence comes from and repair recorder normalization so future paired captures can support conservative trade-through evidence.
 
-## Phase 8I Verdict
+## Phase 8J Verdict
 
-The evaluation pipeline is safer and more informative:
+Reliable trade prints are available, but a clean valid paired corpus still needs one capture/validation hardening pass:
 
-- Strategy Lab replay no longer appends generated market logger output into source replay fixtures.
-- Paired runs extract real CLOB token IDs from raw L2 recorder metadata or unambiguous side-labeled events.
-- Token mapping fails closed as `token_mapping_missing` or `token_mapping_ambiguous`.
-- A synthetic fill-bearing paired test proves `replay fill + real token ID + placement timestamp + raw L2 market_trade` can produce `trade_through_fill`.
-- Current corpus rerun completed with source replay hashes unchanged.
-- Current live corpus still has no `market_trade`, so fair-value-maker evidence is touch-only and late-entry still has no eligible fills.
+- Polymarket market WebSocket emits complete public trade prints as `last_trade_price` with token ID, price, size, side, timestamp, market, and transaction hash.
+- The raw L2 recorder now preserves `last_trade_price` and emits `market_trade` only when all trade-through evidence fields are present.
+- CLOB last-trade-price endpoints are snapshot references only; they lack size/timestamp and are not trade-through proof.
+- Data API trades are public and complete enough for audit/backfill checks, but observed samples were lagging relative to market WS.
+- A short repaired-recorder capture produced normalized `market_trade`.
+- A paired capture attempt produced raw L2 with `market_trade` coverage, but the manifest is invalid because recorder SIGINT was recorded as `null` and embedded Strategy Lab validation timed out.
 
 ## Updated Report
 
-- `AI_WORKSPACE/PHASE8I_REPLAY_IMMUTABILITY_TOKEN_MAPPING.md`
+- `AI_WORKSPACE/PHASE8J_TRADE_PRINT_SOURCE_AUDIT.md`
 
 ## Next Exact Task
 
-Collect or construct the next clean paired evidence corpus with raw L2 `market_trade` coverage, then rerun Strategy Lab under the immutable, real-token-mapped pipeline before any strategy tuning.
+Phase 8K should harden paired capture validation, treat expected recorder shutdown correctly, and capture one clean valid paired BTC 5-minute corpus with normalized `market_trade` before any strategy tuning.

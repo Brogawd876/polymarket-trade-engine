@@ -54,3 +54,16 @@ Phase 8I update:
 Next exact task:
 
 Build or capture a clean paired corpus with real `market_trade` coverage, then rerun paired Strategy Lab before any strategy tuning or live readiness claims.
+
+Phase 8J update:
+
+- Reliable public trade prints were found on Polymarket's market WebSocket as complete `last_trade_price` messages.
+- Complete `last_trade_price` messages include token ID, price, size, side, market, timestamp, and transaction hash. These qualify as Tier 1 public trade-print evidence when all required fields are present.
+- The raw L2 recorder now preserves `last_trade_price` and additionally emits `market_trade` only for complete trade prints. Incomplete last-trade snapshots stay weak reference data.
+- Probe script added: `scripts/probe-polymarket-trade-prints.ts`.
+- Short repaired-recorder capture produced normalized `market_trade` events.
+- A paired capture attempt produced raw L2 with `market_trade`, but its manifest was invalid because recorder SIGINT shutdown was recorded as `null` and embedded Strategy Lab validation timed out.
+
+Next exact task:
+
+Harden paired capture validation, then capture one clean valid paired BTC 5-minute corpus with normalized `market_trade`. Do not tune strategies until trade-through evidence is present in a valid pair.

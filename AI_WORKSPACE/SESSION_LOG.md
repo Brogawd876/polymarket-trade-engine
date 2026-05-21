@@ -484,3 +484,20 @@
   - Full suite `bun test --max-concurrency=1` passed: 390 pass, 7 skip, 0 fail.
 - Handoff reference: `AI_WORKSPACE/HANDOFF.md`
 
+## 2026-05-21T11:45:00-04:00
+
+- Agent used: Codex
+- Task attempted: Phase 8J Polymarket trade-print source audit and market_trade capture.
+- Outcome:
+  - Confirmed official Polymarket market WebSocket docs describe `last_trade_price` as a maker/taker match trade event.
+  - Added `scripts/probe-polymarket-trade-prints.ts` to compare market WebSocket, CLOB last-trade-price, and Data API trade sources for an active BTC 5-minute market.
+  - Live probe saw complete market WebSocket trade prints with token ID, price, size, timestamp, side, market, and transaction hash.
+  - Updated `RawL2Recorder` to preserve `last_trade_price` and emit `market_trade` only when the trade-print fields required by conservative scoring are present.
+  - Confirmed the old raw L2 corpus had `last_trade_price` but zero normalized `market_trade`, so old captures remain touch-only for trade-through purposes.
+  - Short repaired-recorder capture produced normalized `market_trade`; paired capture attempt produced raw L2 with `market_trade` coverage but invalid manifest due recorder SIGINT exit-code handling and Strategy Lab validation timeout.
+  - No strategy tuning, ranking changes, readiness gate changes, live trading, or profitability claim.
+- Validation:
+  - `bun run check` passed.
+  - `bun test --max-concurrency=1 test/engine/recorders/raw-l2-recorder.test.ts` passed.
+- Handoff reference: `AI_WORKSPACE/HANDOFF.md`
+

@@ -11,6 +11,13 @@ import { type Clock, RealClock } from "../bot-core/data-sources.ts";
 
 const DEFAULT_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 
+function normalizeTradeAction(side: unknown): "buy" | "sell" | undefined {
+  if (typeof side !== "string") return undefined;
+  const normalized = side.toLowerCase();
+  if (normalized === "buy" || normalized === "sell") return normalized;
+  return undefined;
+}
+
 export type RawL2RecorderOptions = {
   writer?: EventWriter;
   clock?: Clock;
@@ -202,7 +209,7 @@ export class RawL2Recorder {
         this.processBookSnapshot(data, now);
       } else if (data.event_type === "price_change") {
         this.processPriceChange(data, now);
-      } else if (data.event_type === "trades") {
+      } else if (data.event_type === "trades" || data.event_type === "trade") {
         this.processTrade(data, now);
       } else if (data.event_type === "tick_size_change") {
         this.processTickSizeChange(data, now);
@@ -270,7 +277,7 @@ export class RawL2Recorder {
       payload: {
         tokenId: msg.asset_id,
         side: this.tokenSides.get(msg.asset_id),
-        action: msg.side, // "buy" or "sell"
+        action: normalizeTradeAction(msg.side),
         price: parseFloat(msg.price),
         shares: parseFloat(msg.size),
         makerTaker: "unknown", // Public feed trades do not indicate perfectly
@@ -292,18 +299,57 @@ export class RawL2Recorder {
   }
 
   private processLastTradePrice(msg: any, receivedTsMs: number) {
+    const sourceTsMs = Number.parseInt(msg.timestamp, 10);
+    const price = Number.parseFloat(msg.price);
+    const shares = msg.size !== undefined ? Number.parseFloat(msg.size) : null;
     this.enqueueWrite({
       eventType: "last_trade_price",
       source: "polymarket-clob",
       slug: this.activeSlug ?? undefined,
       receivedTsMs,
+      sourceTsMs: Number.isFinite(sourceTsMs) ? sourceTsMs : undefined,
       payload: {
         tokenId: msg.asset_id,
         side: this.tokenSides.get(msg.asset_id),
-        price: parseFloat(msg.price),
-        raw: { fee_rate_bps: msg.fee_rate_bps },
+        action: normalizeTradeAction(msg.side),
+        price,
+        shares: shares ?? undefined,
+        raw: {
+          fee_rate_bps: msg.fee_rate_bps,
+          market: msg.market,
+          event_type: msg.event_type,
+        },
       },
     });
+
+    // Polymarket documents market-channel last_trade_price as the public trade
+    // execution print. Emit market_trade only when the message carries the
+    // fields required by conservative fill scoring.
+    if (
+      typeof msg.asset_id === "string" &&
+      Number.isFinite(price) &&
+      shares !== null &&
+      Number.isFinite(shares) &&
+      Number.isFinite(sourceTsMs)
+    ) {
+      this.enqueueWrite({
+        eventType: "market_trade",
+        source: "polymarket-clob",
+        slug: this.activeSlug ?? undefined,
+        receivedTsMs,
+        sourceTsMs,
+        payload: {
+          tokenId: msg.asset_id,
+          side: this.tokenSides.get(msg.asset_id),
+          action: normalizeTradeAction(msg.side),
+          price,
+          shares,
+          makerTaker: "unknown",
+          tradePrintSource: "clob_market_last_trade_price",
+          raw: { fee_rate_bps: msg.fee_rate_bps, market: msg.market },
+        },
+      });
+    }
   }
 
   async stop(): Promise<void> {

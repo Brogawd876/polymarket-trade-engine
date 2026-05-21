@@ -1,47 +1,47 @@
-# Handoff: Phase 8I Replay Immutability and Token Mapping Repair
+# Handoff: Phase 8J Trade-Print Source Audit
 
 ## Current Status
 
-Branch: `feat/replay-immutability-token-mapping`
+Branch: `feat/trade-print-source-audit`
 
-Phase 8I repaired the paired Strategy Lab evaluation pipeline without changing strategy logic, ranking weights, readiness gates, live trading behavior, or conservative fill scoring semantics.
+Phase 8J proved where reliable public Polymarket trade-print evidence comes from and repaired raw L2 normalization without changing strategy logic, ranking weights, readiness gates, live trading behavior, or conservative fill scoring semantics.
 
 ## Changes
 
-- Strategy Lab replay runs now pass `marketLogMode: "disabled"` into `EarlyBird`.
-- `MarketLifecycle` can disable the per-market `Logger`; normal runtime defaults remain unchanged.
-- `ReplayVenueAdapter` accepts optional replay metadata and uses supplied `clobTokenIds` instead of defaulting to `replay-up` / `replay-down`.
-- Added `engine/replay/paired-token-mapping.ts` to extract real CLOB token IDs from paired raw L2 files.
-- Added tests for token extraction, source replay immutability, real-token Strategy Lab mapping, and synthetic trade-through evidence.
+- `engine/recorders/raw-l2-recorder.ts` now treats complete Polymarket market-channel `last_trade_price` messages as public trade prints and emits a paired `market_trade` event when token ID, price, size, and timestamp are all present.
+- Incomplete `last_trade_price` messages are still recorded as `last_trade_price` only; they do not become trade-through evidence.
+- Added `scripts/probe-polymarket-trade-prints.ts` to compare market WebSocket, CLOB last-trade-price, and Data API trades for an active BTC 5-minute market.
+- Added recorder tests proving incomplete last-trade messages stay weak and complete trade prints become `market_trade`.
 
-## Corpus Rerun
+## Source Findings
 
-- Command completed:
-  - `bun scripts/run-strategy-lab-paired-corpus.ts --pairs data/pairs --timeout-ms 180000 --variants late-entry late-entry-flow-aware fair-value-maker`
-- Valid pairs used:
-  - `btc-updown-5m-1779343200`
-  - `btc-updown-5m-1779372900`
-- Source replay SHA-256 hashes and byte sizes were unchanged after rerun.
-- Late-entry and late-entry-flow-aware still produced no eligible fills.
-- Fair-value-maker produced 31 eligible/evaluated usable fills, all `touch_only`, zero `trade_through_fill`.
+- Official Polymarket docs state the market WebSocket receives trade executions and defines `last_trade_price` as emitted when maker and taker orders match.
+- Live probe on `btc-updown-5m-1779377400` saw 75 market-WS trade-like messages in 10 seconds with token ID, price, size, timestamp, and market match.
+- CLOB last-trade-price endpoints return price/side snapshots without size/timestamp, so they are Tier 3 reference data only.
+- Data API trades return public trade rows with token, price, size, timestamp, and slug/condition match, but observed samples lagged the market WS.
+
+## Capture Result
+
+- Short repaired-recorder capture on `btc-updown-5m-1779377400` produced 201 normalized `market_trade` events.
+- Paired capture attempt on `btc-updown-5m-1779377700` produced complete raw L2 coverage with 3,874 `market_trade` events, but the pair manifest is invalid because recorder shutdown was recorded as `null` and embedded Strategy Lab validation timed out.
+- Generated `data/` and `logs/` artifacts remain uncommitted.
 
 ## Interpretation
 
-The token mismatch is repaired. The source-log mutation bug is repaired. Usable conservative evidence is possible in controlled conditions.
-
-The current live corpus still does not prove realistic profitability because its raw L2 files have zero `market_trade` events and its late-entry runs still have zero eligible fills.
+The public trade-print source exists and the repaired recorder can normalize it into scorer-ready `market_trade`. The old corpus still cannot prove realistic maker execution because its normalized files have zero `market_trade`. A clean valid paired capture is now the next blocker, not strategy tuning.
 
 ## Validation
 
 - `bun run check` passed.
-- `bun test --max-concurrency=1 test/engine/paired-corpus.test.ts` passed.
-- `bun test --max-concurrency=1 test/engine/paired-l2.test.ts` passed.
-- `bun test --max-concurrency=1 test/engine/strategy-lab-rigorous.test.ts` passed.
-- `bun test --max-concurrency=1 test/engine/fill-scoring.test.ts` passed.
-- `bun test --max-concurrency=1 test/engine/replay-immutability.test.ts` passed.
-- `bun test --max-concurrency=1 test/engine/paired-token-mapping.test.ts` passed.
-- Full suite `bun test --max-concurrency=1` passed: 390 pass, 7 skip, 0 fail.
+- `bun test --max-concurrency=1 test/engine/recorders/raw-l2-recorder.test.ts` passed.
+- Probe command completed:
+  - `bun scripts/probe-polymarket-trade-prints.ts --duration-ms 10000 --min-seconds-remaining 90`
 
 ## Next Exact Task
 
-Phase 8J should gather a clean paired corpus with raw L2 `market_trade` coverage, or add a capture/recorder improvement that proves `market_trade` coverage can be observed. Only after trusted trade-through evidence exists should strategy tuning resume.
+Phase 8K should harden paired capture validation:
+
+1. Treat expected SIGINT recorder shutdown as success when the recorder writes `recorder_completed`.
+2. Bound and report Strategy Lab validation for a just-captured pair.
+3. Capture one clean valid paired BTC 5-minute corpus with normalized `market_trade`.
+4. Rerun paired Strategy Lab and require trade-through evidence before any strategy tuning.
