@@ -51,13 +51,13 @@ not provided), this classification is never reached — the scorer falls back to
 `touch_only` if a book touch occurred.
 
 ### `touch_only`
-The best ask (for a buy) or best bid (for a sell) reaches our resting price according
-to a `market_book_snapshot` or `market_book_delta`, but no trade-through evidence
-exists and queue satisfaction cannot be confirmed.
+The book state shows our resting price was reached by the **same side we are resting on**, but no trade-through evidence exists and queue satisfaction cannot be confirmed.
 
-**A book touch is not a fill.** On the Polymarket CLOB, a resting maker order at
-price P is only filled when an aggressor trades at or through P. A snapshot showing
-the ask at P means someone is resting there, not that they were hit.
+**Correct maker-side touch semantics:**
+- **maker BUY at P**: we are resting on the **bid** side. Touch occurs when `bestBid >= P` (the bid queue has moved up to our price level, meaning an aggressor could hit us).
+- **maker SELL at P**: we are resting on the **ask** side. Touch occurs when `bestAsk <= P` (the ask queue has dropped down to our price level).
+
+> **Important:** The opposite side (ask for BUY, bid for SELL) reaching our price is a **taker** crossing, not a maker touch. Using the ask to detect a maker-BUY touch would be inverted logic.
 
 ### `no_fill`
 Relevant events for the correct `tokenId` were observed after placement, but the
@@ -76,7 +76,7 @@ stream is insufficient to make any determination.
 | Book touch alone | Not a fill — classified as `touch_only` |
 | Unknown queue position | `queuePosition` treated as `Infinity`; exact-price trades can never satisfy the queue threshold |
 | Missing `market_trade` evidence | Does not create a fill verdict |
-| `last_trade_price` event | Used for markout reference pricing only — **never** creates fill evidence |
+| `last_trade_price` event | **v1: ignored entirely** — not used for fill evidence or markout reference. Only `market_book_snapshot`/`market_book_delta` supply markout reference prices. |
 | Events before `placedTsMs` | Ignored — pre-placement market activity does not affect fill scoring |
 | Events for wrong `tokenId` | Ignored — token mismatch is fully filtered |
 | Out-of-order events | Sorted by `processedTsMs` before processing |
