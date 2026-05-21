@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, existsSync } from "fs";
+import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import * as path from "path";
 import { type PairManifest } from "../engine/replay/pair-manifest.ts";
 import { StrategyLabBatchManager } from "../engine/strategy-lab.ts";
@@ -102,6 +102,14 @@ async function main() {
   let timedOut = false;
 
   while (batch.state === "queued" || batch.state === "running") {
+    // If all runs are complete but batch state is stuck, give it a tiny grace period then force complete
+    if (batch.progress.completedRuns === batch.progress.totalRuns && batch.progress.totalRuns > 0) {
+      if (Date.now() - startMs > timeoutMs) {
+        batch.state = "completed"; // force complete to escape lifecycle hang
+        break;
+      }
+    }
+
     if (shouldTimeout(startMs, timeoutMs)) {
       timedOut = true;
       manager.cancelBatch(batch.id);
@@ -113,12 +121,15 @@ async function main() {
     process.stdout.write(`\r[Strategy Lab] ${batch.progress.completedRuns} / ${batch.progress.totalRuns} runs completed...`);
   }
 
+  let finalExitCode = 0;
   if (timedOut) {
     console.log(`\n\n[ERROR] Strategy Lab Batch Timed Out!`);
     console.log(`Completed runs: ${batch.progress.completedRuns} / ${batch.progress.totalRuns}`);
-    if (!allowPartial) process.exit(1);
+    console.log(`Status: timed_out`);
+    if (!allowPartial) finalExitCode = 1;
   } else {
     console.log(`\n\nStrategy Lab Batch Completed. State: ${batch.state}`);
+    if (batch.state === "failed") finalExitCode = 1;
   }
   
   console.log(`\n--- Corpus Summary ---`);
@@ -147,6 +158,7 @@ async function main() {
   if (outCalibrationJsonl) {
     const records = extractCalibrationRecords(batch, allManifests);
     if (records.length > 0) {
+      mkdirSync(path.dirname(outCalibrationJsonl), { recursive: true });
       const jsonl = records.map(r => JSON.stringify(r)).join("\n");
       writeFileSync(outCalibrationJsonl, jsonl, "utf-8");
       console.log(`\nCalibration records written to: ${outCalibrationJsonl} (${records.length} records)`);
@@ -156,9 +168,15 @@ async function main() {
   }
 
   if (outJson) {
+    mkdirSync(path.dirname(outJson), { recursive: true });
     writeFileSync(outJson, JSON.stringify(batch.summary, null, 2), "utf-8");
     console.log(`\nSummary JSON written to: ${outJson}`);
   }
+
+  process.exit(finalExitCode);
 }
 
-main().catch(console.error);
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
