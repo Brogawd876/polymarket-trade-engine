@@ -106,7 +106,6 @@ describe("Pair Validator", () => {
     expect(manifest.coverageVerdict).toBe("partial");
     expect(manifest.coverageLeadMs).toBe(1000 - 2000); // -1000
     expect(manifest.coverageTailMs).toBe(4000 - 5000); // -1000
-    // It will fail strategy lab parsing because it's not a real replay log
     expect(manifest.pairValidity).toBe("invalid");
   });
 
@@ -119,14 +118,17 @@ describe("Pair Validator", () => {
     // Out of order: 5000 then 1000
     fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n");
 
-    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry");
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 }
+    });
     
     expect(manifest.coverageVerdict).toBe("complete");
     expect(manifest.coverageLeadMs).toBe(2000 - 1000); // 1000
     expect(manifest.coverageTailMs).toBe(5000 - 4000); // 1000
-    // Still invalid because strategy lab parsing fails on this stub (unless DI used)
-    expect(manifest.pairValidity).toBe("invalid");
+    // Should be valid now if metadata provided and SL skipped (or mocked)
+    expect(manifest.pairValidity).toBe("valid");
   });
+
   test("valid pair manifest (complete + usable)", async () => {
     const replayLog = path.join(tmpDir, "complete2.log");
     const l2Log = path.join(tmpDir, "complete2.ndjson");
@@ -135,6 +137,7 @@ describe("Pair Validator", () => {
     fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
 
     const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 },
       testStrategyLabVerdict: "usable"
     });
     
@@ -151,6 +154,7 @@ describe("Pair Validator", () => {
     fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
 
     const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 },
       testStrategyLabVerdict: "unavailable_insufficient_data"
     });
     
@@ -167,6 +171,7 @@ describe("Pair Validator", () => {
     fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
 
     const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 },
       testStrategyLabVerdict: "unavailable_no_fills"
     });
     
@@ -183,11 +188,13 @@ describe("Pair Validator", () => {
     fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
 
     const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 },
       testStrategyLabError: "Simulated SL crash"
     });
     
     expect(manifest.coverageVerdict).toBe("complete");
-    expect(manifest.validationErrors).toContain("Run failed: Simulated SL crash");
+    expect(manifest.strategyLabStatus).toBe("failed");
+    expect(manifest.strategyLabError).toBe("Simulated SL crash");
     expect(manifest.pairValidity).toBe("invalid");
   });
 

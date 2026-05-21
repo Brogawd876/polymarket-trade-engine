@@ -13,6 +13,12 @@ export type PairManifest = {
   recorderEndedAtMs: number;
   runtimeExitCode: number | null;
   recorderExitCode: number | null;
+  
+  // New lifecycle fields
+  recorderStopReason?: "completed" | "expected_sigint" | "timeout" | "crashed" | "unknown";
+  recorderCompletedEventSeen?: boolean;
+  recorderSignal?: string | null;
+  
   replayEventCount: number;
   rawL2EventCount: number;
   rawL2BookEventCount: number;
@@ -28,7 +34,14 @@ export type PairManifest = {
   validationWarnings: string[];
   coverageVerdict: "complete" | "partial" | "missing" | "unknown";
   pairValidity: "valid" | "invalid";
+  
+  strategyLabStatus?: "completed" | "timed_out" | "failed" | "skipped";
   strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "unavailable_insufficient_data" | "failed";
+  strategyLabStartedAtMs?: number;
+  strategyLabEndedAtMs?: number;
+  strategyLabTimeoutMs?: number;
+  strategyLabError?: string;
+
   gitCommit: string;
   commands: string[];
   validatedAtMs: number | null;
