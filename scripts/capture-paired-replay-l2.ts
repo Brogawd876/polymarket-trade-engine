@@ -117,21 +117,23 @@ async function main() {
   console.log(`[Orchestrator] Capture complete. Running validation...`);
 
   const manifest = await validatePair(slug, replayLogPath, rawL2LogPath, strategy, {
-    slotStartMs: slot.startTime,
-    slotEndMs: slot.endTime,
-    captureStartedAtMs,
-    captureEndedAtMs,
-    runtimeStartedAtMs,
-    runtimeEndedAtMs,
-    recorderStartedAtMs,
-    recorderEndedAtMs,
-    runtimeExitCode,
-    recorderExitCode,
-    gitCommit: gitCommitFromEnv(),
-    commands: [
-      recorderCmd.join(" "),
-      runtimeCmd.join(" "),
-    ]
+    metadata: {
+      slotStartMs: slot.startTime,
+      slotEndMs: slot.endTime,
+      captureStartedAtMs,
+      captureEndedAtMs,
+      runtimeStartedAtMs,
+      runtimeEndedAtMs,
+      recorderStartedAtMs,
+      recorderEndedAtMs,
+      runtimeExitCode,
+      recorderExitCode,
+      gitCommit: gitCommitFromEnv(),
+      commands: [
+        recorderCmd.join(" "),
+        runtimeCmd.join(" "),
+      ]
+    }
   });
 
   if (runtimeExitCode !== 0 || recorderExitCode !== 0) {

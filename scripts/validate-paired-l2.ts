@@ -29,7 +29,7 @@ async function main() {
         manifest.replayLogPath,
         manifest.rawL2LogPath,
         manifest.strategy,
-        manifest
+        { metadata: manifest }
       );
       writeFileSync(pairPath, JSON.stringify(updated, null, 2));
       console.log("Validation complete.");
