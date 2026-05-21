@@ -44,7 +44,7 @@ Results for variant `Fair Value Maker (Institutional)` on the new paired corpus:
 
 ## 6. Profit Relevance
 
-*   **What this proves:** This proves that the bot can now be evaluated against **real market trade-throughs**. The high adverse selection rate (92.9%) proves the "seriousness" of the evaluation—it is accurately capturing that the current uncalibrated strategy is being "picked off" by informed traders.
+*   **What this proves:** This proves that the bot can now be evaluated against **real market trade-throughs**. The high adverse selection rate (95.2%) proves the "seriousness" of the evaluation—it is accurately capturing that the current uncalibrated strategy is being "picked off" by informed traders.
 *   **What this does not prove:** This does not prove the strategy is profitable (it is currently losing). It proves that the *measurement of loss* is now highly realistic.
 
 ## 7. Next Recommendation

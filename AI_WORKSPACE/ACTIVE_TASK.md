@@ -6,8 +6,8 @@ Phase 8K clean paired capture validation with normalized `market_trade` is check
 
 ## Status
 
-- Code repo branch: `feat/clean-market-trade-paired-capture`
-- HEAD: `e75813e` (pushed) -> [New commit pending]
+- Code repo branch: `fix/phase8k-ci-typecheck`
+- HEAD: `1e1c858`
 - Phase 8K verdict: **PASS**
 - Decoupled `pairValidity` (raw data) from `strategyLabStatus` (evaluation).
 - Optimized evaluation performance (150k events sorted once, reducing time from >180s to ~4s).
@@ -21,5 +21,5 @@ Phase 8K clean paired capture validation with normalized `market_trade` is check
 
 Phase 8L: Corpus Expansion and Calibration.
 1. Capture a multi-hour paired BTC 5-minute corpus.
-2. Implement Platt/Isotonic calibration to address the identified 92% adverse selection rate.
+2. Implement Platt/Isotonic calibration to address the identified 95.2% adverse selection rate.
 3. Establish a "Calibration Quality" benchmark in Strategy Lab.
