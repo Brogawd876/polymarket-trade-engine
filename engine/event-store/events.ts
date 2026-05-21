@@ -63,13 +63,15 @@ export type ProfitEventType =
   | "feed_connected"
   | "feed_disconnected"
   | "feed_decode_error"
-  | "raw_market_message";
+  | "raw_market_message"
+  | "last_trade_price";
 
 export type BookLevel = [price: number, size: number];
 
 export type MarketBookPayload = {
   conditionId?: string | null;
   clobTokenIds?: [string, string] | null;
+  tokenId?: string | null;
   side?: "UP" | "DOWN" | "BOTH";
   bids?: BookLevel[];
   asks?: BookLevel[];

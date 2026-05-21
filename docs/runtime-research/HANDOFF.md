@@ -7,7 +7,8 @@ Starting checkpoint: `43fae9f docs(research): document markout integration limit
 Scope completed:
 
 - Added `RawL2Recorder` to capture direct Polymarket WS book/delta/trade events.
-- Added `scripts/record-raw-l2.ts` for standalone data capture without trading credentials.
+- Hardened L2 recorder with robust async `enqueueWrite`, explicit `tokenId` mapping, `last_trade_price` semantic fixes, and rigorous test coverage.
+- Added `scripts/record-raw-l2.ts` for standalone data capture with `--auto-slug` support.
 - Normalized incoming L2 JSON into `events.ts` structure.
 - Updated docs to clarify feed-reported limits (e.g. `side` on trades).
 - Added normalized event schema and NDJSON/no-op writers.

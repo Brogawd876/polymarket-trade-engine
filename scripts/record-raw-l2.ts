@@ -1,5 +1,6 @@
 import { RawL2Recorder } from "../engine/recorders/raw-l2-recorder.ts";
 import { NdjsonEventWriter, NoopEventWriter } from "../engine/event-store/writer.ts";
+import { getSlug } from "../utils/slot.ts";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -11,6 +12,8 @@ async function main() {
     const arg = args[i];
     if (arg === "--slug") {
       slug = args[++i] || "";
+    } else if (arg === "--auto-slug") {
+      slug = getSlug(parseInt(args[++i] || "0", 10));
     } else if (arg === "--duration-ms") {
       durationMs = parseInt(args[++i] || "60000", 10);
     } else if (arg === "--dry-run") {
@@ -19,7 +22,7 @@ async function main() {
   }
 
   if (!slug) {
-    console.error("Usage: bun run scripts/record-raw-l2.ts --slug <market-slug> [--duration-ms <ms>] [--dry-run]");
+    console.error("Usage: bun run scripts/record-raw-l2.ts [--slug <market-slug> | --auto-slug <offset>] [--duration-ms <ms>] [--dry-run]");
     process.exit(1);
   }
 

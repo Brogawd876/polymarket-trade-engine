@@ -22,6 +22,7 @@ export class RawL2Recorder {
   private clock: Clock;
   private wsUrl: string;
   private ws?: ReconnectingWs;
+  private pendingWrites: Promise<void>[] = [];
 
   private activeSlug: string | null = null;
   private assetIds: string[] = [];
@@ -33,6 +34,8 @@ export class RawL2Recorder {
     decodeErrorCount: 0,
     messagesReceived: 0,
     messagesWritten: 0,
+    writeErrorCount: 0,
+    unknownMessageCount: 0,
     lastMessageAgeMs: 0,
     lastMessageTs: 0,
     lastError: "",
@@ -54,6 +57,27 @@ export class RawL2Recorder {
     };
   }
 
+  private enqueueWrite(eventInput: any) {
+    const p = this.writer
+      .append(eventInput)
+      .then(() => {
+        this._health.messagesWritten++;
+      })
+      .catch((e: any) => {
+        this._health.writeErrorCount++;
+        this._health.lastError = "Write error: " + e.message;
+      });
+
+    this.pendingWrites.push(p);
+
+    p.finally(() => {
+      const idx = this.pendingWrites.indexOf(p);
+      if (idx !== -1) {
+        this.pendingWrites.splice(idx, 1);
+      }
+    });
+  }
+
   async start(slug: string): Promise<void> {
     if (this.activeSlug) {
       throw new Error("Recorder is already running");
@@ -61,7 +85,7 @@ export class RawL2Recorder {
 
     this.activeSlug = slug;
 
-    await this.writer.append({
+    this.enqueueWrite({
       eventType: "recorder_started",
       source: "raw-l2-recorder",
       slug,
@@ -92,7 +116,7 @@ export class RawL2Recorder {
     this.tokenSides.set(this.assetIds[0]!, "UP");
     this.tokenSides.set(this.assetIds[1]!, "DOWN");
 
-    await this.writer.append({
+    this.enqueueWrite({
       eventType: "market_resolved_for_recording",
       source: "raw-l2-recorder",
       slug,
@@ -111,14 +135,12 @@ export class RawL2Recorder {
       label: "RawL2Recorder",
       onopen: (ws) => {
         this._health.connected = true;
-        this.writer
-          .append({
-            eventType: "feed_connected",
-            source: "raw-l2-recorder",
-            slug: this.activeSlug ?? undefined,
-            payload: { url: this.wsUrl, reconnectCount: this._health.reconnectCount },
-          })
-          .catch(console.error);
+        this.enqueueWrite({
+          eventType: "feed_connected",
+          source: "raw-l2-recorder",
+          slug: this.activeSlug ?? undefined,
+          payload: { url: this.wsUrl, reconnectCount: this._health.reconnectCount },
+        });
 
         ws.send(
           JSON.stringify({
@@ -131,14 +153,12 @@ export class RawL2Recorder {
       onclose: () => {
         this._health.connected = false;
         this._health.reconnectCount++;
-        this.writer
-          .append({
-            eventType: "feed_disconnected",
-            source: "raw-l2-recorder",
-            slug: this.activeSlug ?? undefined,
-            payload: { reconnectCount: this._health.reconnectCount },
-          })
-          .catch(console.error);
+        this.enqueueWrite({
+          eventType: "feed_disconnected",
+          source: "raw-l2-recorder",
+          slug: this.activeSlug ?? undefined,
+          payload: { reconnectCount: this._health.reconnectCount },
+        });
       },
       onmessage: (event) => this.handleMessage(event),
       isTerminal: (event) => {
@@ -162,7 +182,7 @@ export class RawL2Recorder {
       data = JSON.parse(event.data as string);
     } catch (e) {
       this._health.decodeErrorCount++;
-      this.writer.append({
+      this.enqueueWrite({
         eventType: "feed_decode_error",
         source: "raw-l2-recorder",
         payload: { raw: event.data },
@@ -190,13 +210,13 @@ export class RawL2Recorder {
         this.processLastTradePrice(data, now);
       } else {
         // Unknown raw message
-        this.writer.append({
+        this._health.unknownMessageCount++;
+        this.enqueueWrite({
           eventType: "raw_market_message",
           source: "polymarket-clob",
           receivedTsMs: now,
           payload: { raw: data },
         });
-        this._health.messagesWritten++;
       }
     } catch (e: any) {
       this._health.lastError = e.message;
@@ -204,33 +224,32 @@ export class RawL2Recorder {
   }
 
   private processBookSnapshot(msg: any, receivedTsMs: number) {
-    this.writer.append({
+    this.enqueueWrite({
       eventType: "market_book_snapshot",
       source: "polymarket-clob",
       slug: this.activeSlug ?? undefined,
       receivedTsMs,
       payload: {
-        clobTokenIds: [msg.asset_id, msg.asset_id], // Will map correctly if needed, just using single for now
+        tokenId: msg.asset_id,
         side: this.tokenSides.get(msg.asset_id),
         bids: msg.bids.map((b: any) => [parseFloat(b.price), parseFloat(b.size)]),
         asks: msg.asks.map((a: any) => [parseFloat(a.price), parseFloat(a.size)]),
         raw: { tick_size: msg.tick_size }, // Keep small raw metadata
       },
     });
-    this._health.messagesWritten++;
   }
 
   private processPriceChange(msg: any, receivedTsMs: number) {
     for (const change of msg.price_changes) {
       const isBid = change.side === "BUY";
       const lvl: [number, number] = [parseFloat(change.price), parseFloat(change.size)];
-      this.writer.append({
+      this.enqueueWrite({
         eventType: "market_book_delta",
         source: "polymarket-clob",
         slug: this.activeSlug ?? undefined,
         receivedTsMs,
         payload: {
-          clobTokenIds: [change.asset_id, change.asset_id],
+          tokenId: change.asset_id,
           side: this.tokenSides.get(change.asset_id),
           bidChanges: isBid ? [lvl] : undefined,
           askChanges: !isBid ? [lvl] : undefined,
@@ -238,12 +257,11 @@ export class RawL2Recorder {
           bestAsk: change.best_ask ? parseFloat(change.best_ask) : null,
         },
       });
-      this._health.messagesWritten++;
     }
   }
 
   private processTrade(msg: any, receivedTsMs: number) {
-    this.writer.append({
+    this.enqueueWrite({
       eventType: "market_trade",
       source: "polymarket-clob",
       slug: this.activeSlug ?? undefined,
@@ -258,11 +276,10 @@ export class RawL2Recorder {
         makerTaker: "unknown", // Public feed trades do not indicate perfectly
       },
     });
-    this._health.messagesWritten++;
   }
 
   private processTickSizeChange(msg: any, receivedTsMs: number) {
-    this.writer.append({
+    this.enqueueWrite({
       eventType: "market_status_change",
       source: "polymarket-clob",
       slug: this.activeSlug ?? undefined,
@@ -272,28 +289,21 @@ export class RawL2Recorder {
         raw: { new_tick_size: msg.new_tick_size },
       },
     });
-    this._health.messagesWritten++;
   }
 
   private processLastTradePrice(msg: any, receivedTsMs: number) {
-    // We record this as a trade with size 0, or just an explicit price change
-    // Using market_trade with size=0 because it implies a transaction happened 
-    // and updated the last price.
-    this.writer.append({
-      eventType: "market_trade",
+    this.enqueueWrite({
+      eventType: "last_trade_price",
       source: "polymarket-clob",
       slug: this.activeSlug ?? undefined,
       receivedTsMs,
       payload: {
         tokenId: msg.asset_id,
         side: this.tokenSides.get(msg.asset_id),
-        action: "unknown", // side is not in this message
         price: parseFloat(msg.price),
-        shares: 0, // not in this message
-        feeRateBps: parseFloat(msg.fee_rate_bps),
+        raw: { fee_rate_bps: msg.fee_rate_bps },
       },
     });
-    this._health.messagesWritten++;
   }
 
   async stop(): Promise<void> {
@@ -301,13 +311,18 @@ export class RawL2Recorder {
       this.ws.destroy();
       this.ws = undefined;
     }
+
+    await Promise.allSettled(this.pendingWrites);
     
-    await this.writer.append({
-      eventType: "recorder_completed",
-      source: "raw-l2-recorder",
-      slug: this.activeSlug ?? undefined,
-      payload: { health: this.health },
-    });
+    // Write completion synchronously to guarantee it makes it
+    try {
+      await this.writer.append({
+        eventType: "recorder_completed",
+        source: "raw-l2-recorder",
+        slug: this.activeSlug ?? undefined,
+        payload: { health: this.health },
+      });
+    } catch (e) {}
 
     await this.writer.close();
     this.activeSlug = null;

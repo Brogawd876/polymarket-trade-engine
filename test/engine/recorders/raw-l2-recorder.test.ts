@@ -93,12 +93,14 @@ describe("RawL2Recorder", () => {
     
     const preLength = writer.events.length;
     mockWsOpts.onmessage(wsMsg);
+    await Promise.resolve();
+    await Promise.resolve(); // flush microtasks
     
     expect(writer.events.length).toBe(preLength + 1);
     const evt = writer.events[preLength]!;
     expect(evt.eventType).toBe("market_book_snapshot");
     expect(evt.payload).toMatchObject({
-      clobTokenIds: ["up123", "up123"],
+      tokenId: "up123",
       side: "UP",
       bids: [[0.50, 100]],
       asks: [[0.52, 200]],
@@ -106,7 +108,7 @@ describe("RawL2Recorder", () => {
     });
     
     expect(recorder.health.messagesReceived).toBe(1);
-    expect(recorder.health.messagesWritten).toBe(1);
+    expect(recorder.health.messagesWritten).toBe(4); // 3 startup events + 1 book snapshot
   });
 
   it("normalizes price changes", async () => {
@@ -131,11 +133,13 @@ describe("RawL2Recorder", () => {
     
     const preLength = writer.events.length;
     mockWsOpts.onmessage(wsMsg);
+    await Promise.resolve();
+    await Promise.resolve();
     
     const evt = writer.events[preLength]!;
     expect(evt.eventType).toBe("market_book_delta");
     expect(evt.payload).toMatchObject({
-      clobTokenIds: ["down456", "down456"],
+      tokenId: "down456",
       side: "DOWN",
       bidChanges: [[0.45, 50]],
       bestBid: 0.45,
@@ -160,6 +164,8 @@ describe("RawL2Recorder", () => {
     
     const preLength = writer.events.length;
     mockWsOpts.onmessage(wsMsg);
+    await Promise.resolve();
+    await Promise.resolve();
     
     const evt = writer.events[preLength]!;
     expect(evt.eventType).toBe("market_trade");
@@ -178,9 +184,43 @@ describe("RawL2Recorder", () => {
     mockWsOpts.onopen(mockWsInstance);
     
     mockWsOpts.onmessage({ data: "invalid-json" });
+    await Promise.resolve();
+    await Promise.resolve();
     
     expect(recorder.health.decodeErrorCount).toBe(1);
     const lastEvt = writer.events[writer.events.length - 1]!;
     expect(lastEvt.eventType).toBe("feed_decode_error");
+  });
+
+  it("normalizes last_trade_price without contaminating trades", async () => {
+    await recorder.start("btc-updown-test");
+    mockWsOpts.onopen(mockWsInstance);
+    
+    const wsMsg = {
+      data: JSON.stringify({
+        event_type: "last_trade_price",
+        asset_id: "down456",
+        price: "0.45",
+        fee_rate_bps: "200"
+      })
+    };
+    
+    const preLength = writer.events.length;
+    mockWsOpts.onmessage(wsMsg);
+    await Promise.resolve();
+    await Promise.resolve();
+    
+    const evt = writer.events[preLength]!;
+    expect(evt.eventType).toBe("last_trade_price");
+    expect(evt.payload).toMatchObject({
+      tokenId: "down456",
+      side: "DOWN",
+      price: 0.45,
+      raw: { fee_rate_bps: "200" }
+    });
+    
+    // Ensure no 'market_trade' got logged for this
+    const trades = writer.events.filter(e => e.eventType === "market_trade");
+    expect(trades.length).toBe(0);
   });
 });

@@ -13,10 +13,11 @@ This establishes the data foundation for future replay, realistic markouts, and 
 Run the script from the command line:
 
 ```bash
-bun run scripts/record-raw-l2.ts --slug <market-slug> [--duration-ms <ms>] [--dry-run]
+bun run scripts/record-raw-l2.ts [--slug <market-slug> | --auto-slug <offset>] [--duration-ms <ms>] [--dry-run]
 ```
 
-- `--slug`: The Polymarket slug (e.g. `btc-updown-5m-1779294600`). The script resolves token IDs automatically via the Gamma API.
+- `--slug`: The Polymarket slug (e.g. `btc-updown-5m-1779294600`).
+- `--auto-slug`: The offset to automatically resolve a slug (e.g., `0` for current, `1` for next). Resolves dynamically using `slot.ts` without credentials.
 - `--duration-ms`: The time to record in milliseconds. Defaults to 60,000 (60s).
 - `--dry-run`: Skips writing to disk (uses `NoopEventWriter`).
 
@@ -29,8 +30,10 @@ The recorder connects to the public `wss://ws-subscriptions-clob.polymarket.com/
 - `market_book_snapshot`: Full book state at initialization (including tick size).
 - `market_book_delta`: Incremental bid/ask updates.
 - `market_trade`: Trade events including price and size.
+- `last_trade_price`: Real-time updates of the last traded price explicitly distinguished from zero-size trades.
 - `market_status_change`: Tick size updates.
 - Feed Health: `feed_connected`, `feed_disconnected`, `feed_decode_error`.
+- Metrics: Tracks `messagesReceived`, `messagesWritten`, `writeErrorCount`, and `unknownMessageCount`. Writes are queued asynchronously for high throughput.
 
 ## What is NOT Captured
 
