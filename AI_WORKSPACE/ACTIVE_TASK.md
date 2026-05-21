@@ -1,24 +1,26 @@
 # Active Task
 
-**Status:** phase_8h_zero_fill_diagnostic_completed
+**Status:** phase_8i_replay_immutability_token_mapping_completed
 
 ## Current Objective
 
-Diagnose why paired Strategy Lab corpus execution reports zero usable fill evidence.
+Repair paired Strategy Lab evaluation trust by making replay inputs immutable and mapping paired raw L2 real CLOB token IDs into replay venue metadata.
 
-## Phase 8H Verdict
+## Phase 8I Verdict
 
-Zero fill evidence is mixed causes:
+The evaluation pipeline is safer and more informative:
 
-- Current clean late-entry paired captures produced no eligible fills, so `unavailable_no_fills` is correct for those runs.
-- All current raw L2 captures have book updates and `last_trade_price`, but zero `market_trade` events, so trade-through evidence is unavailable.
-- Active Strategy Lab variants can produce fills, but replay uses synthetic token IDs (`replay-up`, `replay-down`) while raw L2 uses real CLOB token IDs, preventing scorer token matching.
-- Strategy Lab replay can append generated output back into source replay logs, contaminating corpus inputs on repeated runs.
+- Strategy Lab replay no longer appends generated market logger output into source replay fixtures.
+- Paired runs extract real CLOB token IDs from raw L2 recorder metadata or unambiguous side-labeled events.
+- Token mapping fails closed as `token_mapping_missing` or `token_mapping_ambiguous`.
+- A synthetic fill-bearing paired test proves `replay fill + real token ID + placement timestamp + raw L2 market_trade` can produce `trade_through_fill`.
+- Current corpus rerun completed with source replay hashes unchanged.
+- Current live corpus still has no `market_trade`, so fair-value-maker evidence is touch-only and late-entry still has no eligible fills.
 
 ## Updated Report
 
-- `AI_WORKSPACE/PHASE8H_ZERO_FILL_DIAGNOSTIC.md`
+- `AI_WORKSPACE/PHASE8I_REPLAY_IMMUTABILITY_TOKEN_MAPPING.md`
 
 ## Next Exact Task
 
-Patch Strategy Lab replay execution so it never appends to source replay logs, then pass real paired raw L2 CLOB token IDs into replay venue metadata before collecting more fill evidence.
+Collect or construct the next clean paired evidence corpus with raw L2 `market_trade` coverage, then rerun Strategy Lab under the immutable, real-token-mapped pipeline before any strategy tuning.

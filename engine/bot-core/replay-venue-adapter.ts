@@ -16,8 +16,10 @@ export class ReplayVenueAdapter implements VenueDataAdapter {
   private _lastOrderBook: ReplayEvent | null = null;
   private currentRound: RoundWindow | null = null;
   private asset: BotAsset = "btc";
+  private readonly replayMetadata?: Partial<VenueMetadata>;
 
-  constructor(reader: ReplayLogReader) {
+  constructor(reader: ReplayLogReader, replayMetadata?: Partial<VenueMetadata>) {
+    this.replayMetadata = replayMetadata;
     reader.subscribe((evt) => this.handleEvent(evt));
   }
 
@@ -44,11 +46,12 @@ export class ReplayVenueAdapter implements VenueDataAdapter {
     console.log(`[ReplayVenueAdapter] initRound: ${round.slug}`);
     this.currentRound = round;
     if (this._lastOrderBook) this.handleEvent(this._lastOrderBook);
+    const metadata = existingMetadata ?? this.replayMetadata;
     return {
-      conditionId: existingMetadata?.conditionId ?? "replay-condition",
-      clobTokenIds: existingMetadata?.clobTokenIds ?? ["replay-up", "replay-down"],
-      feeRateBps: existingMetadata?.feeRateBps ?? 0.001,
-      closed: false,
+      conditionId: metadata?.conditionId ?? "replay-condition",
+      clobTokenIds: metadata?.clobTokenIds ?? ["replay-up", "replay-down"],
+      feeRateBps: metadata?.feeRateBps ?? 0.001,
+      closed: metadata?.closed ?? false,
     };
   }
 

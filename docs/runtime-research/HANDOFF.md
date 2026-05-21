@@ -42,3 +42,15 @@ Phase 8H update:
 Next exact task:
 
 First make Strategy Lab replay execution immutable-safe and pass real paired CLOB token IDs into replay venue metadata. Then add a synthetic fill-bearing paired fixture with `market_trade` evidence before larger corpus capture or strategy tuning. Do not tune strategies yet.
+
+Phase 8I update:
+
+- Strategy Lab replay is now immutable-safe: batch runs disable per-market slug file logging so source replay fixtures are input-only.
+- Paired Strategy Lab runs extract real CLOB token IDs from raw L2 recorder metadata or unambiguous side-labeled raw L2 events, then pass them into replay venue metadata.
+- Token mapping fails closed as `token_mapping_missing` or `token_mapping_ambiguous` when ordering cannot be trusted.
+- A synthetic fill-bearing paired test proves the conservative evidence path can produce `trade_through_fill` with replay fill telemetry, real token IDs, placement timestamps, and raw L2 `market_trade`.
+- Current paired corpus rerun completed without source replay hash changes. Late-entry still has zero eligible fills. Fair-value-maker now evaluates 31/31 usable touch-only fills, but zero trade-through because current raw L2 still has zero `market_trade`.
+
+Next exact task:
+
+Build or capture a clean paired corpus with real `market_trade` coverage, then rerun paired Strategy Lab before any strategy tuning or live readiness claims.

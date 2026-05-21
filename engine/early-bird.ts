@@ -54,6 +54,7 @@ import {
   NdjsonEventWriter,
   type EventWriter,
 } from "./event-store/writer.ts";
+import type { VenueMetadata } from "./bot-core/index.ts";
 
 const SAVE_INTERVAL_MS = 5000;
 
@@ -65,6 +66,8 @@ export type EarlyBirdRuntimeOptions = {
   presetId?: string;
   orderBookFactory?: (clock: Clock, tradeTape: TradeTapeTracker) => OrderBook;
   eventWriter?: EventWriter;
+  marketLogMode?: "normal" | "disabled";
+  replayVenueMetadata?: Partial<VenueMetadata>;
 };
 
 export type EngineStatus = {
@@ -116,6 +119,8 @@ export class EarlyBird {
   private _persistState = true;
   private _telemetry: TelemetrySink;
   private _eventWriter: EventWriter;
+  private readonly _marketLogMode: "normal" | "disabled";
+  private readonly _replayVenueMetadata?: Partial<VenueMetadata>;
   private _runCompletedEventEmitted = false;
   private _tickInterval: unknown = null;
   private readonly _orderBookFactory?: (
@@ -152,6 +157,8 @@ export class EarlyBird {
     this._maxSessionProfit = parseFloat(process.env.MAX_SESSION_PROFIT ?? "1000000");
     this._clock = runtime.clock ?? new RealClock();
     this._telemetry = runtime.telemetry ?? new NullTelemetrySink();
+    this._marketLogMode = runtime.marketLogMode ?? "normal";
+    this._replayVenueMetadata = runtime.replayVenueMetadata;
     this._eventWriter =
       runtime.eventWriter ??
       new NdjsonEventWriter({
@@ -493,7 +500,7 @@ export class EarlyBird {
 
       if (slug && !this._lifecycles.has(slug) && !this._completedSlugs.has(slug)) {
         const venue = this._replayReader
-          ? new ReplayVenueAdapter(this._replayReader)
+          ? new ReplayVenueAdapter(this._replayReader, this._replayVenueMetadata)
           : undefined;
 
         const orderBook = this._replayReader
@@ -528,6 +535,7 @@ export class EarlyBird {
             clock: this._clock,
             telemetry: this._telemetry,
             alwaysLog: this._alwaysLog,
+            marketLogMode: this._marketLogMode,
             eventWriter: this._eventWriter,
             }),
 

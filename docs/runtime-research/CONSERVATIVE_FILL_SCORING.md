@@ -133,6 +133,19 @@ For markouts:
 **Sparse replay fixtures (Phase 5B) will produce many `unknown_insufficient_data`
 and `missing_horizon` outcomes.** The raw L2 recorder exists to fix this for new data.
 
+## Paired Replay Token Mapping
+
+Phase 8I repaired paired Strategy Lab replay so raw L2 evidence and replay fills can share real CLOB token IDs.
+
+When a paired raw L2 file is supplied, Strategy Lab extracts ordered token IDs from:
+
+- `payload.clobTokenIds` recorder metadata, or
+- exactly one side-labeled `UP` token and exactly one side-labeled `DOWN` token.
+
+Those IDs are passed into replay venue metadata, so generated `ORDER_INTENT` and fill telemetry use the same token IDs as raw L2 events. If mapping is missing or ambiguous, Strategy Lab does not guess. It records `token_mapping_missing` or `token_mapping_ambiguous` for eligible-fill runs.
+
+This mapping fix does not loosen conservative scoring. `market_trade` is still required for `trade_through_fill`; book-only evidence remains `touch_only`.
+
 ---
 
 ## How This Prevents Fake Maker PnL

@@ -52,6 +52,7 @@ function formatSnapshot(data: object): string {
 export class Logger {
   private _entries: string[] = [];
   private _filePath: string | null = null;
+  private readonly _disabled: boolean;
   private _snapshotProvider: (() => object) | null = null;
   private _tickerProvider:
     | (() => {
@@ -85,8 +86,13 @@ export class Logger {
   private _snapshotTimer: NodeJS.Timeout | null = null;
   private _slotEndMs: number = 0;
 
+  constructor(opts: { disabled?: boolean } = {}) {
+    this._disabled = opts.disabled ?? false;
+  }
+
   /** Inject an orderbook snapshot provider — called automatically before every log entry. */
   setSnapshotProvider(fn: () => object) {
+    if (this._disabled) return;
     this._snapshotProvider = fn;
   }
 
@@ -94,6 +100,7 @@ export class Logger {
   setMarketResultProvider(
     fn: () => { openPrice?: number; gap?: number; priceToBeat?: number },
   ) {
+    if (this._disabled) return;
     this._marketResultProvider = fn;
   }
 
@@ -113,6 +120,7 @@ export class Logger {
       contractAddress?: string;
     } | null,
   ) {
+    if (this._disabled) return;
     this._resolutionProvider = fn;
   }
 
@@ -127,6 +135,7 @@ export class Logger {
       divergence?: number | null;
     },
   ) {
+    if (this._disabled) return;
     this._tickerProvider = fn;
   }
 
@@ -136,6 +145,7 @@ export class Logger {
     endTime: number,
     strategyName: string,
   ) {
+    if (this._disabled) return;
     this._entries = [];
     this._slotEndMs = endTime;
     mkdirSync("logs", { recursive: true });
@@ -153,6 +163,7 @@ export class Logger {
   }
 
   endSlot(slug: string) {
+    if (this._disabled) return;
     if (this._snapshotTimer) {
       clearInterval(this._snapshotTimer);
       this._snapshotTimer = null;
@@ -165,6 +176,7 @@ export class Logger {
 
   /** Stop the snapshot timer and discard all buffered entries without writing to disk. */
   destroy() {
+    if (this._disabled) return;
     if (this._snapshotTimer) {
       clearInterval(this._snapshotTimer);
       this._snapshotTimer = null;
@@ -174,16 +186,19 @@ export class Logger {
 
   /** Log a structured NDJSON entry. Automatically prepends an orderbook snapshot. */
   log(entry: LogEntry) {
+    if (this._disabled) return;
     this._writeSnapshot();
     this._append(entry);
   }
 
   /** Write a standalone orderbook snapshot. */
   snapshot() {
+    if (this._disabled) return;
     this._writeSnapshot();
   }
 
   private _writeSnapshot() {
+    if (this._disabled) return;
     if (!this._snapshotProvider) return;
     this._entries.push(""); // blank line separator before each snapshot group
     const data = {
@@ -214,10 +229,12 @@ export class Logger {
   }
 
   private _append(entry: object) {
+    if (this._disabled) return;
     this._entries.push(JSON.stringify({ ts: Date.now(), ...entry }));
   }
 
   private _flush() {
+    if (this._disabled) return;
     if (!this._filePath || this._entries.length === 0) return;
     mkdirSync("logs", { recursive: true });
     appendFileSync(this._filePath, this._entries.join("\n") + "\n");

@@ -37,6 +37,21 @@ Running a successful capture generates three key artifacts:
 - `pairValidity`: `"valid" | "invalid"`. Tracks if the pair passed basic checks, coverage bounds, and Strategy Lab evaluation without internal execution failure. No-fill runs can still be marked valid.
 - `strategyLabEvidenceVerdict`: Evaluates whether Strategy Lab was able to use the capture (`usable`, `unavailable_no_fills`, `unavailable_insufficient_data`, etc).
 
+## Strategy Lab Replay Safety
+
+Phase 8I made paired Strategy Lab replay input-only for source replay logs.
+
+When `StrategyLabBatchManager` runs a replay fixture, it disables per-market slug file logging through `marketLogMode: "disabled"`. Generated runtime output must not be appended to the source `logs/early-bird-<slug>.log` file that is being replayed. Normal capture/runtime logging defaults remain unchanged.
+
+For paired runs with `l2Files`, Strategy Lab also extracts real CLOB token IDs from the paired raw L2 file and passes them into replay venue metadata. This prevents replay fills from using synthetic `replay-up` / `replay-down` token IDs when raw L2 evidence uses real token IDs.
+
+Token mapping source order:
+
+1. Ordered raw L2 recorder metadata (`payload.clobTokenIds` on `market_resolved_for_recording`).
+2. Exactly one side-labeled `UP` token and exactly one side-labeled `DOWN` token from raw L2 events.
+
+If ordering is missing or ambiguous, the mapping fails closed as `token_mapping_missing` or `token_mapping_ambiguous`.
+
 ## Safety Restrictions & Boundaries
 
 - **No Live Trading**: The orchestrator absolutely forbids using `--prod`, `--live`, or matching environment variables. It enforces `NODE_ENV=development` and fail-closes if it detects live flags.

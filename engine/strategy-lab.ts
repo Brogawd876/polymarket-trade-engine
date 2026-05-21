@@ -14,6 +14,7 @@ import {
   type ReferencePricePoint,
 } from "./replay/markout.ts";
 import { ConservativeFillScorer, type FillScoreResult } from "./replay/fill-scoring.ts";
+import { extractClobTokenIdsFromRawL2 } from "./replay/paired-token-mapping.ts";
 
 export type StrategyLabBatchState = "queued" | "running" | "completed" | "failed" | "canceled";
 export type StrategyLabRunStatus = "queued" | "running" | "completed" | "failed" | "canceled";
@@ -910,10 +911,16 @@ export class StrategyLabBatchManager {
       try {
         const clock = new VirtualClock();
         const sink = new CollectingTelemetrySink();
+        const l2File = batch.l2Files?.[run.file];
+        const tokenMapping = l2File ? extractClobTokenIdsFromRawL2(l2File) : null;
         const bot = new EarlyBird(run.strategy, 1, false, 1, false, run.file, {
           clock,
           persistState: false,
           telemetry: sink,
+          marketLogMode: "disabled",
+          replayVenueMetadata: tokenMapping?.status === "ok"
+            ? { clobTokenIds: tokenMapping.tokenIds }
+            : undefined,
         });
         this.currentBots.set(batchId, bot);
         const reader = bot.replayReader;
@@ -927,9 +934,17 @@ export class StrategyLabBatchManager {
         await new Promise(resolve => setTimeout(resolve, 0));
 
         if ((run.status as StrategyLabRunStatus) !== "canceled") {
-          const l2File = batch.l2Files?.[run.file];
           const l2Events = l2File ? loadL2Events(l2File) : [];
           Object.assign(run, deriveResultFromEvents(run, sink.events, replayReferences, l2Events));
+          if (l2File && tokenMapping?.status === "unavailable") {
+            const cFill = run.execution.conservativeFill;
+            if (cFill.eligibleFillCount > 0) {
+              cFill.conservativeFillWarning = tokenMapping.reason;
+              cFill.conservativeFillUnavailableReasons[tokenMapping.reason] =
+                (cFill.conservativeFillUnavailableReasons[tokenMapping.reason] ?? 0) +
+                cFill.eligibleFillCount;
+            }
+          }
         }
       } catch (error) {
         if ((run.status as StrategyLabRunStatus) !== "canceled") {

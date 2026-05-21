@@ -105,6 +105,7 @@ type MarketLifecycleOptions = {
   userChannel: UserChannel;
   recovery?: RecoveryOptions;
   alwaysLog?: boolean;
+  marketLogMode?: "normal" | "disabled";
   /** Optional OrderBook override (used in tests to inject SimOrderBook). */
   orderBook?: OrderBook;
   resolution?: ResolutionSourceAdapter;
@@ -146,7 +147,7 @@ export class MarketLifecycle {
   private _pnl = 0;
   private _inFlight = 0;
   private _strategyLocks = 0;
-  private _marketLogger = new Logger();
+  private _marketLogger: Logger;
   private _marketOpenTimer: unknown = null;
   private _marketPriceHandle: { cancel: () => void } | null = null;
   private _strategyCleanup: (() => void) | null = null;
@@ -189,6 +190,7 @@ export class MarketLifecycle {
     this._tracker = opts.tracker;
     this._ticker = opts.ticker;
     this._alwaysLog = opts.alwaysLog ?? false;
+    this._marketLogger = new Logger({ disabled: opts.marketLogMode === "disabled" });
     this._clock = opts.clock ?? new RealClock();
     this._telemetry = opts.telemetry ?? new NullTelemetrySink();
     this._eventWriter = opts.eventWriter;

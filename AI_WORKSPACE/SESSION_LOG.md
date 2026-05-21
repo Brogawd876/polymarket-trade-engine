@@ -468,3 +468,19 @@
   - `bun test --max-concurrency=1 test/engine/paired-l2.test.ts` passed.
 - Handoff reference: `AI_WORKSPACE/HANDOFF.md`
 
+## 2026-05-21T11:15:00-04:00
+
+- Agent used: Codex
+- Task attempted: Phase 8I replay immutability and real token mapping repair.
+- Outcome:
+  - Added immutable-safe Strategy Lab replay execution by disabling per-market file logging for Strategy Lab batches.
+  - Added paired raw L2 token extraction and injected real CLOB token IDs into replay venue metadata when mapping is unambiguous.
+  - Added a synthetic fill-bearing paired Strategy Lab test proving real token mapping plus raw L2 `market_trade` can produce usable `trade_through_fill` evidence.
+  - Reran the current paired corpus safely. Source replay hashes and byte sizes stayed unchanged.
+  - Current corpus result: late-entry variants still have zero eligible fills; fair-value-maker now evaluates 31/31 usable touch-only fills with real token IDs, but still zero trade-through because current live raw L2 has no `market_trade` events.
+- Validation:
+  - `bun run check` passed.
+  - Focused paired/replay/fill tests passed.
+  - Full suite `bun test --max-concurrency=1` passed: 390 pass, 7 skip, 0 fail.
+- Handoff reference: `AI_WORKSPACE/HANDOFF.md`
+
