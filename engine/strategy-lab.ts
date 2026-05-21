@@ -27,6 +27,19 @@ export type StrategyLabBatchRequest = {
   l2Files?: Record<string, string>; // mapping from fixture path to l2 log path
 };
 
+export type ConservativeFillEvidencePoint = {
+  orderId: string;
+  tokenId: string;
+  action: "buy" | "sell";
+  side: "UP" | "DOWN";
+  price: number;
+  shares: number;
+  placedTsMs: number;
+  verdict: string;
+  markouts: { "1s": number | null; "5s": number | null; "30s": number | null; };
+  adverseSelection: boolean | null;
+};
+
 export type ConservativeFillReport = {
   conservativeFillEvidenceAvailable: boolean;
   conservativeFillEvidenceSource: "raw_l2_event_store" | "unavailable";
@@ -46,6 +59,7 @@ export type ConservativeFillReport = {
   evaluatedFillCount: number;
   eligibleFillCount: number;
   conservativeFillWarning?: string;
+  evidence?: ConservativeFillEvidencePoint[];
 };
 
 export type StrategyLabRunResult = {
@@ -238,6 +252,7 @@ const EMPTY_EXECUTION_SUMMARY: ExecutionQualitySummary = {
     usableEvidenceCount: 0,
     evaluatedFillCount: 0,
     eligibleFillCount: 0,
+    evidence: [],
   },
 };
 
@@ -487,6 +502,20 @@ export function deriveResultFromEvents(
         placedTsMs: intent.createdAtMs,
         skipSort: true,
       }, sortedL2);
+
+      if (!cFill.evidence) cFill.evidence = [];
+      cFill.evidence.push({
+        orderId: fill.orderId ?? fill.intentId ?? "unknown",
+        tokenId: intent.tokenId,
+        action: fill.action,
+        side: fill.side,
+        price: fill.price,
+        shares: fill.shares,
+        placedTsMs: intent.createdAtMs,
+        verdict: scorerResult.verdict,
+        markouts: scorerResult.markouts,
+        adverseSelection: scorerResult.adverseSelection,
+      });
 
       cFill.conservativeFillVerdictCounts[scorerResult.verdict] = (cFill.conservativeFillVerdictCounts[scorerResult.verdict] ?? 0) + 1;
       

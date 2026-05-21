@@ -3,20 +3,20 @@
 ## Current State
 
 - Repository: `polymarket-trade-engine`
-- Branch: `fix/phase8k-ci-typecheck`
-- HEAD: `1e1c858`
-- Phase: Phase 8K checkpoint complete
+- Branch: `feat/phase8l-corpus-calibration`
+- HEAD: Phase 8L completed locally.
+- Phase: Phase 8L offline calibration dataset extraction is available. complete
 
-## Recently Completed: Phase 8K
+## Recently Completed: Phase 8L
 
-Phase 8K successfully fixed the capture/validation lifecycle issues and optimized the evaluation pipeline.
+Phase 8L successfully built the offline corpus expansion harness and calibration record extraction framework.
 
 ### What Changed
 
-- **Lifecycle Hardening:** Decoupled raw pair validity from evaluation status. Added Windows-compatible clean shutdown via `stdin` character sequence.
-- **Performance:** Reduced fill evaluation time by ~50x by sorting L2 events once instead of per-fill.
-- **Validation:** Added rigorous unit tests for success/failure/timeout states of the capture lifecycle.
-- **Evidence:** Proved that normalized `market_trade` events are correctly identified and used as trade-through evidence in Strategy Lab.
+- **Corpus Expansion Harness:** Modified `scripts/run-strategy-lab-paired-corpus.ts` to process entire directories of paired corpus manifests and output aggregated metrics and JSON/JSONL datasets.
+- **Calibration Record Schema:** Created `engine/replay/calibration-extractor.ts` to map offline strategy variant results into a flat `CalibrationRecord` suitable for Platt scaling or isotonic regression models.
+- **Data Quality Preservation:** System explicitly logs missing reasons for metrics (like missing 1s, 5s, 30s markouts) and does not fake profitability or backfill unsupported values.
+- **Live Isolation:** Maintained strict isolation from live trading logic and did not alter Strategy Lab ranking weights or readiness gates.
 
 ### Corpus Status
 
@@ -25,9 +25,9 @@ Phase 8K successfully fixed the capture/validation lifecycle issues and optimize
 - **Evidence Proof:** 70 usable fills confirmed via real trade-throughs across 15 runs.
 - **Metric Insight:** Identified a 95.2% adverse selection rate on uncalibrated market making.
 
-## Next Up: Phase 8L
+## Next Up: Calibration Modeling
 
-Capture a larger corpus and implement Platt/Isotonic calibration to reduce adverse selection.
+Build isotonic regression or Platt scaling calibration models to correct probabilities based on the offline `CalibrationRecord` corpus.
 
 ## Constraints & Rules
 
