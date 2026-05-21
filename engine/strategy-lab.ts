@@ -42,6 +42,7 @@ export type ConservativeFillReport = {
   conservativeMarkout30sAvg: number | null;
   conservativeAdverseSelectionRate: number | null;
   usableEvidenceCount: number;
+  evaluatedFillCount: number;
   eligibleFillCount: number;
   conservativeFillWarning?: string;
 };
@@ -135,6 +136,7 @@ export type StrategyLabVariantSummary = {
     unknownInsufficientDataCount: number;
     usableEvidenceRate: number | null;
     usableEvidenceCount: number;
+    evaluatedFillCount: number;
     eligibleFillCount: number;
     avgMarkout1s: number | null;
     avgMarkout5s: number | null;
@@ -233,6 +235,7 @@ const EMPTY_EXECUTION_SUMMARY: ExecutionQualitySummary = {
     conservativeMarkout30sAvg: null,
     conservativeAdverseSelectionRate: null,
     usableEvidenceCount: 0,
+    evaluatedFillCount: 0,
     eligibleFillCount: 0,
   },
 };
@@ -299,7 +302,8 @@ export function deriveResultFromEvents(
   const intentsById = new Map<string, { tokenId: string; createdAtMs: number }>();
   const intentsBySlug = new Map<string, { tokenId: string; createdAtMs: number }[]>();
   const fillEvents: Array<{
-    orderId: string;
+    orderId: string | null;
+    intentId: string | null;
     slug: string;
     action: "buy" | "sell";
     side: "UP" | "DOWN";
@@ -320,10 +324,10 @@ export function deriveResultFromEvents(
       case "ORDER_INTENT":
         result.slug = event.payload.slug;
         result.counts.intents += 1;
-        if (event.payload.intent && "tokenId" in event.payload.intent) {
+        if (event.payload.intent) {
           const intentData = {
-            tokenId: event.payload.intent.tokenId,
-            createdAtMs: event.payload.intent.createdAtMs,
+            tokenId: (event.payload.intent as any).tokenId,
+            createdAtMs: (event.payload.intent as any).createdAtMs,
           };
           if (event.payload.intent.id) {
             intentsById.set(event.payload.intent.id, intentData);
@@ -354,7 +358,8 @@ export function deriveResultFromEvents(
           });
 
           fillEvents.push({
-            orderId: event.payload.orderId ?? event.payload.intentId ?? "unknown",
+            orderId: event.payload.orderId ?? null,
+            intentId: event.payload.intentId ?? null,
             slug: event.payload.slug,
             action: event.payload.action,
             side: event.payload.side,
@@ -432,13 +437,30 @@ export function deriveResultFromEvents(
     }
 
     for (const fill of fillEvents) {
-      let intent = intentsById.get(fill.orderId);
+      let intent: { tokenId: string; createdAtMs: number } | undefined;
+
+      // 1. If fill.intentId exists: use intentsById.get(fill.intentId)
+      if (fill.intentId) {
+        intent = intentsById.get(fill.intentId);
+      }
+      
+      // 2. If no intentId, use orderId only if there is a real explicit orderId -> intent mapping (which we store in intentsById via intent.id)
+      if (!intent && !fill.intentId && fill.orderId) {
+        intent = intentsById.get(fill.orderId);
+      }
+
+      // 3. If no usable ID mapping: fallback to slug only if exactly one intent exists for that slug.
       if (!intent) {
         const slugIntents = intentsBySlug.get(fill.slug) ?? [];
         if (slugIntents.length === 1) {
           intent = slugIntents[0];
         } else if (slugIntents.length > 1) {
+          // 4. If multiple intents exist for the same slug and no unambiguous ID link exists: do not score it.
           cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping = (cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping ?? 0) + 1;
+          continue;
+        } else {
+          // 5. If no intent exists: increment missing_intent_mapping
+          cFill.conservativeFillUnavailableReasons.missing_intent_mapping = (cFill.conservativeFillUnavailableReasons.missing_intent_mapping ?? 0) + 1;
           continue;
         }
       }
@@ -452,8 +474,10 @@ export function deriveResultFromEvents(
         continue;
       }
 
+      cFill.evaluatedFillCount++;
+
       const scorerResult = scorer.evaluate({
-        orderId: fill.orderId,
+        orderId: fill.orderId ?? fill.intentId ?? "unknown",
         tokenId: intent.tokenId,
         action: fill.action,
         side: fill.side,
@@ -463,7 +487,10 @@ export function deriveResultFromEvents(
       }, l2Events);
 
       cFill.conservativeFillVerdictCounts[scorerResult.verdict] = (cFill.conservativeFillVerdictCounts[scorerResult.verdict] ?? 0) + 1;
-      cFill.usableEvidenceCount++;
+      
+      if (scorerResult.verdict !== "unknown_insufficient_data") {
+        cFill.usableEvidenceCount++;
+      }
 
       if (scorerResult.markouts["1s"] !== null) conservativeMarkout1s.push(scorerResult.markouts["1s"]);
       if (scorerResult.markouts["5s"] !== null) conservativeMarkout5s.push(scorerResult.markouts["5s"]);
@@ -582,8 +609,9 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
       const tradeThroughFillCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill ?? 0), 0);
       const unknownInsufficientDataCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.unknown_insufficient_data ?? 0), 0);
       const totalEligibleFills = items.reduce((sum, run) => sum + run.execution.conservativeFill.eligibleFillCount, 0);
+      const totalEvaluatedFills = items.reduce((sum, run) => sum + run.execution.conservativeFill.evaluatedFillCount, 0);
       const totalUsableFills = items.reduce((sum, run) => sum + run.execution.conservativeFill.usableEvidenceCount, 0);
-      const usableEvidenceRate = totalEligibleFills > 0 ? totalUsableFills / totalEligibleFills : null;
+      const usableEvidenceRate = totalEvaluatedFills > 0 ? totalUsableFills / totalEvaluatedFills : null;
       const avgCmarkout1s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout1sAvg));
       const avgCmarkout5s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout5sAvg));
       const avgCmarkout30s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout30sAvg));
@@ -646,6 +674,7 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
           unknownInsufficientDataCount,
           usableEvidenceRate,
           usableEvidenceCount: totalUsableFills,
+          evaluatedFillCount: totalEvaluatedFills,
           eligibleFillCount: totalEligibleFills,
           avgMarkout1s: avgCmarkout1s,
           avgMarkout5s: avgCmarkout5s,

@@ -69,6 +69,9 @@ type ExecutionQualitySummary = {
         conservativeMarkout5sAvg: number | null;
         conservativeMarkout30sAvg: number | null;
         conservativeAdverseSelectionRate: number | null;
+        usableEvidenceCount: number;
+        evaluatedFillCount: number;
+        eligibleFillCount: number;
         conservativeFillWarning?: string;
     };
 };
@@ -116,6 +119,9 @@ type StrategyRank = {
         tradeThroughFillCount: number;
         unknownInsufficientDataCount: number;
         usableEvidenceRate: number | null;
+        usableEvidenceCount: number;
+        evaluatedFillCount: number;
+        eligibleFillCount: number;
         avgMarkout1s: number | null;
         avgMarkout5s: number | null;
         avgMarkout30s: number | null;
@@ -211,25 +217,26 @@ function getEvidenceLabel(run: BatchRun): string {
     const cFill = run.execution?.conservativeFill;
     if (!cFill || !cFill.conservativeFillEvidenceAvailable) return 'Unavailable';
     if (cFill.conservativeFillWarning) return 'Unavailable';
-    if (cFill.usableEvidenceCount > 0) {
-        if ((cFill.conservativeFillVerdictCounts?.trade_through_fill ?? 0) > 0) return 'Trade-through';
-        if ((cFill.conservativeFillVerdictCounts?.probable_fill ?? 0) > 0) return 'Probable';
-        if ((cFill.conservativeFillVerdictCounts?.touch_only ?? 0) > 0) return 'Touch-only';
-        if ((cFill.conservativeFillVerdictCounts?.no_fill ?? 0) > 0) return 'No Fill';
-        if ((cFill.conservativeFillVerdictCounts?.unknown_insufficient_data ?? 0) > 0) return 'Unknown';
-        return 'Usable evidence';
-    }
-    return 'Raw L2 present';
+    if (cFill.evaluatedFillCount === 0) return 'Raw L2 present, not evaluable';
+    if (cFill.usableEvidenceCount === 0) return 'No usable evidence';
+    if ((cFill.conservativeFillVerdictCounts?.trade_through_fill ?? 0) > 0) return 'Trade-through';
+    if ((cFill.conservativeFillVerdictCounts?.probable_fill ?? 0) > 0) return 'Probable';
+    if ((cFill.conservativeFillVerdictCounts?.touch_only ?? 0) > 0) return 'Touch-only';
+    return 'Unknown';
 }
 
 function getEvidenceTitle(run: BatchRun): string {
     const cFill = run.execution?.conservativeFill;
     if (!cFill) return '';
     const parts = [`Source: ${cFill.conservativeFillEvidenceSource}`];
+    parts.push(`Eligible: ${cFill.eligibleFillCount}`);
+    parts.push(`Evaluated: ${cFill.evaluatedFillCount}`);
+    parts.push(`Usable: ${cFill.usableEvidenceCount}`);
+    parts.push(`Unknown/Insufficient: ${cFill.conservativeFillVerdictCounts?.unknown_insufficient_data ?? 0}`);
     if (cFill.conservativeFillWarning) parts.push(`Warning: ${cFill.conservativeFillWarning}`);
     if (cFill.conservativeFillUnavailableReasons && Object.keys(cFill.conservativeFillUnavailableReasons).length > 0) {
         const reasons = Object.entries(cFill.conservativeFillUnavailableReasons).map(([k, v]) => `${k}:${v}`).join(', ');
-        parts.push(`Reasons: ${reasons}`);
+        parts.push(`Unavailable Reasons: ${reasons}`);
     }
     return parts.join(' | ');
 }
@@ -555,7 +562,7 @@ export default function StrategyLab() {
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-400">{rank.logLoss?.toFixed(4) ?? '---'}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.avgFillRate)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-amber-300" title={`Evidence Available: ${percent(rank.conservativeFill?.usableEvidenceRate)}. Trade-thru: ${rank.conservativeFill?.tradeThroughFillCount}, Probable: ${rank.conservativeFill?.probableFillCount}, Touch: ${rank.conservativeFill?.touchOnlyCount}, No-fill: ${rank.conservativeFill?.noFillCount}`}>
-                                                    {rank.conservativeFill?.tradeThroughFillCount ? `TT:${rank.conservativeFill.tradeThroughFillCount}` : (rank.conservativeFill?.usableEvidenceRate ? percent(rank.conservativeFill.usableEvidenceRate) : '---')}
+                                                    {rank.conservativeFill?.usableEvidenceCount != null && rank.conservativeFill?.evaluatedFillCount != null ? `Usable ${rank.conservativeFill.usableEvidenceCount}/${rank.conservativeFill.evaluatedFillCount}` : '---'}
                                                 </td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(rank.avgSettlementMarkout ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(rank.avgSettlementMarkout)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.tradeRate)}</td>

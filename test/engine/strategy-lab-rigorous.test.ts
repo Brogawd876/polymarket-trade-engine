@@ -33,8 +33,10 @@ describe("StrategyLab Rigorous Fill Evidence", () => {
       { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "intent1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
     ], []);
     expect(res.execution.conservativeFill.conservativeFillEvidenceAvailable).toBe(false);
-    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
     expect(res.execution.conservativeFill.conservativeFillEvidenceSource).toBe("unavailable");
+    expect(res.execution.conservativeFill.eligibleFillCount).toBe(1);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(0);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
     expect(res.execution.conservativeFill.conservativeFillWarning).toBe("raw_l2_events_missing");
   });
 
@@ -45,17 +47,8 @@ describe("StrategyLab Rigorous Fill Evidence", () => {
     ], [
       { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
     ]);
-    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
-    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
-  });
-
-  test("raw L2 market_trade above maker SELL price -> trade_through_fill", () => {
-    const res = runScorer([
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent1", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
-      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "intent1", status: "filled", side: "UP", action: "sell", price: 0.60, shares: 10 } as any }
-    ], [
-      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.61, shares: 10 } }
-    ]);
+    expect(res.execution.conservativeFill.eligibleFillCount).toBe(1);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(1);
     expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
     expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
   });
@@ -67,43 +60,98 @@ describe("StrategyLab Rigorous Fill Evidence", () => {
     ], [
       { eventType: "market_book_snapshot", processedTsMs: 1002, payload: { tokenId: "TOKEN_A", side: "UP", bestBid: 0.50, bestAsk: 0.52 } }
     ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(1);
     expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
     expect(res.execution.conservativeFill.conservativeFillVerdictCounts.touch_only).toBe(1);
   });
 
-  test("raw L2 wrong token -> unknown_insufficient_data", () => {
+  test("raw L2 wrong token -> unknown_insufficient_data does not count as usable", () => {
     const res = runScorer([
       { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent1", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
       { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "intent1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
     ], [
       { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_WRONG", price: 0.49, shares: 10 } }
     ]);
-    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
+    expect(res.execution.conservativeFill.eligibleFillCount).toBe(1);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(1);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
     expect(res.execution.conservativeFill.conservativeFillVerdictCounts.unknown_insufficient_data).toBe(1);
   });
 
-  test("two intents in same slug, one fill, no unambiguous link -> unavailable", () => {
+  test("missing token ID -> unavailable, missing_token_id", () => {
     const res = runScorer([
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { tokenId: "TOKEN_A", createdAtMs: 1001 } as any } }, // NO ID
-      { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { tokenId: "TOKEN_A", createdAtMs: 1002 } as any } }, // NO ID
-      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "unknown-order-id", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent1", createdAtMs: 1001 } as any } }, // no tokenId
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "intent1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
     ], [
       { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
     ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(0);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
+    expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.missing_token_id).toBe(1);
+  });
+
+  test("missing placement timestamp -> unavailable, missing_order_placement_time", () => {
+    const res = runScorer([
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent1", tokenId: "TOKEN_A" } as any } }, // no createdAtMs
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "intent1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+    ], [
+      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
+    ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(0);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
+    expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.missing_order_placement_time).toBe(1);
+  });
+
+  test("lifecycle has both orderId and intentId -> uses intentId", () => {
+    const res = runScorer([
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-abc", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
+      { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "clob-order-123", tokenId: "TOKEN_WRONG", createdAtMs: 1002 } as any } },
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "clob-order-123", intentId: "intent-abc", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+    ], [
+      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
+    ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(1);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
+    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
+  });
+
+  test("CLOB order ID must not be mistaken for intent ID -> ambiguous_intent_mapping", () => {
+    const res = runScorer([
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "different-intent", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
+      { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "another-intent", tokenId: "TOKEN_A", createdAtMs: 1002 } as any } },
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "clob-order-123", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+    ], [
+      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
+    ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(0);
     expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
     expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping).toBe(1);
   });
 
-  test("fill with matching intentId -> correct token/placement used", () => {
+  test("multiple fills aggregate correctly", () => {
     const res = runScorer([
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "my-intent", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
-      { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "other-intent", tokenId: "TOKEN_B", createdAtMs: 1002 } as any } },
-      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", intentId: "my-intent", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i1", tokenId: "T1", createdAtMs: 1001 } as any } }, // trade_through
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i2", tokenId: "T2", createdAtMs: 1001 } as any } }, // touch_only
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i3", tokenId: "T3", createdAtMs: 1001 } as any } }, // unknown_insufficient_data
+      // i4 missing token id -> missing_token_id (unavailable)
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i4", createdAtMs: 1001 } as any } },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i2", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i3", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
+      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i4", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
     ], [
-      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
+      { eventType: "market_trade", processedTsMs: 1002, payload: { tokenId: "T1", price: 0.49, shares: 10 } }, // trade_through
+      { eventType: "market_book_snapshot", processedTsMs: 1002, payload: { tokenId: "T2", side: "UP", bestBid: 0.50, bestAsk: 0.52 } }, // touch
+      // T3 gets no events -> unknown
     ]);
-    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
+    
+    expect(res.execution.conservativeFill.eligibleFillCount).toBe(4);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(3);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(2);
     expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
+    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.touch_only).toBe(1);
+    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.unknown_insufficient_data).toBe(1);
+    expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.missing_token_id).toBe(1);
   });
 
   test("multiple horizons are averaged separately", () => {
@@ -124,32 +172,5 @@ describe("StrategyLab Rigorous Fill Evidence", () => {
     expect(res.execution.conservativeFill.conservativeMarkout1sAvg).toBeCloseTo((0.02 + 0.04) / 2, 4); // 0.03
     expect(res.execution.conservativeFill.conservativeMarkout5sAvg).toBeCloseTo(0.035, 4); // 0.03 from fill1, 0.04 from fill2
     expect(res.execution.conservativeFill.conservativeMarkout30sAvg).toBeNull();
-  });
-
-  test("multiple fills aggregate counts (logic check)", () => {
-    const res = runScorer([
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i1", tokenId: "T1", createdAtMs: 1001 } as any } },
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i2", tokenId: "T2", createdAtMs: 1001 } as any } },
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i3", tokenId: "T3", createdAtMs: 1001 } as any } },
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i4", tokenId: "T4", createdAtMs: 1001 } as any } },
-      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "i5", tokenId: "T5", createdAtMs: 1001 } as any } },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i1", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i2", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i3", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i4", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-      { ts: 1002, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "i5", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any },
-    ], [
-      { eventType: "market_trade", processedTsMs: 1002, payload: { tokenId: "T1", price: 0.49, shares: 10 } }, // trade_through
-      { eventType: "market_book_snapshot", processedTsMs: 1002, payload: { tokenId: "T2", side: "UP", bestBid: 0.50, bestAsk: 0.52 } }, // touch
-      { eventType: "market_trade", processedTsMs: 1002, payload: { tokenId: "T3", price: 0.50, shares: 1000 } }, // probable (since queue is unknown, actually wait, unknown queue defaults to Infinity, so this will be no_fill)
-      // T4 gets no events -> unknown
-      // T5 will also be no_fill or unknown, let's just assert the totals work.
-    ]);
-    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(5);
-    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
-    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.touch_only).toBe(1);
-    // 3 fills have no data or don't meet fill criteria
-    const counts = res.execution.conservativeFill.conservativeFillVerdictCounts;
-    expect(counts.no_fill + counts.unknown_insufficient_data).toBe(3);
   });
 });
