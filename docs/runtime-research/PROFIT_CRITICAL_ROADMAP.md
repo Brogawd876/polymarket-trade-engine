@@ -22,7 +22,9 @@ Goal: populate conservative maker fill assumptions, maker/taker classification, 
 
 Why it matters for profit: PnL from optimistic replay fills is not evidence. Markouts reveal adverse selection and toxic maker fills.
 
-Files/modules: `engine/replay/fill-model.ts`, `engine/replay/markout.ts`, `engine/strategy-lab.ts`.
+Files/modules: `engine/replay/fill-model.ts`, `engine/replay/fill-scoring.ts`, `engine/replay/markout.ts`, `engine/strategy-lab.ts`.
+
+Phase 8D status: Conservative fill-scoring module exists. Book touches do not create fake fills. Trade-through required for sure fills. Unknown queue correctly degrades to pessimistic. Markouts mapped accurately to token side. Strategy Lab integration is pending as an explicit next step.
 
 Phase 8B status: Strategy Lab now reports markouts where replay token-side observations support them. Markout values are measurement-only and do not change ranking/scoring yet. Sparse replay fixtures can still produce unavailable horizons, and that is intentional.
 

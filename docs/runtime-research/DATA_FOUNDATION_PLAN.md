@@ -14,7 +14,7 @@
 ## Next Wiring Tasks
 
 1. Persist Binance/Coinbase price ticks and feed freshness events directly from adapters.
-2. Replace optimistic replay fill scoring with the conservative fill model behind an explicit option, then make it the default for research metrics.
+2. Integrate `ConservativeFillScorer` into `engine/strategy-lab.ts` (behind an explicit option, or as report-only, then default).
 3. Add maker/taker and fee/rebate event emission for every fill; rebates must remain estimates, not guaranteed PnL.
 
 ## Go/No-Go Gates
