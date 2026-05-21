@@ -40,6 +40,7 @@ export type MarkoutResult = {
 
 export type MarkoutOptions = {
   maxObservationDistanceMs?: number;
+  skipSort?: boolean;
 };
 
 export type MarkoutSummary = {
@@ -74,7 +75,7 @@ export function calculateMarkouts(
     }));
   }
 
-  const sorted = [...references].sort((a, b) => a.tsMs - b.tsMs);
+  const sorted = opts.skipSort ? references : [...references].sort((a, b) => a.tsMs - b.tsMs);
   return horizons.map((horizon) => calculateMarkout(fill, sorted, horizon, opts));
 }
 
@@ -199,17 +200,40 @@ function findHorizonReference(
 ): ReferencePricePoint | null {
   const target = fill.tsMs + horizon;
   const tolerance = opts.maxObservationDistanceMs ?? DEFAULT_MAX_OBSERVATION_DISTANCE_MS;
-  const afterFill = references.filter((point) => point.tsMs >= fill.tsMs);
-  const later = afterFill.find((point) => point.tsMs >= target);
-  if (later && later.tsMs - target <= tolerance) return later;
+  
+  let startIndex = 0;
+  let low = 0;
+  let high = references.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (references[mid].tsMs < fill.tsMs) {
+      low = mid + 1;
+    } else {
+      startIndex = mid;
+      high = mid - 1;
+    }
+  }
+  if (low === references.length) startIndex = references.length;
+
   let nearest: ReferencePricePoint | null = null;
   let nearestDistance = Infinity;
-  for (const point of afterFill) {
+  let later: ReferencePricePoint | null = null;
+
+  for (let i = startIndex; i < references.length; i++) {
+    const point = references[i];
+    if (point.tsMs >= target) {
+      later = point;
+      break;
+    }
     const distance = Math.abs(point.tsMs - target);
     if (distance <= tolerance && distance < nearestDistance) {
       nearest = point;
       nearestDistance = distance;
     }
+  }
+
+  if (later && later.tsMs - target <= tolerance) {
+    return later;
   }
   return nearest;
 }

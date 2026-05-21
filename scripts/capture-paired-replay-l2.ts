@@ -10,9 +10,9 @@ function execProcess(
   args: string[], 
   onStdout?: (data: string) => void,
   onStderr?: (data: string) => void
-): { process: ChildProcess; promise: Promise<number | null> } {
-  const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
-  const promise = new Promise<number | null>((resolve) => {
+): { process: ChildProcess; promise: Promise<{ code: number | null; signal: string | null }> } {
+  const p = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] }); // Enable stdin
+  const promise = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     p.stdout.on("data", (b) => {
       const s = b.toString();
       if (onStdout) onStdout(s);
@@ -23,8 +23,8 @@ function execProcess(
       if (onStderr) onStderr(s);
       else process.stderr.write(s);
     });
-    p.on("close", (code) => resolve(code));
-    p.on("error", () => resolve(null));
+    p.on("close", (code, signal) => resolve({ code, signal }));
+    p.on("error", () => resolve({ code: null, signal: null }));
   });
   return { process: p, promise };
 }
@@ -34,12 +34,14 @@ async function main() {
   let strategy = "late-entry";
   let rounds = 1;
   let slotOffset = 1;
+  let strategyLabTimeoutMs = 120000;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--strategy") strategy = args[++i] || strategy;
     else if (arg === "--rounds") rounds = parseInt(args[++i] || "1", 10);
     else if (arg === "--slot-offset") slotOffset = parseInt(args[++i] || "1", 10);
+    else if (arg === "--strategy-lab-timeout-ms") strategyLabTimeoutMs = parseInt(args[++i] || "120000", 10);
     else if (arg === "--prod" || arg === "--live") {
       console.error("Live/prod flags are forbidden in this capture script.");
       process.exit(1);
@@ -100,23 +102,37 @@ async function main() {
     process.stdout.write(`[Bot] ${data}`);
   }, (data) => process.stderr.write(`[Bot ERR] ${data}`));
 
-  const runtimeExitCode = await runtime.promise;
+  const { code: runtimeExitCode } = await runtime.promise;
   const runtimeEndedAtMs = Date.now();
   console.log(`[Orchestrator] Bot runtime exited with code ${runtimeExitCode}`);
 
   console.log(`[Orchestrator] Waiting 2 seconds for L2 tail buffer...`);
   await new Promise(r => setTimeout(r, 2000));
 
-  console.log(`[Orchestrator] Sending SIGINT to recorder...`);
-  recorder.process.kill("SIGINT");
-  const recorderExitCode = await recorder.promise;
+  console.log(`[Orchestrator] Attempting clean recorder shutdown via stdin...`);
+  recorder.process.stdin?.write("stop\n");
+  
+  // Give it 3 seconds to stop cleanly via stdin
+  let recorderDone = false;
+  const timeout = setTimeout(() => {
+    if (!recorderDone) {
+      console.log(`[Orchestrator] Recorder clean shutdown timed out. Sending SIGINT...`);
+      recorder.process.kill("SIGINT");
+    }
+  }, 3000);
+
+  const { code: recorderExitCode, signal: recorderSignal } = await recorder.promise;
+  recorderDone = true;
+  clearTimeout(timeout);
+
   const recorderEndedAtMs = Date.now();
-  console.log(`[Orchestrator] Recorder exited with code ${recorderExitCode}`);
+  console.log(`[Orchestrator] Recorder exited with code ${recorderExitCode}, signal ${recorderSignal}`);
   const captureEndedAtMs = Date.now();
 
   console.log(`[Orchestrator] Capture complete. Running validation...`);
 
   const manifest = await validatePair(slug, replayLogPath, rawL2LogPath, strategy, {
+    strategyLabTimeoutMs,
     metadata: {
       slotStartMs: slot.startTime,
       slotEndMs: slot.endTime,
@@ -128,6 +144,7 @@ async function main() {
       recorderEndedAtMs,
       runtimeExitCode,
       recorderExitCode,
+      recorderSignal,
       gitCommit: gitCommitFromEnv(),
       commands: [
         recorderCmd.join(" "),
@@ -136,9 +153,11 @@ async function main() {
     }
   });
 
-  if (runtimeExitCode !== 0 || recorderExitCode !== 0) {
-    manifest.validationErrors.push(`Processes failed: runtime=${runtimeExitCode}, recorder=${recorderExitCode}`);
+  if (runtimeExitCode !== 0) {
+    manifest.validationErrors.push(`Runtime process failed with code ${runtimeExitCode}`);
   }
+  
+  // Recorder failure check is now handled inside validatePair using SIGINT logic
 
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
@@ -149,6 +168,7 @@ async function main() {
   } else {
     console.log(`[Orchestrator] Validation passed!`);
     console.log(`[Orchestrator] Coverage: ${manifest.coverageVerdict}`);
+    console.log(`[Orchestrator] Strategy Lab Status: ${manifest.strategyLabStatus}`);
     console.log(`[Orchestrator] Strategy Lab Evidence Verdict: ${manifest.strategyLabEvidenceVerdict}`);
     console.log(`[Orchestrator] Manifest written to: ${manifestPath}`);
   }

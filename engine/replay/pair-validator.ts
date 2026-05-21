@@ -6,6 +6,12 @@ export interface PairValidationOptions {
   metadata?: Partial<PairManifest>;
   testStrategyLabVerdict?: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "unavailable_insufficient_data" | "failed";
   testStrategyLabError?: string;
+  strategyLabTimeoutMs?: number;
+  skipStrategyLab?: boolean;
+  /**
+   * Optional manager instance for dependency injection (useful for tests)
+   */
+  batchManager?: StrategyLabBatchManager;
 }
 
 export async function validatePair(
@@ -31,6 +37,7 @@ export async function validatePair(
 
   let replaySlugFound: string | null = null;
   let rawL2SlugFound: string | null = null;
+  let recorderCompletedEventSeen = false;
 
   // Read Replay Log
   if (!existsSync(replayLogPath)) {
@@ -69,10 +76,7 @@ export async function validatePair(
       
       if (replaySlugFound && replaySlugFound !== slug) {
         validationErrors.push(`Replay log slug mismatch: expected ${slug}, found ${replaySlugFound}`);
-      } else if (!replaySlugFound && replayEventCount > 0) {
-        validationWarnings.push("No explicit slug found in replay log.");
       }
-
     } catch (e) {
       parseErrors.push(`Failed to read replay log: ${e}`);
     }
@@ -98,6 +102,8 @@ export async function validatePair(
             rawL2BookEventCount++;
           } else if (type === "market_trade") {
             rawL2TradeEventCount++;
+          } else if (type === "recorder_completed") {
+            recorderCompletedEventSeen = true;
           }
           
           const ts = event.receivedTsMs ?? event.processedTsMs;
@@ -111,7 +117,7 @@ export async function validatePair(
           }
         } catch (e) {
           parseErrors.push(`Failed to parse raw L2 event: ${e}`);
-          break; // Stop parsing on first error to prevent log spam
+          break;
         }
       }
       rawL2FirstEventTsMs = minTs;
@@ -125,8 +131,6 @@ export async function validatePair(
 
       if (rawL2SlugFound && rawL2SlugFound !== slug) {
         validationErrors.push(`Raw L2 log slug mismatch: expected ${slug}, found ${rawL2SlugFound}`);
-      } else if (!rawL2SlugFound && rawL2EventCount > 0) {
-        validationWarnings.push("No explicit slug found in raw L2 log.");
       }
     } catch (e) {
       parseErrors.push(`Failed to read raw L2 log: ${e}`);
@@ -150,65 +154,101 @@ export async function validatePair(
     }
   }
 
-  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "unavailable_insufficient_data" | "failed" = "failed";
+  // Recorder Shutdown Logic
+  let recorderExitCode = metadata.recorderExitCode ?? null;
+  let recorderSignal = metadata.recorderSignal ?? null;
+  let recorderStopReason = metadata.recorderStopReason ?? "unknown";
 
-  if (validationErrors.length === 0 && parseErrors.length === 0) {
-    if (options.testStrategyLabVerdict || options.testStrategyLabError) {
-      if (options.testStrategyLabError) {
-        validationErrors.push(`Run failed: ${options.testStrategyLabError}`);
-        strategyLabEvidenceVerdict = "failed";
-      } else {
-        strategyLabEvidenceVerdict = options.testStrategyLabVerdict!;
-      }
+  if (recorderExitCode === 0) {
+    recorderStopReason = "completed";
+  } else if (recorderExitCode === null && recorderSignal === "SIGINT") {
+    if (recorderCompletedEventSeen) {
+      recorderStopReason = "expected_sigint";
     } else {
+      recorderStopReason = "unknown"; // null exit without completion marker
+      validationErrors.push("Recorder exited via SIGINT but no recorder_completed event was seen.");
+    }
+  } else if (recorderExitCode !== null && recorderExitCode !== 0) {
+    recorderStopReason = "crashed";
+    validationErrors.push(`Recorder crashed with exit code ${recorderExitCode}`);
+  }
+
+  let strategyLabStatus: "completed" | "timed_out" | "failed" | "skipped" = "skipped";
+  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "unavailable_insufficient_data" | "failed" = "failed";
+  let strategyLabStartedAtMs: number | undefined;
+  let strategyLabEndedAtMs: number | undefined;
+  let strategyLabError: string | undefined;
+
+  const skipStrategyLab = options.skipStrategyLab || validationErrors.length > 0 || parseErrors.length > 0 || coverageVerdict !== "complete";
+
+  if (!skipStrategyLab) {
+    if (options.testStrategyLabVerdict || options.testStrategyLabError) {
+      strategyLabStatus = options.testStrategyLabError ? "failed" : "completed";
+      strategyLabEvidenceVerdict = options.testStrategyLabVerdict ?? "failed";
+      strategyLabError = options.testStrategyLabError;
+    } else {
+      strategyLabStartedAtMs = Date.now();
       try {
-        const manager = new StrategyLabBatchManager();
+        const manager = options.batchManager ?? new StrategyLabBatchManager();
         const batch = await manager.createBatch({
           strategies: [strategy],
           files: [replayLogPath],
           l2Files: { [replayLogPath]: rawL2LogPath }
         });
 
-        // Wait for batch to complete
-        let waitLimit = 600; // 60 seconds max
+        const timeoutMs = options.strategyLabTimeoutMs ?? 60000;
+        const start = Date.now();
         let finishedBatch = manager.getBatch(batch.id);
-        while (finishedBatch && (finishedBatch.state === "running" || finishedBatch.state === "queued") && waitLimit > 0) {
-          await new Promise(r => setTimeout(r, 100));
+        
+        while (finishedBatch && (finishedBatch.state === "running" || finishedBatch.state === "queued")) {
+          if (Date.now() - start > timeoutMs) {
+            strategyLabStatus = "timed_out";
+            strategyLabError = "Strategy Lab batch timed out during validation";
+            break;
+          }
+          await new Promise(r => setTimeout(r, 200));
           finishedBatch = manager.getBatch(batch.id);
-          waitLimit--;
         }
 
-        if (finishedBatch && finishedBatch.state === "completed") {
-          const run = finishedBatch.runs[0];
-          if (run && run.status === "completed") {
-            const cFill = run.execution.conservativeFill;
-            if (!cFill.conservativeFillEvidenceAvailable) {
-              strategyLabEvidenceVerdict = "unavailable_missing_l2";
-            } else if (cFill.eligibleFillCount === 0) {
-              strategyLabEvidenceVerdict = "unavailable_no_fills";
-            } else if (cFill.conservativeFillUnavailableReasons.unmatched_intent_id || 
+        if (strategyLabStatus !== "timed_out") {
+          if (finishedBatch && (finishedBatch.state === "completed" || finishedBatch.state === "failed")) {
+            strategyLabStatus = finishedBatch.state === "completed" ? "completed" : "failed";
+            const run = finishedBatch.runs[0];
+            if (run && run.status === "completed") {
+              const cFill = run.execution.conservativeFill;
+              if (!cFill.conservativeFillEvidenceAvailable) {
+                strategyLabEvidenceVerdict = "unavailable_missing_l2";
+              } else if (cFill.eligibleFillCount === 0) {
+                strategyLabEvidenceVerdict = "unavailable_no_fills";
+              } else if (cFill.conservativeFillUnavailableReasons.unmatched_intent_id || 
                        cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping || 
                        cFill.conservativeFillUnavailableReasons.missing_intent_mapping) {
-              strategyLabEvidenceVerdict = "unavailable_missing_mapping";
-              validationWarnings.push("Fills occurred but mapping was incomplete or ambiguous.");
-            } else if (cFill.usableEvidenceCount > 0) {
-              strategyLabEvidenceVerdict = "usable";
-            } else if (cFill.eligibleFillCount > 0 && cFill.evaluatedFillCount > 0) {
-              strategyLabEvidenceVerdict = "unavailable_insufficient_data";
+                strategyLabEvidenceVerdict = "unavailable_missing_mapping";
+                validationWarnings.push("Fills occurred but mapping was incomplete or ambiguous.");
+              } else if (cFill.usableEvidenceCount > 0) {
+                strategyLabEvidenceVerdict = "usable";
+              } else if (cFill.eligibleFillCount > 0 && cFill.evaluatedFillCount > 0) {
+                strategyLabEvidenceVerdict = "unavailable_insufficient_data";
+              } else {
+                strategyLabEvidenceVerdict = "failed";
+              }
+            } else if (run && run.status === "failed") {
+              strategyLabStatus = "failed";
+              strategyLabError = (run as any).error || (run as any).execution?.error || "run failed";
             } else {
-              // Should not really be hit given the prior conditions, but fallback safely
-              strategyLabEvidenceVerdict = "failed";
+              strategyLabStatus = "failed";
+              strategyLabError = `Run status: ${run ? run.status : "missing"}`;
             }
-          } else if (run && run.status === "failed") {
-            // @ts-ignore - we don't have full type definition but it might have an error property
-            validationErrors.push(`Run failed: ${run.error || run.execution?.error || "unknown"}`);
+          } else {
+            strategyLabStatus = "failed";
+            strategyLabError = `Batch state: ${finishedBatch ? finishedBatch.state : "missing"}`;
           }
-        } else {
-          validationErrors.push(`Strategy Lab batch failed or timed out. State: ${finishedBatch ? finishedBatch.state : "missing"}`);
         }
       } catch (e: any) {
-        validationErrors.push(`Strategy Lab validation threw: ${e.message}`);
+        strategyLabStatus = "failed";
+        strategyLabError = e.message;
       }
+      strategyLabEndedAtMs = Date.now();
     }
   }
 
@@ -231,7 +271,10 @@ export async function validatePair(
     recorderStartedAtMs: metadata.recorderStartedAtMs ?? 0,
     recorderEndedAtMs: metadata.recorderEndedAtMs ?? 0,
     runtimeExitCode: metadata.runtimeExitCode ?? null,
-    recorderExitCode: metadata.recorderExitCode ?? null,
+    recorderExitCode: recorderExitCode,
+    recorderSignal: metadata.recorderSignal ?? recorderSignal,
+    recorderStopReason: recorderStopReason,
+    recorderCompletedEventSeen: recorderCompletedEventSeen,
     replayEventCount,
     rawL2EventCount,
     rawL2BookEventCount,
@@ -247,7 +290,12 @@ export async function validatePair(
     validationWarnings,
     coverageVerdict,
     pairValidity,
+    strategyLabStatus,
     strategyLabEvidenceVerdict,
+    strategyLabStartedAtMs,
+    strategyLabEndedAtMs,
+    strategyLabTimeoutMs: options.strategyLabTimeoutMs,
+    strategyLabError,
     gitCommit: metadata.gitCommit ?? "unknown",
     commands: metadata.commands ?? [],
     validatedAtMs: Date.now(),

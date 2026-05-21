@@ -407,7 +407,7 @@ export function deriveResultFromEvents(
       ? appendSettlementReference(replayReferences, { tsMs: settlementTsMs, direction: result.direction })
       : replayReferences;
   const markoutResults = fillsForMarkout.flatMap((fill) =>
-    calculateMarkouts(fill, referencesWithSettlement),
+    calculateMarkouts(fill, referencesWithSettlement, { skipSort: true }),
   );
   const markoutSummary: MarkoutSummary = summarizeMarkouts(markoutResults);
 
@@ -432,6 +432,9 @@ export function deriveResultFromEvents(
     const conservativeMarkout5s: number[] = [];
     const conservativeMarkout30s: number[] = [];
     const scorerAdverse: boolean[] = [];
+
+    // Optimization: sort L2 events once
+    const sortedL2 = [...l2Events].sort((a, b) => (a.processedTsMs ?? a.receivedTsMs) - (b.processedTsMs ?? b.receivedTsMs));
 
     if (fillEvents.length === 0) {
       cFill.conservativeFillWarning = "no_eligible_fills";
@@ -482,7 +485,8 @@ export function deriveResultFromEvents(
         price: fill.price,
         shares: fill.shares,
         placedTsMs: intent.createdAtMs,
-      }, l2Events);
+        skipSort: true,
+      }, sortedL2);
 
       cFill.conservativeFillVerdictCounts[scorerResult.verdict] = (cFill.conservativeFillVerdictCounts[scorerResult.verdict] ?? 0) + 1;
       
