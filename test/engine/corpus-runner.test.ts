@@ -165,7 +165,7 @@ import "../../scripts/run-strategy-lab-paired-corpus.ts";
     fs.writeFileSync(wrapperScript, wrapperContent);
 
     const outJson = path.join(reportsDir, "mismatch-summary.json");
-    const proc = spawn("bun", [wrapperScript, "--pairs-dir", pairsDir, "--out-json", outJson, "--variants", "simulation"], {
+    const proc = spawn("bun", [wrapperScript, "--pairs-dir", pairsDir, "--out-json", outJson, "--variants", "simulation", "--timeout-ms", "2000"], {
       cwd: process.cwd()
     });
     let stdout = "";
@@ -175,7 +175,7 @@ import "../../scripts/run-strategy-lab-paired-corpus.ts";
     fs.rmSync(wrapperScript, { force: true });
     
     expect(code).toBe(1); // Should fail because of internal state mismatch
-    expect(stdout).toContain("Strategy Lab Batch Completed. State: internal_state_mismatch");
+    expect(stdout).toContain("Strategy Lab Batch internal state mismatch!");
     expect(fs.existsSync(outJson)).toBe(true);
     const summary = JSON.parse(fs.readFileSync(outJson, "utf8"));
     expect(summary.status).toBe("internal_state_mismatch");

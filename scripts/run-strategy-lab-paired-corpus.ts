@@ -100,11 +100,15 @@ async function main() {
   let batch = initialBatch;
   const startMs = Date.now();
   let timedOut = false;
+  let internalMismatch = false;
 
   while (batch.state === "queued" || batch.state === "running") {
 
     if (shouldTimeout(startMs, timeoutMs)) {
       timedOut = true;
+      if (batch.progress.completedRuns === batch.progress.totalRuns && batch.progress.totalRuns > 0 && batch.state === "running") {
+        internalMismatch = true;
+      }
       manager.cancelBatch(batch.id);
       batch = manager.getBatch(batch.id) ?? batch;
       break;
@@ -117,19 +121,20 @@ async function main() {
   let finalExitCode = 0;
   let finalStatus: string = batch.state;
   if (timedOut) {
-    console.log(`\n\n[ERROR] Strategy Lab Batch Timed Out!`);
-    console.log(`Completed runs: ${batch.progress.completedRuns} / ${batch.progress.totalRuns}`);
-    console.log(`Status: timed_out`);
-    finalStatus = "timed_out";
-    if (!allowPartial) finalExitCode = 1;
-  } else {
-    // Check if we hit the internal state mismatch
-    if (batch.progress.completedRuns === batch.progress.totalRuns && batch.state === "running") {
+    if (internalMismatch) {
+      console.log(`\n\n[ERROR] Strategy Lab Batch internal state mismatch! Completed ${batch.progress.totalRuns} runs but hung in running state.`);
       finalStatus = "internal_state_mismatch";
       finalExitCode = 1;
+    } else {
+      console.log(`\n\n[ERROR] Strategy Lab Batch Timed Out!`);
+      console.log(`Completed runs: ${batch.progress.completedRuns} / ${batch.progress.totalRuns}`);
+      console.log(`Status: timed_out`);
+      finalStatus = "timed_out";
+      if (!allowPartial) finalExitCode = 1;
     }
+  } else {
     console.log(`\n\nStrategy Lab Batch Completed. State: ${finalStatus}`);
-    if (finalStatus === "failed" || finalStatus === "internal_state_mismatch") finalExitCode = 1;
+    if (finalStatus === "failed") finalExitCode = 1;
   }
   
   console.log(`\n--- Corpus Summary ---`);
