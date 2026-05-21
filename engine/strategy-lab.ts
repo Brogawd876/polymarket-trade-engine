@@ -407,7 +407,7 @@ export function deriveResultFromEvents(
       ? appendSettlementReference(replayReferences, { tsMs: settlementTsMs, direction: result.direction })
       : replayReferences;
   const markoutResults = fillsForMarkout.flatMap((fill) =>
-    calculateMarkouts(fill, referencesWithSettlement),
+    calculateMarkouts(fill, referencesWithSettlement, { skipSort: true }),
   );
   const markoutSummary: MarkoutSummary = summarizeMarkouts(markoutResults);
 

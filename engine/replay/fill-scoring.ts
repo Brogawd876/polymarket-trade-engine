@@ -110,9 +110,24 @@ export class ConservativeFillScorer {
     let currentBid: number | null = null;
     let currentAsk: number | null = null;
 
-    for (const evt of sorted) {
-      // Rule: ignore events before order placement
-      if (evt.processedTsMs < opts.placedTsMs) continue;
+    // Binary search to find start index
+    let startIndex = 0;
+    let low = 0;
+    let high = sorted.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >>> 1;
+      const ts = sorted[mid].processedTsMs ?? sorted[mid].receivedTsMs ?? 0;
+      if (ts < opts.placedTsMs) {
+        low = mid + 1;
+      } else {
+        startIndex = mid;
+        high = mid - 1;
+      }
+    }
+    if (low === sorted.length) startIndex = sorted.length;
+
+    for (let i = startIndex; i < sorted.length; i++) {
+      const evt = sorted[i];
 
       // ── Book events ────────────────────────────────────────────────────────
       if (evt.eventType === "market_book_snapshot" || evt.eventType === "market_book_delta") {
@@ -231,7 +246,7 @@ export class ConservativeFillScorer {
         price: opts.price,
       };
 
-      const mkResults = calculateMarkouts(fillForMarkout, references, { maxObservationDistanceMs: 5000 });
+      const mkResults = calculateMarkouts(fillForMarkout, references, { maxObservationDistanceMs: 5000, skipSort: true });
 
       for (const res of mkResults) {
         const label =
