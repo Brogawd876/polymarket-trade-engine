@@ -11,7 +11,7 @@ function execProcess(
   onStdout?: (data: string) => void,
   onStderr?: (data: string) => void
 ): { process: ChildProcess; promise: Promise<{ code: number | null; signal: string | null }> } {
-  const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+  const p = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] }); // Enable stdin
   const promise = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     p.stdout.on("data", (b) => {
       const s = b.toString();
@@ -109,9 +109,22 @@ async function main() {
   console.log(`[Orchestrator] Waiting 2 seconds for L2 tail buffer...`);
   await new Promise(r => setTimeout(r, 2000));
 
-  console.log(`[Orchestrator] Sending SIGINT to recorder...`);
-  recorder.process.kill("SIGINT");
+  console.log(`[Orchestrator] Attempting clean recorder shutdown via stdin...`);
+  recorder.process.stdin?.write("stop\n");
+  
+  // Give it 3 seconds to stop cleanly via stdin
+  let recorderDone = false;
+  const timeout = setTimeout(() => {
+    if (!recorderDone) {
+      console.log(`[Orchestrator] Recorder clean shutdown timed out. Sending SIGINT...`);
+      recorder.process.kill("SIGINT");
+    }
+  }, 3000);
+
   const { code: recorderExitCode, signal: recorderSignal } = await recorder.promise;
+  recorderDone = true;
+  clearTimeout(timeout);
+
   const recorderEndedAtMs = Date.now();
   console.log(`[Orchestrator] Recorder exited with code ${recorderExitCode}, signal ${recorderSignal}`);
   const captureEndedAtMs = Date.now();

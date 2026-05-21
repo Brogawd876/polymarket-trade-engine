@@ -38,6 +38,7 @@ export type ScoreFillOptions = {
   placedTsMs: number;
   queuePosition?: number | null;
   maxWaitMs?: number;
+  skipSort?: boolean;
 };
 
 /**
@@ -90,7 +91,7 @@ function isMakerTouch(action: "buy" | "sell", orderPrice: number, bid: number | 
 
 export class ConservativeFillScorer {
   evaluate(opts: ScoreFillOptions, events: ProfitEventEnvelope[]): FillScoreResult {
-    const sorted = [...events].sort((a, b) => a.processedTsMs - b.processedTsMs);
+    const sorted = opts.skipSort ? events : [...events].sort((a, b) => a.processedTsMs - b.processedTsMs);
 
     let verdict: FillScoreVerdict = "unknown_insufficient_data";
     let reason = "no relevant data found";

@@ -195,7 +195,7 @@ describe("Pair Validator", () => {
     expect(manifest.coverageVerdict).toBe("complete");
     expect(manifest.strategyLabStatus).toBe("failed");
     expect(manifest.strategyLabError).toBe("Simulated SL crash");
-    expect(manifest.pairValidity).toBe("invalid");
+    expect(manifest.pairValidity).toBe("valid");
   });
 
 });

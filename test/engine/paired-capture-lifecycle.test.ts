@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import { validatePair } from "../../engine/replay/pair-validator.ts";
+import { StrategyLabBatchManager, type StrategyLabBatch } from "../../engine/strategy-lab.ts";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -81,20 +82,88 @@ describe("Pair Capture Lifecycle", () => {
     expect(manifest.validationErrors).toContain("Recorder crashed with exit code 1");
   });
 
-  test("strategy lab timeout does not invalidate structural pair but marks verdict", async () => {
+  class MockBatchManager extends StrategyLabBatchManager {
+    mockState: any = "completed";
+    mockBatch: any = null;
+
+    constructor(mockState: any, mockBatch: any) {
+      super();
+      this.mockState = mockState;
+      this.mockBatch = mockBatch;
+    }
+
+    async createBatch(): Promise<any> {
+      return { id: "mock-batch" };
+    }
+
+    getBatch(): any {
+      return {
+        id: "mock-batch",
+        state: this.mockState,
+        runs: this.mockBatch?.runs ?? [{ 
+          status: "completed", 
+          execution: { 
+            conservativeFill: { 
+              conservativeFillEvidenceAvailable: true,
+              eligibleFillCount: 1,
+              usableEvidenceCount: 1,
+              conservativeFillUnavailableReasons: {}
+            } 
+          } 
+        }]
+      };
+    }
+  }
+
+  test("strategy lab timeout does NOT invalidate structural pair", async () => {
     const { replayLog, l2Log } = createLogs("sl-timeout");
     
-    // We can't easily trigger a real timeout in unit test without mocking the manager,
-    // but validatePair implementation handles it. We'll test the property mapping.
+    // Use a manager that stays in "running" state to trigger timeout
+    const mockManager = new MockBatchManager("running", null);
+
     const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
       metadata: { recorderExitCode: 0 },
-      strategyLabTimeoutMs: 1 // Force immediate timeout if it were to run
+      strategyLabTimeoutMs: 50, // Fast timeout
+      batchManager: mockManager
     });
     
-    // In this test, it will actually run and either complete very fast or timeout.
-    // Since it's a stub log, it might fail early.
-    // Let's just verify it didn't hang.
-    expect(manifest.strategyLabStatus).toBeDefined();
-    expect(manifest.pairValidity).toBeDefined();
+    expect(manifest.strategyLabStatus).toBe("timed_out");
+    expect(manifest.strategyLabError).toBe("Strategy Lab batch timed out during validation");
+    expect(manifest.pairValidity).toBe("valid"); // Separated!
+  });
+
+  test("strategy lab failure does NOT invalidate structural pair", async () => {
+    const { replayLog, l2Log } = createLogs("sl-failed");
+    
+    const mockManager = new MockBatchManager("failed", {
+      runs: [{ status: "failed", error: "Injected failure" }]
+    });
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 },
+      batchManager: mockManager
+    });
+    
+    expect(manifest.strategyLabStatus).toBe("failed");
+    expect(manifest.strategyLabError).toBe("Injected failure");
+    expect(manifest.pairValidity).toBe("valid");
+  });
+
+  test("valid strategy lab completion", async () => {
+    const { replayLog, l2Log } = createLogs("sl-ok");
+    
+    const mockManager = new MockBatchManager("completed", null);
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 },
+      batchManager: mockManager
+    });
+    
+    if (manifest.strategyLabStatus === "failed") {
+        console.log("Strategy Lab Error:", manifest.strategyLabError);
+    }
+    expect(manifest.strategyLabStatus).toBe("completed");
+    expect(manifest.strategyLabEvidenceVerdict).toBe("usable");
+    expect(manifest.pairValidity).toBe("valid");
   });
 });

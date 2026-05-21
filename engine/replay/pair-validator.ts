@@ -8,6 +8,10 @@ export interface PairValidationOptions {
   testStrategyLabError?: string;
   strategyLabTimeoutMs?: number;
   skipStrategyLab?: boolean;
+  /**
+   * Optional manager instance for dependency injection (useful for tests)
+   */
+  batchManager?: StrategyLabBatchManager;
 }
 
 export async function validatePair(
@@ -185,7 +189,7 @@ export async function validatePair(
     } else {
       strategyLabStartedAtMs = Date.now();
       try {
-        const manager = new StrategyLabBatchManager();
+        const manager = options.batchManager ?? new StrategyLabBatchManager();
         const batch = await manager.createBatch({
           strategies: [strategy],
           files: [replayLogPath],
@@ -199,6 +203,7 @@ export async function validatePair(
         while (finishedBatch && (finishedBatch.state === "running" || finishedBatch.state === "queued")) {
           if (Date.now() - start > timeoutMs) {
             strategyLabStatus = "timed_out";
+            strategyLabError = "Strategy Lab batch timed out during validation";
             break;
           }
           await new Promise(r => setTimeout(r, 200));
@@ -206,8 +211,8 @@ export async function validatePair(
         }
 
         if (strategyLabStatus !== "timed_out") {
-          if (finishedBatch && finishedBatch.state === "completed") {
-            strategyLabStatus = "completed";
+          if (finishedBatch && (finishedBatch.state === "completed" || finishedBatch.state === "failed")) {
+            strategyLabStatus = finishedBatch.state === "completed" ? "completed" : "failed";
             const run = finishedBatch.runs[0];
             if (run && run.status === "completed") {
               const cFill = run.execution.conservativeFill;
@@ -216,8 +221,8 @@ export async function validatePair(
               } else if (cFill.eligibleFillCount === 0) {
                 strategyLabEvidenceVerdict = "unavailable_no_fills";
               } else if (cFill.conservativeFillUnavailableReasons.unmatched_intent_id || 
-                         cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping || 
-                         cFill.conservativeFillUnavailableReasons.missing_intent_mapping) {
+                       cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping || 
+                       cFill.conservativeFillUnavailableReasons.missing_intent_mapping) {
                 strategyLabEvidenceVerdict = "unavailable_missing_mapping";
                 validationWarnings.push("Fills occurred but mapping was incomplete or ambiguous.");
               } else if (cFill.usableEvidenceCount > 0) {
@@ -230,6 +235,9 @@ export async function validatePair(
             } else if (run && run.status === "failed") {
               strategyLabStatus = "failed";
               strategyLabError = (run as any).error || (run as any).execution?.error || "run failed";
+            } else {
+              strategyLabStatus = "failed";
+              strategyLabError = `Run status: ${run ? run.status : "missing"}`;
             }
           } else {
             strategyLabStatus = "failed";
@@ -245,7 +253,7 @@ export async function validatePair(
   }
 
   let pairValidity: "valid" | "invalid" = "valid";
-  if (validationErrors.length > 0 || parseErrors.length > 0 || coverageVerdict !== "complete" || strategyLabStatus === "failed" || strategyLabStatus === "timed_out") {
+  if (validationErrors.length > 0 || parseErrors.length > 0 || coverageVerdict !== "complete") {
     pairValidity = "invalid";
   }
 

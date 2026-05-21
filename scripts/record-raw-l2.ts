@@ -73,6 +73,13 @@ async function main() {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
+  // Support clean shutdown via stdin for Windows compatibility
+  process.stdin.on("data", (data) => {
+    if (data.toString().trim().toLowerCase() === "stop") {
+      shutdown();
+    }
+  });
+
   try {
     await recorder.start(slug);
     console.log("Recorder is running. Press Ctrl+C to stop early.");

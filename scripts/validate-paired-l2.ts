@@ -9,6 +9,8 @@ async function main() {
   let l2Path = "";
   let slug = "";
   let strategy = "late-entry";
+  let strategyLabTimeoutMs = 60000;
+  let skipStrategyLab = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -17,6 +19,8 @@ async function main() {
     else if (arg === "--l2") l2Path = args[++i] || "";
     else if (arg === "--slug") slug = args[++i] || "";
     else if (arg === "--strategy") strategy = args[++i] || "";
+    else if (arg === "--strategy-lab-timeout-ms") strategyLabTimeoutMs = parseInt(args[++i] || "60000", 10);
+    else if (arg === "--skip-strategy-lab") skipStrategyLab = true;
   }
 
   if (pairPath) {
@@ -29,7 +33,11 @@ async function main() {
         manifest.replayLogPath,
         manifest.rawL2LogPath,
         manifest.strategy,
-        { metadata: manifest }
+        { 
+          metadata: manifest,
+          strategyLabTimeoutMs,
+          skipStrategyLab
+        }
       );
       writeFileSync(pairPath, JSON.stringify(updated, null, 2));
       console.log("Validation complete.");
@@ -41,7 +49,10 @@ async function main() {
     }
   } else if (replayPath && l2Path && slug) {
     console.log(`Validating raw paths for slug ${slug}`);
-    const manifest = await validatePair(slug, replayPath, l2Path, strategy);
+    const manifest = await validatePair(slug, replayPath, l2Path, strategy, {
+      strategyLabTimeoutMs,
+      skipStrategyLab
+    });
     console.log(JSON.stringify(manifest, null, 2));
     process.exit(manifest.validationErrors.length > 0 ? 1 : 0);
   } else {
