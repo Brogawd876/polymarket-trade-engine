@@ -6,8 +6,8 @@ Phase 8K clean paired capture validation with normalized `market_trade` is check
 
 ## Status
 
-- Code repo branch: `fix/phase8k-ci-typecheck`
-- HEAD: `1e1c858`
+- Code repo branch: `master`
+- HEAD: PR #1 merged into master. CI passed before merge. master verified locally after pull.
 - Phase 8K verdict: **PASS**
 - Decoupled `pairValidity` (raw data) from `strategyLabStatus` (evaluation).
 - Optimized evaluation performance (150k events sorted once, reducing time from >180s to ~4s).
