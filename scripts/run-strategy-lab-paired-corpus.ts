@@ -3,13 +3,19 @@ import * as path from "path";
 import { type PairManifest } from "../engine/replay/pair-manifest.ts";
 import { StrategyLabBatchManager } from "../engine/strategy-lab.ts";
 
+import { shouldTimeout } from "./paired-corpus-utils.ts";
+
 async function main() {
   const args = process.argv.slice(2);
   let pairsDir = "data/pairs";
   let variants = ["late-entry", "late-entry-flow-aware", "fair-value-maker"];
+  let timeoutMs = 120000;
+  let allowPartial = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--pairs") pairsDir = args[++i] || pairsDir;
+    else if (args[i] === "--timeout-ms") timeoutMs = parseInt(args[++i] || String(timeoutMs), 10);
+    else if (args[i] === "--allow-partial") allowPartial = true;
     else if (args[i] === "--variants") {
       variants = [];
       while (i + 1 < args.length && !args[i + 1]!.startsWith("--")) {
@@ -57,13 +63,28 @@ async function main() {
   });
 
   let batch = initialBatch;
+  const startMs = Date.now();
+  let timedOut = false;
+
   while (batch.state === "queued" || batch.state === "running") {
+    if (shouldTimeout(startMs, timeoutMs)) {
+      timedOut = true;
+      manager.cancelBatch(batch.id);
+      batch = manager.getBatch(batch.id) ?? batch;
+      break;
+    }
     await new Promise(r => setTimeout(r, 1000));
     batch = manager.getBatch(batch.id) ?? batch;
     process.stdout.write(`\r[Strategy Lab] ${batch.progress.completedRuns} / ${batch.progress.totalRuns} runs completed...`);
   }
 
-  console.log(`\n\nStrategy Lab Batch Completed. State: ${batch.state}`);
+  if (timedOut) {
+    console.log(`\n\n[ERROR] Strategy Lab Batch Timed Out!`);
+    console.log(`Completed runs: ${batch.progress.completedRuns} / ${batch.progress.totalRuns}`);
+    if (!allowPartial) process.exit(1);
+  } else {
+    console.log(`\n\nStrategy Lab Batch Completed. State: ${batch.state}`);
+  }
   
   console.log(`\n--- Aggregate Summary ---`);
   console.log(`Total Runs: ${batch.summary.totalRuns}`);

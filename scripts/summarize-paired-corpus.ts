@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "fs";
 import * as path from "path";
 import { type PairManifest } from "../engine/replay/pair-manifest.ts";
+import { summarizePairManifests, formatPairedCorpusReport } from "./paired-corpus-utils.ts";
 
 function main() {
   const args = process.argv.slice(2);
@@ -24,67 +25,14 @@ function main() {
     }
   }
 
-  let totalCaptures = manifests.length;
-  let validPairs = 0;
-  let invalidPairs = 0;
-  let completeCoverage = 0;
-  let incompleteCoverage = 0;
-  let usableEvidence = 0;
-  let noFills = 0;
-  let insufficientData = 0;
-  let missingMapping = 0;
-  let failedSL = 0;
-
-  for (const m of manifests) {
-    if (m.pairValidity === "valid") validPairs++;
-    else invalidPairs++;
-
-    if (m.coverageVerdict === "complete") completeCoverage++;
-    else incompleteCoverage++;
-
-    switch (m.strategyLabEvidenceVerdict) {
-      case "usable": usableEvidence++; break;
-      case "unavailable_no_fills": noFills++; break;
-      case "unavailable_insufficient_data": insufficientData++; break;
-      case "unavailable_missing_mapping": missingMapping++; break;
-      default: failedSL++; break;
-    }
-  }
-
-  const md = [
-    `# Phase 8G Paired Corpus Report`,
-    ``,
-    `## Aggregate Counts`,
-    `- **Total captures attempted:** ${totalCaptures}`,
-    `- **Total valid pairs:** ${validPairs}`,
-    `- **Invalid pairs:** ${invalidPairs}`,
-    `- **Complete coverage count:** ${completeCoverage}`,
-    `- **Partial/Missing/Unknown coverage count:** ${incompleteCoverage}`,
-    `- **Usable evidence count:** ${usableEvidence}`,
-    `- **Unavailable (No Fills) count:** ${noFills}`,
-    `- **Unavailable (Insufficient Data) count:** ${insufficientData}`,
-    `- **Unavailable (Missing Mapping) count:** ${missingMapping}`,
-    `- **Failed SL Evaluation count:** ${failedSL}`,
-    ``,
-    `## Corpus Summary Table`,
-    ``,
-    `| Slug | Strategy | Validity | Coverage | SL Verdict | Replay Ev | L2 Ev (Book/Trade) | Errors/Warnings |`,
-    `|------|----------|----------|----------|------------|-----------|---------------------|-----------------|`
-  ];
-
-  for (const m of manifests) {
-    md.push(`| ${m.slug} | ${m.strategy} | ${m.pairValidity} | ${m.coverageVerdict} | ${m.strategyLabEvidenceVerdict} | ${m.replayEventCount} | ${m.rawL2EventCount} (${m.rawL2BookEventCount}/${m.rawL2TradeEventCount}) | ${m.parseErrors.length + m.validationErrors.length} / ${m.validationWarnings.length} |`);
-  }
-
-  md.push(``, `## Interpretation`);
-  md.push(`- **What the corpus proves:** The evaluation plumbing works correctly to pair live shadows with L2 data.`);
-  md.push(`- **What it does not prove:** Any profitability claim. We are still establishing the data foundation.`);
-  md.push(`- **Data missing:** We need to ensure strategies are actually taking trades so we have sufficient usable evidence for markout reporting.`);
+  const summary = summarizePairManifests(manifests);
   
-  md.push(``, `## Next Recommendation`);
-  md.push(`Proceed to run Strategy Lab paired corpus batch over these generated datasets, or capture more if usable evidence is low.`);
+  // Optionally read the runner status from a file if we want to pipe it here,
+  // but for now we just mark it as not_run unless updated externally.
 
-  writeFileSync(outPath, md.join("\n"));
+  const md = formatPairedCorpusReport(summary);
+
+  writeFileSync(outPath, md);
   console.log(`Wrote summary to ${outPath}`);
 }
 

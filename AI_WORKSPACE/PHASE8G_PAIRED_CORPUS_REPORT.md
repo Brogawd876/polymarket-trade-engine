@@ -1,16 +1,23 @@
 # Phase 8G Paired Corpus Report
 
 ## Aggregate Counts
-- **Total captures attempted:** 4
-- **Total valid pairs:** 3
-- **Invalid pairs:** 1
-- **Complete coverage count:** 4
+- **Total manifests scanned:** 4
+- **Valid pairs:** 3
+- **Invalid pairs:** 0
+- **Skipped old-schema pairs:** 1
+- **Malformed pairs:** 0
+
+## Valid Pairs Evidence Verdicts
+- **Complete coverage count:** 3
 - **Partial/Missing/Unknown coverage count:** 0
 - **Usable evidence count:** 0
-- **Unavailable (No Fills) count:** 4
+- **Unavailable (No Fills) count:** 3
 - **Unavailable (Insufficient Data) count:** 0
 - **Unavailable (Missing Mapping) count:** 0
 - **Failed SL Evaluation count:** 0
+
+## Strategy Lab Paired-Corpus Runner
+- **Status:** not_run
 
 ## Corpus Summary Table
 
