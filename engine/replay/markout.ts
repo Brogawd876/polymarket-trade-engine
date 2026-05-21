@@ -206,7 +206,9 @@ function findHorizonReference(
   let high = references.length - 1;
   while (low <= high) {
     const mid = (low + high) >>> 1;
-    if (references[mid].tsMs < fill.tsMs) {
+    const midRef = references[mid];
+    if (!midRef) break;
+    if (midRef.tsMs < fill.tsMs) {
       low = mid + 1;
     } else {
       startIndex = mid;
@@ -221,6 +223,7 @@ function findHorizonReference(
 
   for (let i = startIndex; i < references.length; i++) {
     const point = references[i];
+    if (!point) continue;
     if (point.tsMs >= target) {
       later = point;
       break;

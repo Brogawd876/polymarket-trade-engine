@@ -1,26 +1,25 @@
-# Active Task
-
-**Status:** phase_8j_trade_print_source_audit_completed
+# Active Task: Phase 8K Checkpoint Complete
 
 ## Current Objective
 
-Prove where reliable Polymarket BTC 5-minute trade-print evidence comes from and repair recorder normalization so future paired captures can support conservative trade-through evidence.
+Phase 8K clean paired capture validation with normalized `market_trade` is checkpointed onto the feature branch.
 
-## Phase 8J Verdict
+## Status
 
-Reliable trade prints are available, but a clean valid paired corpus still needs one capture/validation hardening pass:
+- Code repo branch: `feat/clean-market-trade-paired-capture`
+- HEAD: `e75813e` (pushed) -> [New commit pending]
+- Phase 8K verdict: **PASS**
+- Decoupled `pairValidity` (raw data) from `strategyLabStatus` (evaluation).
+- Optimized evaluation performance (150k events sorted once, reducing time from >180s to ~4s).
+- Hardened recorder shutdown via `stdin` to support Windows `recorder_completed` writing.
+- Captured valid paired corpus including `btc-updown-5m-1779390000` with 5,389 normalized `market_trade` events.
+- Paired Strategy Lab confirmed 70 usable fills with real trade-through evidence across 15 runs.
+- No strategy tuning, ranking changes, readiness gate changes, or live trading occurred.
+- Generated raw L2/replay artifacts remain uncommitted.
 
-- Polymarket market WebSocket emits complete public trade prints as `last_trade_price` with token ID, price, size, side, timestamp, market, and transaction hash.
-- The raw L2 recorder now preserves `last_trade_price` and emits `market_trade` only when all trade-through evidence fields are present.
-- CLOB last-trade-price endpoints are snapshot references only; they lack size/timestamp and are not trade-through proof.
-- Data API trades are public and complete enough for audit/backfill checks, but observed samples were lagging relative to market WS.
-- A short repaired-recorder capture produced normalized `market_trade`.
-- A paired capture attempt produced raw L2 with `market_trade` coverage, but the manifest is invalid because recorder SIGINT was recorded as `null` and embedded Strategy Lab validation timed out.
+## Next Phase
 
-## Updated Report
-
-- `AI_WORKSPACE/PHASE8J_TRADE_PRINT_SOURCE_AUDIT.md`
-
-## Next Exact Task
-
-Phase 8K should harden paired capture validation, treat expected recorder shutdown correctly, and capture one clean valid paired BTC 5-minute corpus with normalized `market_trade` before any strategy tuning.
+Phase 8L: Corpus Expansion and Calibration.
+1. Capture a multi-hour paired BTC 5-minute corpus.
+2. Implement Platt/Isotonic calibration to address the identified 92% adverse selection rate.
+3. Establish a "Calibration Quality" benchmark in Strategy Lab.
