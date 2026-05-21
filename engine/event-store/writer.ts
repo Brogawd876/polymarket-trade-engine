@@ -26,6 +26,7 @@ export type EventWriterOptions = {
   commitSha?: string;
   nowMs?: () => number;
   monotonicNs?: () => bigint;
+  exactFilePath?: string;
 };
 
 export class NoopEventWriter implements EventWriter {
@@ -70,8 +71,12 @@ export class NdjsonEventWriter implements EventWriter {
   constructor(opts: EventWriterOptions = {}) {
     this.runId = opts.runId ?? `run-${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID()}`;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
-    const rootDir = opts.rootDir ?? path.join("logs", "events");
-    this.filePath = path.join(rootDir, this.runId, "events.ndjson");
+    if (opts.exactFilePath) {
+      this.filePath = opts.exactFilePath;
+    } else {
+      const rootDir = opts.rootDir ?? path.join("logs", "events");
+      this.filePath = path.join(rootDir, this.runId, "events.ndjson");
+    }
     this.context = {
       runId: this.runId,
       sessionId: this.sessionId,

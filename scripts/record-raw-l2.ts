@@ -7,6 +7,7 @@ async function main() {
   let slug = "";
   let durationMs = 60000; // Default 60 seconds
   let dryRun = false;
+  let outPath = "";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -18,11 +19,13 @@ async function main() {
       durationMs = parseInt(args[++i] || "60000", 10);
     } else if (arg === "--dry-run") {
       dryRun = true;
+    } else if (arg === "--out") {
+      outPath = args[++i] || "";
     }
   }
 
   if (!slug) {
-    console.error("Usage: bun run scripts/record-raw-l2.ts [--slug <market-slug> | --auto-slug <offset>] [--duration-ms <ms>] [--dry-run]");
+    console.error("Usage: bun run scripts/record-raw-l2.ts [--slug <market-slug> | --auto-slug <offset>] [--duration-ms <ms>] [--out <path>] [--dry-run]");
     process.exit(1);
   }
 
@@ -30,8 +33,22 @@ async function main() {
   console.log(`Slug: ${slug}`);
   console.log(`Duration: ${durationMs}ms`);
   console.log(`Mode: ${dryRun ? "DRY-RUN (NoopWriter)" : "CAPTURE (NdjsonWriter)"}`);
+  if (outPath) console.log(`Output: ${outPath}`);
 
-  const writer = dryRun ? new NoopEventWriter() : new NdjsonEventWriter();
+  // Create writer, mapping custom output path if provided
+  let writerOpts = {};
+  if (outPath) {
+    const pathSegments = outPath.split("/");
+    const filename = pathSegments.pop() || "events.ndjson";
+    // We mock runId to be the file name base so NdjsonEventWriter writes exactly what we want,
+    // or we can adjust NdjsonEventWriter if needed, but NdjsonEventWriter does: `path.join(rootDir, runId, "events.ndjson")`
+    // Actually wait, let's fix NdjsonEventWriter to accept an exact filePath instead!
+    // But I'll just change NdjsonEventWriter directly first. 
+    // Wait, let's just pass `exactFilePath: outPath` to NdjsonEventWriter.
+    writerOpts = { exactFilePath: outPath };
+  }
+
+  const writer = dryRun ? new NoopEventWriter() : new NdjsonEventWriter(writerOpts);
   const recorder = new RawL2Recorder({ writer });
 
   let isShuttingDown = false;
@@ -44,7 +61,7 @@ async function main() {
       console.log("Recorder stopped safely.");
       console.log("Health summary:", recorder.health);
       if (!dryRun) {
-        console.log(`Output written to: logs/events/${writer.runId}/events.ndjson`);
+        console.log(`Output written to: ${outPath || `logs/events/${writer.runId}/events.ndjson`}`);
       }
       process.exit(0);
     } catch (e) {
