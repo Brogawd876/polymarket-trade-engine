@@ -1,7 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { type PairManifest } from "./pair-manifest.ts";
 import { StrategyLabBatchManager } from "../strategy-lab.ts";
-import { getSlug } from "../../utils/slot.ts";
 
 export async function validatePair(
   slug: string,
@@ -23,6 +22,9 @@ export async function validatePair(
   let rawL2FirstEventTsMs: number | null = null;
   let rawL2LastEventTsMs: number | null = null;
 
+  let replaySlugFound: string | null = null;
+  let rawL2SlugFound: string | null = null;
+
   // Read Replay Log
   if (!existsSync(replayLogPath)) {
     validationErrors.push(`Replay log not found: ${replayLogPath}`);
@@ -31,22 +33,39 @@ export async function validatePair(
       const replayContent = readFileSync(replayLogPath, "utf-8");
       const lines = replayContent.split("\n").filter(l => l.trim().length > 0);
       replayEventCount = lines.length;
-      if (lines.length > 0) {
+      
+      let minTs: number | null = null;
+      let maxTs: number | null = null;
+
+      for (const line of lines) {
         try {
-          const firstEvent = JSON.parse(lines[0]!);
-          if (firstEvent.ts) replayFirstEventTsMs = firstEvent.ts;
+          const event = JSON.parse(line);
+          const ts = event.ts;
+          if (typeof ts === "number") {
+            if (minTs === null || ts < minTs) minTs = ts;
+            if (maxTs === null || ts > maxTs) maxTs = ts;
+          }
+          if (event.event?.slug) replaySlugFound = event.event.slug;
+          if (event.slug) replaySlugFound = event.slug;
         } catch (e) {
-          parseErrors.push(`Failed to parse first replay event: ${e}`);
+          parseErrors.push(`Failed to parse replay event: ${e}`);
+          break;
         }
-        try {
-          const lastEvent = JSON.parse(lines[lines.length - 1]!);
-          if (lastEvent.ts) replayLastEventTsMs = lastEvent.ts;
-        } catch (e) {
-          parseErrors.push(`Failed to parse last replay event: ${e}`);
-        }
-      } else {
+      }
+      
+      replayFirstEventTsMs = minTs;
+      replayLastEventTsMs = maxTs;
+
+      if (replayEventCount === 0) {
         validationErrors.push("Replay log is empty");
       }
+      
+      if (replaySlugFound && replaySlugFound !== slug) {
+        validationErrors.push(`Replay log slug mismatch: expected ${slug}, found ${replaySlugFound}`);
+      } else if (!replaySlugFound && replayEventCount > 0) {
+        validationWarnings.push("No explicit slug found in replay log.");
+      }
+
     } catch (e) {
       parseErrors.push(`Failed to read replay log: ${e}`);
     }
@@ -61,8 +80,8 @@ export async function validatePair(
       const lines = rawL2Content.split("\n").filter(l => l.trim().length > 0);
       rawL2EventCount = lines.length;
       
-      let firstTs: number | null = null;
-      let lastTs: number | null = null;
+      let minTs: number | null = null;
+      let maxTs: number | null = null;
 
       for (const line of lines) {
         try {
@@ -73,20 +92,34 @@ export async function validatePair(
           } else if (type === "market_trade") {
             rawL2TradeEventCount++;
           }
-          if (event.receivedTsMs) {
-            if (firstTs === null) firstTs = event.receivedTsMs;
-            lastTs = event.receivedTsMs;
+          
+          const ts = event.receivedTsMs ?? event.processedTsMs;
+          if (typeof ts === "number") {
+            if (minTs === null || ts < minTs) minTs = ts;
+            if (maxTs === null || ts > maxTs) maxTs = ts;
+          }
+
+          if (event.slug) {
+            rawL2SlugFound = event.slug;
           }
         } catch (e) {
           parseErrors.push(`Failed to parse raw L2 event: ${e}`);
           break; // Stop parsing on first error to prevent log spam
         }
       }
-      rawL2FirstEventTsMs = firstTs;
-      rawL2LastEventTsMs = lastTs;
+      rawL2FirstEventTsMs = minTs;
+      rawL2LastEventTsMs = maxTs;
 
       if (rawL2EventCount === 0) {
         validationErrors.push("Raw L2 log is empty");
+      } else if (rawL2BookEventCount === 0 && rawL2TradeEventCount === 0) {
+        validationErrors.push("Raw L2 log contains zero useful book or trade events.");
+      }
+
+      if (rawL2SlugFound && rawL2SlugFound !== slug) {
+        validationErrors.push(`Raw L2 log slug mismatch: expected ${slug}, found ${rawL2SlugFound}`);
+      } else if (!rawL2SlugFound && rawL2EventCount > 0) {
+        validationWarnings.push("No explicit slug found in raw L2 log.");
       }
     } catch (e) {
       parseErrors.push(`Failed to read raw L2 log: ${e}`);
@@ -110,7 +143,7 @@ export async function validatePair(
     }
   }
 
-  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed" = "failed";
+  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed" | "unknown" = "failed";
 
   if (validationErrors.length === 0 && parseErrors.length === 0) {
     try {
@@ -146,8 +179,6 @@ export async function validatePair(
           } else if (cFill.usableEvidenceCount > 0) {
             strategyLabEvidenceVerdict = "usable";
           } else {
-            // Fills existed, mapping worked, but no fills were scored as usable (e.g. unknown insufficient data, or touch_only)
-            // Still usable evidence (even if verdict is 0), but we can call it usable.
             strategyLabEvidenceVerdict = "usable";
           }
         } else if (run && run.status === "failed") {
@@ -160,6 +191,11 @@ export async function validatePair(
     } catch (e: any) {
       validationErrors.push(`Strategy Lab validation threw: ${e.message}`);
     }
+  }
+
+  let pairValidity: "valid" | "invalid" = "valid";
+  if (validationErrors.length > 0 || parseErrors.length > 0 || coverageVerdict === "missing" || coverageVerdict === "unknown") {
+    pairValidity = "invalid";
   }
 
   return {
@@ -191,6 +227,7 @@ export async function validatePair(
     validationErrors,
     validationWarnings,
     coverageVerdict,
+    pairValidity,
     strategyLabEvidenceVerdict,
     gitCommit: metadata.gitCommit ?? "unknown",
     commands: metadata.commands ?? [],

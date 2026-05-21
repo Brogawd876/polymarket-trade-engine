@@ -27,6 +27,7 @@ export type PairManifest = {
   validationErrors: string[];
   validationWarnings: string[];
   coverageVerdict: "complete" | "partial" | "missing" | "unknown";
+  pairValidity: "valid" | "invalid";
   strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed";
   gitCommit: string;
   commands: string[];
