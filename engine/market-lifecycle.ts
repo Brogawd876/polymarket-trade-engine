@@ -1712,12 +1712,6 @@ export class MarketLifecycle {
       this._resolutionWaitStartMs = this._clock.nowMs();
     }
 
-    const timeoutMs = 15000;
-    if (this._clock.nowMs() - this._resolutionWaitStartMs > timeoutMs) {
-      this._log(`[${this.slug}] Timed out waiting for resolution after ${timeoutMs}ms.`, "yellow");
-      return true; // Treat as resolved to unblock
-    }
-
     return false;
   }
 

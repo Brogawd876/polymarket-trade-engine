@@ -102,13 +102,6 @@ async function main() {
   let timedOut = false;
 
   while (batch.state === "queued" || batch.state === "running") {
-    // If all runs are complete but batch state is stuck, give it a tiny grace period then force complete
-    if (batch.progress.completedRuns === batch.progress.totalRuns && batch.progress.totalRuns > 0) {
-      if (Date.now() - startMs > timeoutMs) {
-        batch.state = "completed"; // force complete to escape lifecycle hang
-        break;
-      }
-    }
 
     if (shouldTimeout(startMs, timeoutMs)) {
       timedOut = true;
@@ -122,14 +115,21 @@ async function main() {
   }
 
   let finalExitCode = 0;
+  let finalStatus: string = batch.state;
   if (timedOut) {
     console.log(`\n\n[ERROR] Strategy Lab Batch Timed Out!`);
     console.log(`Completed runs: ${batch.progress.completedRuns} / ${batch.progress.totalRuns}`);
     console.log(`Status: timed_out`);
+    finalStatus = "timed_out";
     if (!allowPartial) finalExitCode = 1;
   } else {
-    console.log(`\n\nStrategy Lab Batch Completed. State: ${batch.state}`);
-    if (batch.state === "failed") finalExitCode = 1;
+    // Check if we hit the internal state mismatch
+    if (batch.progress.completedRuns === batch.progress.totalRuns && batch.state === "running") {
+      finalStatus = "internal_state_mismatch";
+      finalExitCode = 1;
+    }
+    console.log(`\n\nStrategy Lab Batch Completed. State: ${finalStatus}`);
+    if (finalStatus === "failed" || finalStatus === "internal_state_mismatch") finalExitCode = 1;
   }
   
   console.log(`\n--- Corpus Summary ---`);
@@ -168,8 +168,21 @@ async function main() {
   }
 
   if (outJson) {
+    const records = outCalibrationJsonl ? extractCalibrationRecords(batch, allManifests) : [];
     mkdirSync(path.dirname(outJson), { recursive: true });
-    writeFileSync(outJson, JSON.stringify(batch.summary, null, 2), "utf-8");
+    writeFileSync(outJson, JSON.stringify({
+      status: finalStatus,
+      totalRuns: batch.summary.totalRuns,
+      completedRuns: batch.summary.completed,
+      failedRuns: batch.summary.failed,
+      canceledRuns: batch.summary.canceled,
+      validPairs: validCount,
+      invalidPairs: invalidCount,
+      calibrationRecordCount: records.length,
+      timedOut: timedOut,
+      usedForcedCompletion: false,
+      summary: batch.summary
+    }, null, 2), "utf-8");
     console.log(`\nSummary JSON written to: ${outJson}`);
   }
 
