@@ -5,6 +5,7 @@ export interface ReconnectingWsOptions {
   url: string;
   label?: string;
   onopen?: (ws: WebSocket) => void;
+  onclose?: () => void;
   onmessage: (event: MessageEvent) => void;
   onerror?: (err: Event) => void;
   /** 
@@ -43,6 +44,7 @@ export function createReconnectingWs(
     };
 
     ws.onclose = (event: CloseEvent) => {
+      opts.onclose?.();
       if (destroyed) return;
 
       // Check for terminal conditions (e.g. geoblock)

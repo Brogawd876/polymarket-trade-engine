@@ -9,14 +9,13 @@
 - Conservative queue-aware fill model scaffold in `engine/replay/fill-model.ts`.
 - Wallet invariant tests and fail-fast checks for impossible sell/settlement inventory.
 - CI now runs `bun run check` and focused data-foundation tests.
+- Raw Polymarket L2 Recorder in `engine/recorders/raw-l2-recorder.ts` with direct WebSocket capture to NDJSON.
 
 ## Next Wiring Tasks
 
-1. Capture raw `OrderBook.handleMessage` websocket book/delta/trade messages into the event writer with receive timestamps.
-2. Persist Binance/Coinbase price ticks and feed freshness events directly from adapters.
-3. Add raw websocket L2 capture so markout quality is based on full book/delta/trade history instead of sparse replay snapshots.
-4. Replace optimistic replay fill scoring with the conservative fill model behind an explicit option, then make it the default for research metrics.
-5. Add maker/taker and fee/rebate event emission for every fill; rebates must remain estimates, not guaranteed PnL.
+1. Persist Binance/Coinbase price ticks and feed freshness events directly from adapters.
+2. Replace optimistic replay fill scoring with the conservative fill model behind an explicit option, then make it the default for research metrics.
+3. Add maker/taker and fee/rebate event emission for every fill; rebates must remain estimates, not guaranteed PnL.
 
 ## Go/No-Go Gates
 

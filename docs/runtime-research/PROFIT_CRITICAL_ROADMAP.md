@@ -12,7 +12,7 @@ Why it matters for profit: no strategy can be trusted until we know exactly what
 
 Files/modules: `engine/event-store/*`, `engine/market-lifecycle.ts`, `engine/early-bird.ts`, `.github/workflows/test.yml`.
 
-Acceptance: append-only NDJSON events exist; focused tests and `bun run check` pass; no live/replay foundation regression.
+Acceptance: append-only NDJSON events exist; focused tests and `bun run check` pass; no live/replay foundation regression; Raw L2 WebSocket recorder implemented and capturing orderbook snapshots/deltas/trades.
 
 Stop if: event-store wiring requires broad rewrites of validated auth, discovery, or replay.
 

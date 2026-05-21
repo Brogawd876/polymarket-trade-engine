@@ -1,22 +1,23 @@
 # Handoff: Profit-Critical Data Foundation And Markout Integration
 
-Current Phase 8B branch: `feat/strategy-lab-markouts`
+Current Phase 8C branch: `feat/raw-l2-recorder`
 
-Starting checkpoint: `a56d2ad fix(data): keep event capture nonfatal and bounded`
+Starting checkpoint: `43fae9f docs(research): document markout integration limits`
 
 Scope completed:
 
+- Added `RawL2Recorder` to capture direct Polymarket WS book/delta/trade events.
+- Added `scripts/record-raw-l2.ts` for standalone data capture without trading credentials.
+- Normalized incoming L2 JSON into `events.ts` structure.
+- Updated docs to clarify feed-reported limits (e.g. `side` on trades).
 - Added normalized event schema and NDJSON/no-op writers.
 - Added narrow runtime event-store integration without touching validated Type 3 auth or market discovery.
 - Added replay markout scaffold.
 - Added conservative maker fill simulator scaffold.
-- Strengthened wallet and settlement inventory invariants.
-- Strengthened CI.
 - Integrated replay token-side post-fill markout calculation into Strategy Lab summaries.
 
 Not completed:
 
-- Raw websocket L2 delta capture.
 - Strategy Lab use of the conservative fill-model outputs as truth.
 - Tiny-live execution measurement.
 - Any strategy tuning or profitability claim.
@@ -31,4 +32,4 @@ Markout notes:
 
 Next exact task:
 
-Choose either raw L2 recorder implementation or conservative fill-model Strategy Lab integration. Raw L2 recorder is preferred if the next objective is better queue/adverse-selection data; conservative fill-model integration is preferred if the next objective is reducing replay fill optimism immediately. Do not tune strategies yet.
+Integrate conservative fill-model outputs into Strategy Lab scoring, or proceed to capture a larger corpus of L2 data for validation. Do not tune strategies yet.

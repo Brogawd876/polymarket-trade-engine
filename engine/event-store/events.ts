@@ -56,7 +56,14 @@ export type ProfitEventType =
   | "dependency_versions"
   | "host_latency_profile"
   | "feed_health"
-  | "operator_action";
+  | "operator_action"
+  | "recorder_started"
+  | "recorder_completed"
+  | "market_resolved_for_recording"
+  | "feed_connected"
+  | "feed_disconnected"
+  | "feed_decode_error"
+  | "raw_market_message";
 
 export type BookLevel = [price: number, size: number];
 
