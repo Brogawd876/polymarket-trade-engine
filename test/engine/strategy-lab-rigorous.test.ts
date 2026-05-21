@@ -129,17 +129,41 @@ describe("StrategyLab Rigorous Fill Evidence", () => {
     expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping).toBeUndefined();
   });
 
-  test("multiple intents same slug, no intentId -> ambiguous_intent_mapping", () => {
+  test("No intentId with exactly one slug intent -> slug fallback is allowed, scorer runs", () => {
+    const res = runScorer([
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-1", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+    ], [
+      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
+    ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(1);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(1);
+    expect(res.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill).toBe(1);
+  });
+
+  test("No intentId with multiple slug intents -> ambiguous_intent_mapping, scorer does not run", () => {
     const res = runScorer([
       { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-1", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
       { ts: 1002, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-2", tokenId: "TOKEN_B", createdAtMs: 1002 } as any } },
-      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", orderId: "clob-order-456", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
     ], [
       { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
     ]);
     expect(res.execution.conservativeFill.evaluatedFillCount).toBe(0);
     expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
     expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping).toBe(1);
+  });
+
+  test("Explicit intentId missing -> fail closed, no slug fallback, unmatched_intent_id", () => {
+    const res = runScorer([
+      { ts: 1001, type: "ORDER_INTENT", payload: { slug: "btc-1000", intent: { id: "intent-1", tokenId: "TOKEN_A", createdAtMs: 1001 } as any } },
+      { ts: 1005, type: "ORDER_LIFECYCLE", payload: { slug: "btc-1000", intentId: "missing-intent", status: "filled", side: "UP", action: "buy", price: 0.50, shares: 10 } as any }
+    ], [
+      { eventType: "market_trade", processedTsMs: 1004, payload: { tokenId: "TOKEN_A", price: 0.49, shares: 10 } }
+    ]);
+    expect(res.execution.conservativeFill.evaluatedFillCount).toBe(0);
+    expect(res.execution.conservativeFill.usableEvidenceCount).toBe(0);
+    expect(res.execution.conservativeFill.conservativeFillUnavailableReasons.unmatched_intent_id).toBe(1);
   });
 
   test("multiple fills aggregate correctly", () => {

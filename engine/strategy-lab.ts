@@ -442,10 +442,12 @@ export function deriveResultFromEvents(
       // 1. If fill.intentId exists: use intentsById.get(fill.intentId)
       if (fill.intentId) {
         intent = intentsById.get(fill.intentId);
-      }
-      
-      // 2. If no intent mapping via intentId: fallback to slug only if exactly one intent exists for that slug.
-      if (!intent) {
+        if (!intent) {
+          cFill.conservativeFillUnavailableReasons.unmatched_intent_id = (cFill.conservativeFillUnavailableReasons.unmatched_intent_id ?? 0) + 1;
+          continue;
+        }
+      } else {
+        // 2. If no intent mapping via intentId: fallback to slug only if exactly one intent exists for that slug.
         const slugIntents = intentsBySlug.get(fill.slug) ?? [];
         if (slugIntents.length === 1) {
           intent = slugIntents[0];
