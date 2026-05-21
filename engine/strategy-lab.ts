@@ -41,6 +41,8 @@ export type ConservativeFillReport = {
   conservativeMarkout5sAvg: number | null;
   conservativeMarkout30sAvg: number | null;
   conservativeAdverseSelectionRate: number | null;
+  usableEvidenceCount: number;
+  eligibleFillCount: number;
   conservativeFillWarning?: string;
 };
 
@@ -132,6 +134,8 @@ export type StrategyLabVariantSummary = {
     tradeThroughFillCount: number;
     unknownInsufficientDataCount: number;
     usableEvidenceRate: number | null;
+    usableEvidenceCount: number;
+    eligibleFillCount: number;
     avgMarkout1s: number | null;
     avgMarkout5s: number | null;
     avgMarkout30s: number | null;
@@ -228,6 +232,8 @@ const EMPTY_EXECUTION_SUMMARY: ExecutionQualitySummary = {
     conservativeMarkout5sAvg: null,
     conservativeMarkout30sAvg: null,
     conservativeAdverseSelectionRate: null,
+    usableEvidenceCount: 0,
+    eligibleFillCount: 0,
   },
 };
 
@@ -263,7 +269,7 @@ function emptySummary(totalRuns: number): StrategyLabBatchSummary {
   };
 }
 
-function deriveResultFromEvents(
+export function deriveResultFromEvents(
   base: StrategyLabRunResult,
   events: TelemetryEvent[],
   replayReferences: ReferencePricePoint[] = [],
@@ -290,7 +296,8 @@ function deriveResultFromEvents(
   let settlementTsMs: number | null = null;
 
   // Track intent data for conservative fill scoring
-  const intentsBySlug = new Map<string, { tokenId: string; createdAtMs: number }>();
+  const intentsById = new Map<string, { tokenId: string; createdAtMs: number }>();
+  const intentsBySlug = new Map<string, { tokenId: string; createdAtMs: number }[]>();
   const fillEvents: Array<{
     orderId: string;
     slug: string;
@@ -314,10 +321,16 @@ function deriveResultFromEvents(
         result.slug = event.payload.slug;
         result.counts.intents += 1;
         if (event.payload.intent && "tokenId" in event.payload.intent) {
-          intentsBySlug.set(event.payload.slug, {
+          const intentData = {
             tokenId: event.payload.intent.tokenId,
             createdAtMs: event.payload.intent.createdAtMs,
-          });
+          };
+          if (event.payload.intent.id) {
+            intentsById.set(event.payload.intent.id, intentData);
+          }
+          const list = intentsBySlug.get(event.payload.slug) ?? [];
+          list.push(intentData);
+          intentsBySlug.set(event.payload.slug, list);
         }
         break;
       case "RISK_DECISION":
@@ -406,8 +419,12 @@ function deriveResultFromEvents(
     cFill.conservativeFillUnavailableReasons.missing_raw_l2_events = fillEvents.length > 0 ? fillEvents.length : 1;
   }
 
+  cFill.eligibleFillCount = fillEvents.length;
+
   if (cFill.conservativeFillEvidenceAvailable) {
-    const scorerMarkouts: number[] = [];
+    const conservativeMarkout1s: number[] = [];
+    const conservativeMarkout5s: number[] = [];
+    const conservativeMarkout30s: number[] = [];
     const scorerAdverse: boolean[] = [];
 
     if (fillEvents.length === 0) {
@@ -415,7 +432,17 @@ function deriveResultFromEvents(
     }
 
     for (const fill of fillEvents) {
-      const intent = intentsBySlug.get(fill.slug);
+      let intent = intentsById.get(fill.orderId);
+      if (!intent) {
+        const slugIntents = intentsBySlug.get(fill.slug) ?? [];
+        if (slugIntents.length === 1) {
+          intent = slugIntents[0];
+        } else if (slugIntents.length > 1) {
+          cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping = (cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping ?? 0) + 1;
+          continue;
+        }
+      }
+
       if (!intent?.tokenId) {
         cFill.conservativeFillUnavailableReasons.missing_token_id = (cFill.conservativeFillUnavailableReasons.missing_token_id ?? 0) + 1;
         continue;
@@ -436,15 +463,22 @@ function deriveResultFromEvents(
       }, l2Events);
 
       cFill.conservativeFillVerdictCounts[scorerResult.verdict] = (cFill.conservativeFillVerdictCounts[scorerResult.verdict] ?? 0) + 1;
+      cFill.usableEvidenceCount++;
 
-      if (scorerResult.markouts["1s"] !== null) scorerMarkouts.push(scorerResult.markouts["1s"]);
-      if (scorerResult.markouts["5s"] !== null) scorerMarkouts.push(scorerResult.markouts["5s"]);
-      if (scorerResult.markouts["30s"] !== null) scorerMarkouts.push(scorerResult.markouts["30s"]);
+      if (scorerResult.markouts["1s"] !== null) conservativeMarkout1s.push(scorerResult.markouts["1s"]);
+      if (scorerResult.markouts["5s"] !== null) conservativeMarkout5s.push(scorerResult.markouts["5s"]);
+      if (scorerResult.markouts["30s"] !== null) conservativeMarkout30s.push(scorerResult.markouts["30s"]);
       if (scorerResult.adverseSelection !== null) scorerAdverse.push(scorerResult.adverseSelection);
     }
 
-    if (scorerMarkouts.length > 0) {
-      cFill.conservativeMarkout1sAvg = average(scorerMarkouts.slice(0, Math.ceil(scorerMarkouts.length / 3)));
+    if (conservativeMarkout1s.length > 0) {
+      cFill.conservativeMarkout1sAvg = average(conservativeMarkout1s);
+    }
+    if (conservativeMarkout5s.length > 0) {
+      cFill.conservativeMarkout5sAvg = average(conservativeMarkout5s);
+    }
+    if (conservativeMarkout30s.length > 0) {
+      cFill.conservativeMarkout30sAvg = average(conservativeMarkout30s);
     }
     if (scorerAdverse.length > 0) {
       cFill.conservativeAdverseSelectionRate = scorerAdverse.filter(v => v).length / scorerAdverse.length;
@@ -547,7 +581,9 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
       const probableFillCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.probable_fill ?? 0), 0);
       const tradeThroughFillCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill ?? 0), 0);
       const unknownInsufficientDataCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.unknown_insufficient_data ?? 0), 0);
-      const usableEvidenceRate = average(completed.map(run => run.execution.conservativeFill.conservativeFillEvidenceAvailable ? 1 : 0));
+      const totalEligibleFills = items.reduce((sum, run) => sum + run.execution.conservativeFill.eligibleFillCount, 0);
+      const totalUsableFills = items.reduce((sum, run) => sum + run.execution.conservativeFill.usableEvidenceCount, 0);
+      const usableEvidenceRate = totalEligibleFills > 0 ? totalUsableFills / totalEligibleFills : null;
       const avgCmarkout1s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout1sAvg));
       const avgCmarkout5s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout5sAvg));
       const avgCmarkout30s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout30sAvg));
@@ -609,6 +645,8 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
           tradeThroughFillCount,
           unknownInsufficientDataCount,
           usableEvidenceRate,
+          usableEvidenceCount: totalUsableFills,
+          eligibleFillCount: totalEligibleFills,
           avgMarkout1s: avgCmarkout1s,
           avgMarkout5s: avgCmarkout5s,
           avgMarkout30s: avgCmarkout30s,

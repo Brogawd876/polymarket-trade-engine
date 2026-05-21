@@ -207,6 +207,33 @@ function SummaryCard({ label, value, tone = 'slate' }: { label: string; value: s
     );
 }
 
+function getEvidenceLabel(run: BatchRun): string {
+    const cFill = run.execution?.conservativeFill;
+    if (!cFill || !cFill.conservativeFillEvidenceAvailable) return 'Unavailable';
+    if (cFill.conservativeFillWarning) return 'Unavailable';
+    if (cFill.usableEvidenceCount > 0) {
+        if ((cFill.conservativeFillVerdictCounts?.trade_through_fill ?? 0) > 0) return 'Trade-through';
+        if ((cFill.conservativeFillVerdictCounts?.probable_fill ?? 0) > 0) return 'Probable';
+        if ((cFill.conservativeFillVerdictCounts?.touch_only ?? 0) > 0) return 'Touch-only';
+        if ((cFill.conservativeFillVerdictCounts?.no_fill ?? 0) > 0) return 'No Fill';
+        if ((cFill.conservativeFillVerdictCounts?.unknown_insufficient_data ?? 0) > 0) return 'Unknown';
+        return 'Usable evidence';
+    }
+    return 'Raw L2 present';
+}
+
+function getEvidenceTitle(run: BatchRun): string {
+    const cFill = run.execution?.conservativeFill;
+    if (!cFill) return '';
+    const parts = [`Source: ${cFill.conservativeFillEvidenceSource}`];
+    if (cFill.conservativeFillWarning) parts.push(`Warning: ${cFill.conservativeFillWarning}`);
+    if (cFill.conservativeFillUnavailableReasons && Object.keys(cFill.conservativeFillUnavailableReasons).length > 0) {
+        const reasons = Object.entries(cFill.conservativeFillUnavailableReasons).map(([k, v]) => `${k}:${v}`).join(', ');
+        parts.push(`Reasons: ${reasons}`);
+    }
+    return parts.join(' | ');
+}
+
 export default function StrategyLab() {
     const isConnected = useStore(state => state.isConnected);
     const [variants, setVariants] = useState<StrategyVariant[]>([]);
@@ -606,8 +633,8 @@ export default function StrategyLab() {
                                                 <td className={`py-2 pr-3 font-bold uppercase ${verdictClass(run.verdict)}`}>{run.verdict ?? '---'}</td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(run.pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(run.pnl)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-300">{run.brierScore?.toFixed(4) ?? '---'}</td>
-                                                <td className="py-2 pr-3 text-right font-mono text-amber-300" title={`Source: ${run.execution?.conservativeFill.conservativeFillEvidenceSource}. ${run.execution?.conservativeFill.conservativeFillWarning ?? ''}`}>
-                                                    {run.execution?.conservativeFill.conservativeFillEvidenceAvailable ? 'REAL' : 'NONE'}
+                                                <td className="py-2 pr-3 text-right font-mono text-amber-300" title={getEvidenceTitle(run)}>
+                                                    {getEvidenceLabel(run)}
                                                 </td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(run.execution?.markouts.settlement ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(run.execution?.markouts.settlement)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.fills}</td>
