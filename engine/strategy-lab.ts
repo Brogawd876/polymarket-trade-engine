@@ -1,3 +1,4 @@
+import { readFileSync } from "fs";
 import { EarlyBird } from "./early-bird.ts";
 import { ReplayRunner, VirtualClock, type TelemetryEvent, type TelemetrySink } from "./bot-core/index.ts";
 import { listStrategyVariants, resolveStrategySelection, type StrategyVariant } from "./strategy/index.ts";
@@ -12,6 +13,7 @@ import {
   type MarkoutSummary,
   type ReferencePricePoint,
 } from "./replay/markout.ts";
+import { ConservativeFillScorer, type FillScoreResult } from "./replay/fill-scoring.ts";
 
 export type StrategyLabBatchState = "queued" | "running" | "completed" | "failed" | "canceled";
 export type StrategyLabRunStatus = "queued" | "running" | "completed" | "failed" | "canceled";
@@ -21,6 +23,25 @@ export type StrategyLabBatchRequest = {
   strategies?: string[];
   variants?: string[];
   files: string[];
+  l2Files?: Record<string, string>; // mapping from fixture path to l2 log path
+};
+
+export type ConservativeFillReport = {
+  conservativeFillEvidenceAvailable: boolean;
+  conservativeFillEvidenceSource: "raw_l2_event_store" | "unavailable";
+  conservativeFillVerdictCounts: {
+    no_fill: number;
+    touch_only: number;
+    probable_fill: number;
+    trade_through_fill: number;
+    unknown_insufficient_data: number;
+  };
+  conservativeFillUnavailableReasons: Record<string, number>;
+  conservativeMarkout1sAvg: number | null;
+  conservativeMarkout5sAvg: number | null;
+  conservativeMarkout30sAvg: number | null;
+  conservativeAdverseSelectionRate: number | null;
+  conservativeFillWarning?: string;
 };
 
 export type StrategyLabRunResult = {
@@ -68,6 +89,7 @@ export type ExecutionQualitySummary = {
     unavailableCount: number;
     unavailableReasons: Record<string, number>;
   };
+  conservativeFill: ConservativeFillReport;
 };
 
 export type StrategyLabVariantSummary = {
@@ -103,6 +125,18 @@ export type StrategyLabVariantSummary = {
   markoutSampleCount: number;
   markoutUnavailableCount: number;
   avgTurnover: number | null;
+  conservativeFill: {
+    noFillCount: number;
+    touchOnlyCount: number;
+    probableFillCount: number;
+    tradeThroughFillCount: number;
+    unknownInsufficientDataCount: number;
+    usableEvidenceRate: number | null;
+    avgMarkout1s: number | null;
+    avgMarkout5s: number | null;
+    avgMarkout30s: number | null;
+    adverseSelectionRate: number | null;
+  };
   score: number;
 };
 
@@ -141,6 +175,7 @@ export type StrategyLabBatch = {
   };
   runs: StrategyLabRunResult[];
   summary: StrategyLabBatchSummary;
+  l2Files?: Record<string, string>;
   error?: string;
 };
 
@@ -178,12 +213,33 @@ const EMPTY_EXECUTION_SUMMARY: ExecutionQualitySummary = {
     unavailableCount: 0,
     unavailableReasons: {},
   },
+  conservativeFill: {
+    conservativeFillEvidenceAvailable: false,
+    conservativeFillEvidenceSource: "unavailable",
+    conservativeFillVerdictCounts: {
+      no_fill: 0,
+      touch_only: 0,
+      probable_fill: 0,
+      trade_through_fill: 0,
+      unknown_insufficient_data: 0,
+    },
+    conservativeFillUnavailableReasons: {},
+    conservativeMarkout1sAvg: null,
+    conservativeMarkout5sAvg: null,
+    conservativeMarkout30sAvg: null,
+    conservativeAdverseSelectionRate: null,
+  },
 };
 
 function emptyExecutionSummary(): ExecutionQualitySummary {
   return {
     ...EMPTY_EXECUTION_SUMMARY,
     markouts: { ...EMPTY_EXECUTION_SUMMARY.markouts },
+    conservativeFill: {
+      ...EMPTY_EXECUTION_SUMMARY.conservativeFill,
+      conservativeFillVerdictCounts: { ...EMPTY_EXECUTION_SUMMARY.conservativeFill.conservativeFillVerdictCounts },
+      conservativeFillUnavailableReasons: { ...EMPTY_EXECUTION_SUMMARY.conservativeFill.conservativeFillUnavailableReasons },
+    },
   };
 }
 
@@ -211,6 +267,7 @@ function deriveResultFromEvents(
   base: StrategyLabRunResult,
   events: TelemetryEvent[],
   replayReferences: ReferencePricePoint[] = [],
+  l2Events: any[] = [],
 ): StrategyLabRunResult {
   const result: StrategyLabRunResult = {
     ...base,
@@ -232,6 +289,18 @@ function deriveResultFromEvents(
   let runningLowPnl = 0;
   let settlementTsMs: number | null = null;
 
+  // Track intent data for conservative fill scoring
+  const intentsBySlug = new Map<string, { tokenId: string; createdAtMs: number }>();
+  const fillEvents: Array<{
+    orderId: string;
+    slug: string;
+    action: "buy" | "sell";
+    side: "UP" | "DOWN";
+    price: number;
+    shares: number;
+    tsMs: number;
+  }> = [];
+
   for (const event of events) {
     switch (event.type) {
       case "SYSTEM_BOOT":
@@ -244,6 +313,12 @@ function deriveResultFromEvents(
       case "ORDER_INTENT":
         result.slug = event.payload.slug;
         result.counts.intents += 1;
+        if (event.payload.intent && "tokenId" in event.payload.intent) {
+          intentsBySlug.set(event.payload.slug, {
+            tokenId: event.payload.intent.tokenId,
+            createdAtMs: event.payload.intent.createdAtMs,
+          });
+        }
         break;
       case "RISK_DECISION":
         result.slug = event.payload.slug;
@@ -263,6 +338,16 @@ function deriveResultFromEvents(
             side: event.payload.side,
             action: event.payload.action,
             price: event.payload.price,
+          });
+
+          fillEvents.push({
+            orderId: event.payload.orderId ?? event.payload.intentId ?? "unknown",
+            slug: event.payload.slug,
+            action: event.payload.action,
+            side: event.payload.side,
+            price: event.payload.price,
+            shares: event.payload.shares,
+            tsMs: event.ts,
           });
         }
         if (event.payload.status === "failed" || event.payload.status === "canceled" || event.payload.status === "expired") {
@@ -307,6 +392,65 @@ function deriveResultFromEvents(
   );
   const markoutSummary: MarkoutSummary = summarizeMarkouts(markoutResults);
 
+  // --- Rigorous Conservative Fill Scoring ---
+  const scorer = new ConservativeFillScorer();
+  const cFill = result.execution.conservativeFill;
+
+  if (l2Events.length > 0) {
+    cFill.conservativeFillEvidenceAvailable = true;
+    cFill.conservativeFillEvidenceSource = "raw_l2_event_store";
+  } else {
+    cFill.conservativeFillEvidenceAvailable = false;
+    cFill.conservativeFillEvidenceSource = "unavailable";
+    cFill.conservativeFillWarning = "raw_l2_events_missing";
+    cFill.conservativeFillUnavailableReasons.missing_raw_l2_events = fillEvents.length > 0 ? fillEvents.length : 1;
+  }
+
+  if (cFill.conservativeFillEvidenceAvailable) {
+    const scorerMarkouts: number[] = [];
+    const scorerAdverse: boolean[] = [];
+
+    if (fillEvents.length === 0) {
+      cFill.conservativeFillWarning = "no_eligible_fills";
+    }
+
+    for (const fill of fillEvents) {
+      const intent = intentsBySlug.get(fill.slug);
+      if (!intent?.tokenId) {
+        cFill.conservativeFillUnavailableReasons.missing_token_id = (cFill.conservativeFillUnavailableReasons.missing_token_id ?? 0) + 1;
+        continue;
+      }
+      if (intent.createdAtMs === undefined || intent.createdAtMs === null) {
+        cFill.conservativeFillUnavailableReasons.missing_order_placement_time = (cFill.conservativeFillUnavailableReasons.missing_order_placement_time ?? 0) + 1;
+        continue;
+      }
+
+      const scorerResult = scorer.evaluate({
+        orderId: fill.orderId,
+        tokenId: intent.tokenId,
+        action: fill.action,
+        side: fill.side,
+        price: fill.price,
+        shares: fill.shares,
+        placedTsMs: intent.createdAtMs,
+      }, l2Events);
+
+      cFill.conservativeFillVerdictCounts[scorerResult.verdict] = (cFill.conservativeFillVerdictCounts[scorerResult.verdict] ?? 0) + 1;
+
+      if (scorerResult.markouts["1s"] !== null) scorerMarkouts.push(scorerResult.markouts["1s"]);
+      if (scorerResult.markouts["5s"] !== null) scorerMarkouts.push(scorerResult.markouts["5s"]);
+      if (scorerResult.markouts["30s"] !== null) scorerMarkouts.push(scorerResult.markouts["30s"]);
+      if (scorerResult.adverseSelection !== null) scorerAdverse.push(scorerResult.adverseSelection);
+    }
+
+    if (scorerMarkouts.length > 0) {
+      cFill.conservativeMarkout1sAvg = average(scorerMarkouts.slice(0, Math.ceil(scorerMarkouts.length / 3)));
+    }
+    if (scorerAdverse.length > 0) {
+      cFill.conservativeAdverseSelectionRate = scorerAdverse.filter(v => v).length / scorerAdverse.length;
+    }
+  }
+
   const wasPredictiveWin = result.direction !== null && filledSides.some(side => side === result.direction);
   const hadWrongDirectionalFill = result.direction !== null && filledSides.some(side => side !== result.direction);
 
@@ -327,6 +471,7 @@ function deriveResultFromEvents(
       unavailableCount: markoutSummary.unavailableCount,
       unavailableReasons: markoutSummary.unavailableReasons,
     },
+    conservativeFill: cFill,
   };
 
   if (result.counts.blocked > 0 && result.counts.fills === 0) result.verdict = "blocked";
@@ -397,6 +542,17 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
       const markoutUnavailableCount = completed.reduce((sum, run) => sum + run.execution.markouts.unavailableCount, 0);
       const avgTurnover = average(completed.map(run => run.execution.turnover));
 
+      const noFillCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.no_fill ?? 0), 0);
+      const touchOnlyCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.touch_only ?? 0), 0);
+      const probableFillCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.probable_fill ?? 0), 0);
+      const tradeThroughFillCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.trade_through_fill ?? 0), 0);
+      const unknownInsufficientDataCount = items.reduce((sum, run) => sum + (run.execution.conservativeFill.conservativeFillVerdictCounts.unknown_insufficient_data ?? 0), 0);
+      const usableEvidenceRate = average(completed.map(run => run.execution.conservativeFill.conservativeFillEvidenceAvailable ? 1 : 0));
+      const avgCmarkout1s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout1sAvg));
+      const avgCmarkout5s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout5sAvg));
+      const avgCmarkout30s = average(completed.map(run => run.execution.conservativeFill.conservativeMarkout30sAvg));
+      const adverseSelectionRate = average(completed.map(run => run.execution.conservativeFill.conservativeAdverseSelectionRate));
+
       const tradeRate = completed.length > 0 ? tradeCount / completed.length : null;
       const score = scoreStrategy({
         totalPnl,
@@ -446,6 +602,18 @@ function summarizeByStrategy(runs: StrategyLabRunResult[]): StrategyLabVariantSu
         markoutSampleCount,
         markoutUnavailableCount,
         avgTurnover,
+        conservativeFill: {
+          noFillCount,
+          touchOnlyCount,
+          probableFillCount,
+          tradeThroughFillCount,
+          unknownInsufficientDataCount,
+          usableEvidenceRate,
+          avgMarkout1s: avgCmarkout1s,
+          avgMarkout5s: avgCmarkout5s,
+          avgMarkout30s: avgCmarkout30s,
+          adverseSelectionRate,
+        },
         score,
       };
     })
@@ -539,6 +707,18 @@ function cloneBatch(batch: StrategyLabBatch): StrategyLabBatch {
   return structuredClone(batch);
 }
 
+function loadL2Events(path: string): any[] {
+  try {
+    const content = readFileSync(path, "utf-8");
+    return content.split("\n")
+      .filter(line => line.trim().length > 0)
+      .map(line => JSON.parse(line));
+  } catch (e) {
+    console.error(`Failed to load L2 events from ${path}:`, e);
+    return [];
+  }
+}
+
 export class StrategyLabBatchManager {
   private batches = new Map<string, StrategyLabBatch>();
   private cancelRequested = new Set<string>();
@@ -613,7 +793,8 @@ export class StrategyLabBatchManager {
       progress: { totalRuns, completedRuns: 0 },
       runs,
       summary: emptySummary(totalRuns),
-    };
+      l2Files: request.l2Files,
+    } as any;
     this.batches.set(batch.id, batch);
 
     setTimeout(() => {
@@ -649,7 +830,7 @@ export class StrategyLabBatchManager {
   }
 
   private async runBatch(batchId: string): Promise<void> {
-    const batch = this.batches.get(batchId);
+    const batch = this.batches.get(batchId) as any;
     if (!batch || batch.state === "canceled") return;
 
     batch.state = "running";
@@ -682,7 +863,9 @@ export class StrategyLabBatchManager {
         await new Promise(resolve => setTimeout(resolve, 0));
 
         if ((run.status as StrategyLabRunStatus) !== "canceled") {
-          Object.assign(run, deriveResultFromEvents(run, sink.events, replayReferences));
+          const l2File = batch.l2Files?.[run.file];
+          const l2Events = l2File ? loadL2Events(l2File) : [];
+          Object.assign(run, deriveResultFromEvents(run, sink.events, replayReferences, l2Events));
         }
       } catch (error) {
         if ((run.status as StrategyLabRunStatus) !== "canceled") {
@@ -692,7 +875,7 @@ export class StrategyLabBatchManager {
         }
       } finally {
         this.currentBots.delete(batchId);
-        batch.progress.completedRuns = batch.runs.filter(item => item.status !== "queued" && item.status !== "running").length;
+        batch.progress.completedRuns = batch.runs.filter((item: StrategyLabRunResult) => item.status !== "queued" && item.status !== "running").length;
         batch.summary = recomputeSummary(batch);
         batch.updatedAtMs = Date.now();
         await new Promise(resolve => setImmediate(resolve));
@@ -700,7 +883,7 @@ export class StrategyLabBatchManager {
     }
 
     if ((batch.state as StrategyLabBatchState) !== "canceled") {
-      batch.state = batch.runs.some(run => run.status === "failed") ? "failed" : "completed";
+      batch.state = batch.runs.some((run: StrategyLabRunResult) => run.status === "failed") ? "failed" : "completed";
       batch.progress.completedRuns = batch.runs.length;
       batch.summary = recomputeSummary(batch);
       batch.updatedAtMs = Date.now();

@@ -60,6 +60,17 @@ type ExecutionQualitySummary = {
         thirtySecond: number | null;
         settlement: number | null;
     };
+    conservativeFill: {
+        conservativeFillEvidenceAvailable: boolean;
+        conservativeFillEvidenceSource: "raw_l2_event_store" | "unavailable";
+        conservativeFillVerdictCounts: Record<string, number>;
+        conservativeFillUnavailableReasons: Record<string, number>;
+        conservativeMarkout1sAvg: number | null;
+        conservativeMarkout5sAvg: number | null;
+        conservativeMarkout30sAvg: number | null;
+        conservativeAdverseSelectionRate: number | null;
+        conservativeFillWarning?: string;
+    };
 };
 
 type StrategyVariant = {
@@ -98,6 +109,18 @@ type StrategyRank = {
     avgCancelRate?: number | null;
     avgSettlementMarkout?: number | null;
     avgTurnover?: number | null;
+    conservativeFill?: {
+        noFillCount: number;
+        touchOnlyCount: number;
+        probableFillCount: number;
+        tradeThroughFillCount: number;
+        unknownInsufficientDataCount: number;
+        usableEvidenceRate: number | null;
+        avgMarkout1s: number | null;
+        avgMarkout5s: number | null;
+        avgMarkout30s: number | null;
+        adverseSelectionRate: number | null;
+    };
     score: number;
     };
 type StrategyRecommendation = {
@@ -488,6 +511,7 @@ export default function StrategyLab() {
                                             <th className="text-right py-2 pr-3">Brier</th>
                                             <th className="text-right py-2 pr-3">LogLoss</th>
                                             <th className="text-right py-2 pr-3">Fill</th>
+                                            <th className="text-right py-2 pr-3">Fill Evidence</th>
                                             <th className="text-right py-2 pr-3">Markout</th>
                                             <th className="text-right py-2 pr-3">Trade</th>
                                             <th className="text-right py-2 pr-3">Problems</th>
@@ -503,6 +527,9 @@ export default function StrategyLab() {
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-300">{rank.brierScore?.toFixed(4) ?? '---'}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-400">{rank.logLoss?.toFixed(4) ?? '---'}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.avgFillRate)}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-amber-300" title={`Evidence Available: ${percent(rank.conservativeFill?.usableEvidenceRate)}. Trade-thru: ${rank.conservativeFill?.tradeThroughFillCount}, Probable: ${rank.conservativeFill?.probableFillCount}, Touch: ${rank.conservativeFill?.touchOnlyCount}, No-fill: ${rank.conservativeFill?.noFillCount}`}>
+                                                    {rank.conservativeFill?.tradeThroughFillCount ? `TT:${rank.conservativeFill.tradeThroughFillCount}` : (rank.conservativeFill?.usableEvidenceRate ? percent(rank.conservativeFill.usableEvidenceRate) : '---')}
+                                                </td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(rank.avgSettlementMarkout ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(rank.avgSettlementMarkout)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(rank.tradeRate)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{rank.problems}</td>
@@ -557,7 +584,7 @@ export default function StrategyLab() {
                                             <th className="text-left py-2 pr-3">Verdict</th>
                                             <th className="text-right py-2 pr-3">PnL</th>
                                             <th className="text-right py-2 pr-3">Brier</th>
-                                            <th className="text-right py-2 pr-3">Fill</th>
+                                            <th className="text-right py-2 pr-3">Fill Evidence</th>
                                             <th className="text-right py-2 pr-3">Markout</th>
                                             <th className="text-right py-2 pr-3">Fills</th>
                                             <th className="text-right py-2 pr-3">Blocked</th>
@@ -579,7 +606,9 @@ export default function StrategyLab() {
                                                 <td className={`py-2 pr-3 font-bold uppercase ${verdictClass(run.verdict)}`}>{run.verdict ?? '---'}</td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(run.pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(run.pnl)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-sky-300">{run.brierScore?.toFixed(4) ?? '---'}</td>
-                                                <td className="py-2 pr-3 text-right font-mono text-slate-300">{percent(run.execution?.fillRate)}</td>
+                                                <td className="py-2 pr-3 text-right font-mono text-amber-300" title={`Source: ${run.execution?.conservativeFill.conservativeFillEvidenceSource}. ${run.execution?.conservativeFill.conservativeFillWarning ?? ''}`}>
+                                                    {run.execution?.conservativeFill.conservativeFillEvidenceAvailable ? 'REAL' : 'NONE'}
+                                                </td>
                                                 <td className={`py-2 pr-3 text-right font-mono ${(run.execution?.markouts.settlement ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{money(run.execution?.markouts.settlement)}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.fills}</td>
                                                 <td className="py-2 pr-3 text-right font-mono text-slate-300">{run.counts.blocked}</td>
