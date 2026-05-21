@@ -2,13 +2,20 @@ import { readFileSync, existsSync } from "fs";
 import { type PairManifest } from "./pair-manifest.ts";
 import { StrategyLabBatchManager } from "../strategy-lab.ts";
 
+export interface PairValidationOptions {
+  metadata?: Partial<PairManifest>;
+  testStrategyLabVerdict?: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed";
+  testStrategyLabError?: string;
+}
+
 export async function validatePair(
   slug: string,
   replayLogPath: string,
   rawL2LogPath: string,
   strategy: string,
-  metadata: Partial<PairManifest> = {}
+  options: PairValidationOptions = {}
 ): Promise<PairManifest> {
+  const metadata = options.metadata ?? {};
   const parseErrors: string[] = [];
   const validationErrors: string[] = [];
   const validationWarnings: string[] = [];
@@ -143,58 +150,67 @@ export async function validatePair(
     }
   }
 
-  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed" | "unknown" = "failed";
+  let strategyLabEvidenceVerdict: "usable" | "unavailable_no_fills" | "unavailable_missing_mapping" | "unavailable_missing_l2" | "failed" = "failed";
 
   if (validationErrors.length === 0 && parseErrors.length === 0) {
-    try {
-      const manager = new StrategyLabBatchManager();
-      const batch = await manager.createBatch({
-        strategies: [strategy],
-        files: [replayLogPath],
-        l2Files: { [replayLogPath]: rawL2LogPath }
-      });
-
-      // Wait for batch to complete
-      let waitLimit = 600; // 60 seconds max
-      let finishedBatch = manager.getBatch(batch.id);
-      while (finishedBatch && (finishedBatch.state === "running" || finishedBatch.state === "queued") && waitLimit > 0) {
-        await new Promise(r => setTimeout(r, 100));
-        finishedBatch = manager.getBatch(batch.id);
-        waitLimit--;
-      }
-
-      if (finishedBatch && finishedBatch.state === "completed") {
-        const run = finishedBatch.runs[0];
-        if (run && run.status === "completed") {
-          const cFill = run.execution.conservativeFill;
-          if (!cFill.conservativeFillEvidenceAvailable) {
-            strategyLabEvidenceVerdict = "unavailable_missing_l2";
-          } else if (cFill.eligibleFillCount === 0) {
-            strategyLabEvidenceVerdict = "unavailable_no_fills";
-          } else if (cFill.conservativeFillUnavailableReasons.unmatched_intent_id || 
-                     cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping || 
-                     cFill.conservativeFillUnavailableReasons.missing_intent_mapping) {
-            strategyLabEvidenceVerdict = "unavailable_missing_mapping";
-            validationWarnings.push("Fills occurred but mapping was incomplete or ambiguous.");
-          } else if (cFill.usableEvidenceCount > 0) {
-            strategyLabEvidenceVerdict = "usable";
-          } else {
-            strategyLabEvidenceVerdict = "usable";
-          }
-        } else if (run && run.status === "failed") {
-          // @ts-ignore - we don't have full type definition but it might have an error property
-          validationErrors.push(`Run failed: ${run.error || run.execution?.error || "unknown"}`);
-        }
+    if (options.testStrategyLabVerdict || options.testStrategyLabError) {
+      if (options.testStrategyLabError) {
+        validationErrors.push(`Run failed: ${options.testStrategyLabError}`);
+        strategyLabEvidenceVerdict = "failed";
       } else {
-        validationErrors.push(`Strategy Lab batch failed or timed out. State: ${finishedBatch ? finishedBatch.state : "missing"}`);
+        strategyLabEvidenceVerdict = options.testStrategyLabVerdict!;
       }
-    } catch (e: any) {
-      validationErrors.push(`Strategy Lab validation threw: ${e.message}`);
+    } else {
+      try {
+        const manager = new StrategyLabBatchManager();
+        const batch = await manager.createBatch({
+          strategies: [strategy],
+          files: [replayLogPath],
+          l2Files: { [replayLogPath]: rawL2LogPath }
+        });
+
+        // Wait for batch to complete
+        let waitLimit = 600; // 60 seconds max
+        let finishedBatch = manager.getBatch(batch.id);
+        while (finishedBatch && (finishedBatch.state === "running" || finishedBatch.state === "queued") && waitLimit > 0) {
+          await new Promise(r => setTimeout(r, 100));
+          finishedBatch = manager.getBatch(batch.id);
+          waitLimit--;
+        }
+
+        if (finishedBatch && finishedBatch.state === "completed") {
+          const run = finishedBatch.runs[0];
+          if (run && run.status === "completed") {
+            const cFill = run.execution.conservativeFill;
+            if (!cFill.conservativeFillEvidenceAvailable) {
+              strategyLabEvidenceVerdict = "unavailable_missing_l2";
+            } else if (cFill.eligibleFillCount === 0) {
+              strategyLabEvidenceVerdict = "unavailable_no_fills";
+            } else if (cFill.conservativeFillUnavailableReasons.unmatched_intent_id || 
+                       cFill.conservativeFillUnavailableReasons.ambiguous_intent_mapping || 
+                       cFill.conservativeFillUnavailableReasons.missing_intent_mapping) {
+              strategyLabEvidenceVerdict = "unavailable_missing_mapping";
+              validationWarnings.push("Fills occurred but mapping was incomplete or ambiguous.");
+            } else if (cFill.usableEvidenceCount > 0) {
+              strategyLabEvidenceVerdict = "usable";
+            } else {
+              strategyLabEvidenceVerdict = "usable";
+            }
+          } else if (run && run.status === "failed") {
+            // @ts-ignore - we don't have full type definition but it might have an error property
+            validationErrors.push(`Run failed: ${run.error || run.execution?.error || "unknown"}`);
+          }
+        } else {
+          validationErrors.push(`Strategy Lab batch failed or timed out. State: ${finishedBatch ? finishedBatch.state : "missing"}`);
+        }
+      } catch (e: any) {
+        validationErrors.push(`Strategy Lab validation threw: ${e.message}`);
+      }
     }
   }
 
   let pairValidity: "valid" | "invalid" = "valid";
-  if (validationErrors.length > 0 || parseErrors.length > 0 || coverageVerdict === "missing" || coverageVerdict === "unknown") {
+  if (validationErrors.length > 0 || parseErrors.length > 0 || coverageVerdict !== "complete") {
     pairValidity = "invalid";
   }
 

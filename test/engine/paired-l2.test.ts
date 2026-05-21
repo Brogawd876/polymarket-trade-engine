@@ -124,19 +124,55 @@ describe("Pair Validator", () => {
     expect(manifest.coverageVerdict).toBe("complete");
     expect(manifest.coverageLeadMs).toBe(2000 - 1000); // 1000
     expect(manifest.coverageTailMs).toBe(5000 - 4000); // 1000
-    // Still invalid because strategy lab parsing fails on this stub
+    // Still invalid because strategy lab parsing fails on this stub (unless DI used)
     expect(manifest.pairValidity).toBe("invalid");
   });
+  test("valid pair manifest (complete + usable)", async () => {
+    const replayLog = path.join(tmpDir, "complete2.log");
+    const l2Log = path.join(tmpDir, "complete2.ndjson");
+    
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
 
-  test("valid pair manifest (stubbed strategy lab success)", async () => {
-    // Because Strategy Lab will fail on our stub logs, the only way a stub log is "valid" is if we assume it's valid despite SL failing, OR we make a mock log that SL skips. 
-    // Wait, if validationErrors contains "Strategy Lab batch failed", pairValidity becomes "invalid".
-    // We can't easily mock SL in an e2e unit test without a real fixture, but we can check that it correctly tries.
-    // For the sake of "no-fill pair can still be valid", we know if SL ran and returned unavailable_no_fills, it would be valid.
-    // Let's assert that IF SL didn't error, pairValidity would be valid. Since SL WILL error on stubs, we expect "invalid".
-    // The requirement "valid pair manifest" and "no-fill pair can still be valid" applies to real captures, but for tests we can just ensure validation logic is sound.
-    // Let's test what we can.
-    expect(true).toBe(true);
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      testStrategyLabVerdict: "usable"
+    });
+    
+    expect(manifest.coverageVerdict).toBe("complete");
+    expect(manifest.pairValidity).toBe("valid");
+    expect(manifest.strategyLabEvidenceVerdict).toBe("usable");
+  });
+
+  test("valid pair manifest (complete + no fills)", async () => {
+    const replayLog = path.join(tmpDir, "complete3.log");
+    const l2Log = path.join(tmpDir, "complete3.ndjson");
+    
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      testStrategyLabVerdict: "unavailable_no_fills"
+    });
+    
+    expect(manifest.coverageVerdict).toBe("complete");
+    expect(manifest.pairValidity).toBe("valid");
+    expect(manifest.strategyLabEvidenceVerdict).toBe("unavailable_no_fills");
+  });
+
+  test("invalid pair manifest (complete + injected failure)", async () => {
+    const replayLog = path.join(tmpDir, "complete4.log");
+    const l2Log = path.join(tmpDir, "complete4.ndjson");
+    
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      testStrategyLabError: "Simulated SL crash"
+    });
+    
+    expect(manifest.coverageVerdict).toBe("complete");
+    expect(manifest.validationErrors).toContain("Run failed: Simulated SL crash");
+    expect(manifest.pairValidity).toBe("invalid");
   });
 
 });
