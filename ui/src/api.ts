@@ -83,3 +83,23 @@ export async function apiFetch<T>(
     return { data: null, error: `Network error: ${msg}`, status: null };
   }
 }
+
+export async function apiFetchText(
+  path: string,
+  init?: RequestInit,
+): Promise<{ data: string | null; error: string | null; status: number | null }> {
+  const url = `${API_BASE}${path}`;
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (_operatorToken) headers['Authorization'] = `Bearer ${_operatorToken}`;
+
+  try {
+    const res = await fetch(url, { ...init, headers });
+    if (res.ok) return { data: await res.text(), error: null, status: res.status };
+    return { data: null, error: `Error ${res.status}`, status: res.status };
+  } catch (err) {
+    return { data: null, error: String(err), status: null };
+  }
+}
+

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, Search, RefreshCw, ChevronRight, Terminal } from 'lucide-react';
-import { apiFetch, API_BASE } from '../api';
+import { apiFetch, apiFetchText } from '../api';
 
 export default function Logs() {
     const [files, setFiles] = useState<string[]>([]);
@@ -29,11 +29,14 @@ export default function Logs() {
     useEffect(() => {
         if (!selectedFile) return;
         let cancelled = false;
-        fetch(`${API_BASE}/api/operator/logs/${encodeURIComponent(selectedFile)}`)
-            .then(res => res.text())
-            .then(text => {
+        apiFetchText(`/api/operator/logs/${encodeURIComponent(selectedFile)}`)
+            .then(result => {
                 if (!cancelled) {
-                    setContent(text);
+                    if (result.error) {
+                        console.error('Failed to fetch log content', result.error);
+                    } else {
+                        setContent(result.data ?? '');
+                    }
                     setLoading(false);
                 }
             })

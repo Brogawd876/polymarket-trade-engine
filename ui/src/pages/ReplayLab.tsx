@@ -14,8 +14,7 @@ import { useStore, type ExecutionRow } from '../store';
 import { ExecutionBlotterPanel } from '../components/LiveMonitor/ExecutionBlotterPanel';
 import { PriceChartPanel } from '../components/LiveMonitor/PriceChartPanel';
 import { SessionSummaryPanel } from '../components/LiveMonitor/SessionSummaryPanel';
-
-const API_BASE = 'http://127.0.0.1:3000/api/operator';
+import { apiFetch } from '../api';
 
 type ReplayFixture = {
     path: string;
@@ -103,9 +102,9 @@ export default function ReplayLab() {
             setActionState('loading');
             setError(null);
             try {
-                const response = await fetch(`${API_BASE}/replay-fixtures`);
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Unable to load replay fixtures');
+                const response = await apiFetch<any>('/api/operator/replay-fixtures');
+                const data = response.data || {};
+                if (response.error) throw new Error(data.error || response.error || 'Unable to load replay fixtures');
                 if (!Array.isArray(data.files)) throw new Error('Replay fixture response was malformed');
                 if (cancelled) return;
 
@@ -130,9 +129,9 @@ export default function ReplayLab() {
         setActionState('loading');
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/replay-fixtures`);
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Unable to refresh replay fixtures');
+            const response = await apiFetch<any>('/api/operator/replay-fixtures');
+            const data = response.data || {};
+            if (response.error) throw new Error(data.error || response.error || 'Unable to refresh replay fixtures');
             const files = Array.isArray(data.files) ? data.files as ReplayFixture[] : [];
             setFixtures(files);
             if (!files.some(fixture => fixture.path === selectedReplay)) {
@@ -157,13 +156,12 @@ export default function ReplayLab() {
                 file: selectedFixture.path,
                 ...(selectedFixture.strategy ? { strategy: selectedFixture.strategy } : {}),
             };
-            const response = await fetch(`${API_BASE}/replay/start`, {
+            const response = await apiFetch<any>('/api/operator/replay/start', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
-            const data = await response.json();
-            if (!response.ok || !data.success) throw new Error(data.error || 'Replay start failed');
+            const data = response.data || {};
+            if (response.error || !data.success) throw new Error(data.error || response.error || 'Replay start failed');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Replay start failed');
         } finally {
@@ -175,9 +173,9 @@ export default function ReplayLab() {
         setActionState('stopping');
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/session/stop`, { method: 'POST' });
-            const data = await response.json();
-            if (!response.ok || !data.success) throw new Error(data.error || 'Replay stop failed');
+            const response = await apiFetch<any>('/api/operator/session/stop', { method: 'POST' });
+            const data = response.data || {};
+            if (response.error || !data.success) throw new Error(data.error || response.error || 'Replay stop failed');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Replay stop failed');
         } finally {

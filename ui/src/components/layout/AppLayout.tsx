@@ -26,26 +26,26 @@ export function AppLayout() {
         : bootInfo?.mode || operatorStatus?.engineStatus?.mode || 'UNKNOWN';
 
     return (
-        <div className="flex h-screen w-full bg-slate-900 text-slate-100 overflow-hidden">
+        <div className="flex h-screen w-full bg-transparent text-slate-100 overflow-hidden">
             {/* Sidebar */}
-            <aside className="w-64 bg-slate-800 border-r border-slate-700 flex flex-col">
-                <div className="p-4 border-b border-slate-700">
-                    <h1 className="text-xl font-bold text-emerald-500 tracking-tight">Operator Deck</h1>        
+            <aside className="w-64 glass-panel border-r border-slate-700/50 flex flex-col z-10 relative">
+                <div className="p-4 border-b border-slate-700/50">
+                    <h1 className="text-xl font-bold neon-text-emerald tracking-tight">Operator Deck</h1>        
                     <div className="flex items-center mt-2 space-x-2 text-xs">
-                        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`} />
-                        <span className="text-slate-400">{isConnected ? 'Connected' : 'Disconnected'}</span>    
+                        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-red-500 shadow-[0_0_8px_rgba(248,113,113,0.8)] animate-pulse'}`} />
+                        <span className="text-slate-400 font-medium">{isConnected ? 'Connected' : 'Disconnected'}</span>    
                     </div>
                 </div>
-                <nav className="flex-1 p-4 space-y-1">
+                <nav className="flex-1 p-4 space-y-1.5">
                     {navItems.map((item) => (
                         <NavLink
                             key={item.path}
                             to={item.path}
                             className={({ isActive }) =>
-                                `flex items-center space-x-3 px-3 py-2 rounded-md transition-colors ${
+                                `flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-all duration-300 ${
                                     isActive
-                                        ? 'bg-emerald-500/10 text-emerald-400'
-                                        : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
+                                        ? 'bg-emerald-500/15 neon-text-emerald border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.05)]'
+                                        : 'text-slate-400 hover:bg-slate-700/30 hover:text-slate-200 hover:translate-x-1'
                                 }`
                             }
                         >
@@ -54,11 +54,11 @@ export function AppLayout() {
                         </NavLink>
                     ))}
                 </nav>
-                <div className="p-4 border-t border-slate-700 text-xs text-slate-500">
+                <div className="p-4 border-t border-slate-700/50 text-xs text-slate-400">
                     {operatorStatus ? (
                         <>
-                            <div>Mode: <span className="text-slate-300 uppercase">{displayMode}</span></div>  
-                            <div>Engine: <span className="text-slate-300">{bootInfo?.version || '0.0.1'}</span></div>
+                            <div>Mode: <span className="neon-text-emerald uppercase font-bold">{displayMode}</span></div>  
+                            <div className="mt-1">Engine: <span className="text-slate-200">{bootInfo?.version || '0.0.1'}</span></div>
                         </>
                     ) : (
                         <div>Engine not identified</div>
@@ -66,7 +66,7 @@ export function AppLayout() {
                 </div>
             </aside>
             {/* Main Content */}
-            <main className="flex-1 overflow-auto bg-slate-900 flex flex-col">
+            <main className="flex-1 overflow-auto bg-transparent flex flex-col relative">
                 {/* Connection / Auth Error Banner */}
                 {connectionError && (
                     <div

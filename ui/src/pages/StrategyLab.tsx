@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, BarChart3, Play, RefreshCw, Square } from 'lucide-react';
 import { useStore } from '../store';
+import { apiFetch } from '../api';
 
-const API_BASE = 'http://127.0.0.1:3000/api/operator';
+
 
 type ReplayFixture = {
     path: string;
@@ -277,13 +278,13 @@ export default function StrategyLab() {
         setError(null);
         try {
             const [strategyResponse, fixtureResponse] = await Promise.all([
-                fetch(`${API_BASE}/strategy-lab/strategies`),
-                fetch(`${API_BASE}/replay-fixtures`),
+                apiFetch<any>('/api/operator/strategy-lab/strategies'),
+                apiFetch<any>('/api/operator/replay-fixtures'),
             ]);
-            const strategyData = await strategyResponse.json();
-            const fixtureData = await fixtureResponse.json();
-            if (!strategyResponse.ok) throw new Error(strategyData.error || 'Unable to load strategies');
-            if (!fixtureResponse.ok) throw new Error(fixtureData.error || 'Unable to load replay fixtures');
+            const strategyData = strategyResponse.data || {};
+            const fixtureData = fixtureResponse.data || {};
+            if (strategyResponse.error) throw new Error(strategyData.error || strategyResponse.error || 'Unable to load strategies');
+            if (fixtureResponse.error) throw new Error(fixtureData.error || fixtureResponse.error || 'Unable to load replay fixtures');
 
             const loadedStrategies = Array.isArray(strategyData.strategies) ? strategyData.strategies as string[] : [];
             const loadedVariants = Array.isArray(strategyData.variants)
@@ -319,13 +320,13 @@ export default function StrategyLab() {
         setError(null);
         setBatch(null);
         try {
-            const response = await fetch(`${API_BASE}/strategy-lab/batches`, {
+            const response = await apiFetch<any>('/api/operator/strategy-lab/batches', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ variants: selectedStrategies, files: selectedFiles }),
             });
-            const data = await response.json();
-            if (!response.ok || !data.success) throw new Error(data.error || 'Strategy Lab batch failed to start');
+            const data = response.data || {};
+            if (response.error || !data.success) throw new Error(data.error || response.error || 'Strategy Lab batch failed to start');
             setBatch(data.batch);
             startPolling(data.batchId);
         } catch (err) {
@@ -339,9 +340,9 @@ export default function StrategyLab() {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = setInterval(async () => {
             try {
-                const response = await fetch(`${API_BASE}/strategy-lab/batches/${batchId}`);
-                const data = await response.json();
-                if (!response.ok || !data.success) throw new Error(data.error || 'Unable to poll batch');
+                const response = await apiFetch<any>(`/api/operator/strategy-lab/batches/${batchId}`);
+                const data = response.data || {};
+                if (response.error || !data.success) throw new Error(data.error || response.error || 'Unable to poll batch');
                 setBatch(data.batch);
                 if (!['queued', 'running'].includes(data.batch.state)) {
                     if (pollRef.current) clearInterval(pollRef.current);
@@ -359,9 +360,9 @@ export default function StrategyLab() {
         if (!batch) return;
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/strategy-lab/batches/${batch.id}/cancel`, { method: 'POST' });
-            const data = await response.json();
-            if (!response.ok || !data.success) throw new Error(data.error || 'Unable to cancel batch');
+            const response = await apiFetch<any>(`/api/operator/strategy-lab/batches/${batch.id}/cancel`, { method: 'POST' });
+            const data = response.data || {};
+            if (response.error || !data.success) throw new Error(data.error || response.error || 'Unable to cancel batch');
             setBatch(data.batch);
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;

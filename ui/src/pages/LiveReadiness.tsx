@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Code2, FlaskConical, Lock, Play, RefreshCw, Save, ShieldAlert } from 'lucide-react';
+import { apiFetch } from '../api';
 
-const API_BASE = 'http://127.0.0.1:3000/api/operator';
 
 type StrategyModule = {
     id: string;
@@ -124,15 +124,15 @@ export default function LiveReadiness() {
         setLoading(true);
         try {
             const [moduleResponse, presetResponse, fixtureResponse, evidenceResponse] = await Promise.all([
-                fetch(`${API_BASE}/strategy/modules`),
-                fetch(`${API_BASE}/strategy/presets`),
-                fetch(`${API_BASE}/replay-fixtures`),
-                fetch(`${API_BASE}/strategy/evidence`),
+                apiFetch<any>('/api/operator/strategy/modules'),
+                apiFetch<any>('/api/operator/strategy/presets'),
+                apiFetch<any>('/api/operator/replay-fixtures'),
+                apiFetch<any>('/api/operator/strategy/evidence'),
             ]);
-            const moduleData = await moduleResponse.json();
-            const presetData = await presetResponse.json();
-            const fixtureData = await fixtureResponse.json();
-            const evidenceData = await evidenceResponse.json();
+            const moduleData = moduleResponse.data || {};
+            const presetData = presetResponse.data || {};
+            const fixtureData = fixtureResponse.data || {};
+            const evidenceData = evidenceResponse.data || {};
             const nextModules = moduleData.modules ?? [];
             const nextPresets = presetData.presets ?? [];
             setModules(nextModules);
@@ -148,12 +148,12 @@ export default function LiveReadiness() {
 
     async function validateCustomModule() {
         setValidation(null);
-        const response = await fetch(`${API_BASE}/strategy/modules/validate`, {
+        const response = await apiFetch<any>('/api/operator/strategy/modules/validate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: 'custom-late-entry', label: 'custom late entry', sourceCode }),
         });
-        const data = await response.json();
+        const data = response.data || {};
         setValidation(data.success ? 'Custom module saved as replay-only. Run replay validation before paper use.' : (data.errors ?? ['Validation failed']).join('; '));
         await loadAll();
     }
@@ -166,7 +166,7 @@ export default function LiveReadiness() {
             setMessage('Preset config must be valid JSON.');
             return;
         }
-        const response = await fetch(`${API_BASE}/strategy/presets`, {
+        const response = await apiFetch<any>('/api/operator/strategy/presets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -178,7 +178,7 @@ export default function LiveReadiness() {
                 notes: 'Created from Live Readiness builder.',
             }),
         });
-        const data = await response.json();
+        const data = response.data || {};
         setMessage(data.success ? `Saved preset ${data.preset.label} (${data.preset.configHash})` : data.error);
         await loadAll();
     }
@@ -186,7 +186,7 @@ export default function LiveReadiness() {
     async function runExperiment() {
         if (!selectedPreset || replayable.length === 0) return;
         setMessage(null);
-        const response = await fetch(`${API_BASE}/strategy-lab/experiments`, {
+        const response = await apiFetch<any>('/api/operator/strategy-lab/experiments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -196,7 +196,7 @@ export default function LiveReadiness() {
                 holdoutFiles: holdout.map(fixture => fixture.path),
             }),
         });
-        const data = await response.json();
+        const data = response.data || {};
         if (!data.success) {
             setMessage(data.error);
             return;
@@ -208,8 +208,8 @@ export default function LiveReadiness() {
     function startPolling(id: string) {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = setInterval(async () => {
-            const response = await fetch(`${API_BASE}/strategy-lab/experiments/${id}`);
-            const data = await response.json();
+            const response = await apiFetch<any>(`/api/operator/strategy-lab/experiments/${id}`);
+            const data = response.data || {};
             if (data.success) {
                 setExperiment(data.experiment);
                 if (!['queued', 'running'].includes(data.experiment.state)) {
@@ -222,27 +222,27 @@ export default function LiveReadiness() {
 
     async function applyRecommendation() {
         if (!experiment?.recommendation) return;
-        const response = await fetch(`${API_BASE}/paper-tuning/recommendations/${experiment.recommendation.id}/apply`, { method: 'POST' });
-        const data = await response.json();
+        const response = await apiFetch<any>('/api/operator/paper-tuning/recommendations/${experiment.recommendation.id}/apply', { method: 'POST' });
+        const data = response.data || {};
         setMessage(data.success ? `Applied paper tuning preset ${data.preset.id}` : data.error);
         await loadAll();
     }
 
     async function promotePaperCandidate() {
         if (!selectedPreset) return;
-        const response = await fetch(`${API_BASE}/strategy/presets/${encodeURIComponent(selectedPreset)}/promote-paper-candidate`, { method: 'POST' });
-        const data = await response.json();
+        const response = await apiFetch<any>('/api/operator/strategy/presets/${encodeURIComponent(selectedPreset)}/promote-paper-candidate', { method: 'POST' });
+        const data = response.data || {};
         setMessage(data.success ? `Preset ${data.preset.label} is now a tiny-live candidate.` : data.error);
         await loadAll();
     }
 
     async function unlockTinyLive() {
-        const response = await fetch(`${API_BASE}/operator/tiny-live/unlock`, {
+        const response = await apiFetch<any>('/api/operator/operator/tiny-live/unlock', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ presetId: selectedPreset, operatorAck: true }),
         });
-        const data = await response.json();
+        const data = response.data || {};
         setMessage(data.success ? 'Tiny-live unlocked for this preset with ultra-tiny caps.' : data.error);
         await loadAll();
     }
