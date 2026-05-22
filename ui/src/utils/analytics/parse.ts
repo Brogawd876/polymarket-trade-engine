@@ -26,7 +26,7 @@ export function parseAllJson(text: string): LogEntry[] {
     } else if (c === "}" && --depth === 0 && start !== -1) {
       try {
         results.push(JSON.parse(text.slice(start, i + 1)));
-      } catch {}
+      } catch { /* skip malformed JSON fragments */ }
       start = -1;
     }
   }

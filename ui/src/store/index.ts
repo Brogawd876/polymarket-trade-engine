@@ -8,7 +8,7 @@ interface FeedState {
     lastUpdated: number;
 }
 
-interface MarketState {
+export interface MarketState {
     price: number;
     bid: number | null;
     ask: number | null;
@@ -77,14 +77,36 @@ interface ChartDataPoint {
     value: number;
 }
 
+/** Corpus quality summary from /api/operator/corpus-summary */
+export interface CorpusSummary {
+    validPairs: number;
+    invalidPairs: number;
+    calibrationRecords: number;
+    tradePrintBackedRecords: number;
+    touchOnlyRecords: number;
+    missingLabels: number;
+    missingFeatures: number;
+    readinessDecision: 'READY' | 'BLOCKED' | 'UNKNOWN';
+    blockers: string[];
+    fetchedAt: number;
+}
+
 export interface AppState {
     // Connection State
     isConnected: boolean;
     setConnected: (status: boolean) => void;
 
-    // Backend System Status (from REST /api/status)
+    // Connection / auth error surfaced from useTelemetry
+    connectionError: string | null;
+    setConnectionError: (error: string | null) => void;
+
+    // Backend System Status (from REST /api/operator/status)
     operatorStatus: import('../types/telemetry').OperatorStatus | null;
     setOperatorStatus: (status: import('../types/telemetry').OperatorStatus) => void;
+
+    // Corpus/replay quality summary (from REST /api/operator/corpus-summary)
+    corpusSummary: CorpusSummary | null;
+    setCorpusSummary: (summary: CorpusSummary | null) => void;
 
     // Latest Telemetry State
     bootInfo: { version: string; mode: string; strategy: string } | null;
@@ -101,7 +123,7 @@ export interface AppState {
     roundResolutions: Record<string, RoundResolution>;
     replayProgress: { totalEvents: number; processedEvents: number; isDone: boolean; virtualTimeMs: number } | null;
     decisionSnapshots: DecisionFeatureSnapshot[];
-    
+
     // Chart Series (derived from events)
     priceHistory: Record<string, ChartDataPoint[]>;
 
@@ -109,7 +131,7 @@ export interface AppState {
     processEvent: (event: TelemetryEvent) => void;
     clearEvents: () => void;
     clearAllTelemetry: () => void;
-    }
+}
 
     const MAX_TIMELINE_EVENTS = 100;
     const MAX_CHART_POINTS = 1000;
@@ -124,8 +146,14 @@ export interface AppState {
     isConnected: false,
     setConnected: (isConnected) => set({ isConnected }),
 
+    connectionError: null,
+    setConnectionError: (error) => set({ connectionError: error }),
+
     operatorStatus: null,
     setOperatorStatus: (status) => set({ operatorStatus: status }),
+
+    corpusSummary: null,
+    setCorpusSummary: (summary) => set({ corpusSummary: summary }),
 
     bootInfo: null,
     feeds: {},

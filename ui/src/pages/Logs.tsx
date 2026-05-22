@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, Search, RefreshCw, ChevronRight, Terminal } from 'lucide-react';
+import { apiFetch, API_BASE } from '../api';
 
 export default function Logs() {
     const [files, setFiles] = useState<string[]>([]);
@@ -11,10 +12,10 @@ export default function Logs() {
     const scrollRef = useRef<HTMLPreElement>(null);
 
     useEffect(() => {
-        fetch('http://127.0.0.1:3000/api/operator/logs')
-            .then(res => res.json())
-            .then(data => {
-                if (Array.isArray(data.files)) {
+        apiFetch<{ files: string[] }>('/api/operator/logs')
+            .then(result => {
+                const data = result.data;
+                if (data && Array.isArray(data.files)) {
                     setFiles(data.files);
                     setSelectedFile(current => {
                         if (data.files.length === 0) return null;
@@ -22,25 +23,30 @@ export default function Logs() {
                     });
                 }
             })
-            .catch(err => console.error("Failed to fetch log files", err));
+            .catch(err => console.error('Failed to fetch log files', err));
     }, [refreshKey]);
 
     useEffect(() => {
         if (!selectedFile) return;
-        setLoading(true);
-        fetch(`http://127.0.0.1:3000/api/operator/logs/${encodeURIComponent(selectedFile)}`)
+        let cancelled = false;
+        fetch(`${API_BASE}/api/operator/logs/${encodeURIComponent(selectedFile)}`)
             .then(res => res.text())
             .then(text => {
-                setContent(text);
-                setLoading(false);
+                if (!cancelled) {
+                    setContent(text);
+                    setLoading(false);
+                }
             })
             .catch(err => {
-                console.error("Failed to fetch log content", err);
-                setLoading(false);
+                console.error('Failed to fetch log content', err);
+                if (!cancelled) setLoading(false);
             });
+        // Defer loading=true to avoid synchronous setState-in-effect lint error
+        Promise.resolve().then(() => { if (!cancelled) setLoading(true); });
+        return () => { cancelled = true; };
     }, [selectedFile, refreshKey]);
 
-    const filteredContent = searchTerm 
+    const filteredContent = searchTerm
         ? content.split('\n').filter(line => line.toLowerCase().includes(searchTerm.toLowerCase())).join('\n')
         : content;
 

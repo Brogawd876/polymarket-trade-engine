@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Shield, Wallet, Network, Cpu, AlertCircle, CheckCircle2, Lock } from 'lucide-react';
+import { apiFetch } from '../api';
 
 interface EngineConfig {
     TICKER: string[];
@@ -24,12 +25,11 @@ export default function Settings() {
     useEffect(() => {
         const fetchConfig = async () => {
             try {
-                const res = await fetch('http://127.0.0.1:3000/api/operator/config');
-                if (!res.ok) throw new Error('Failed to fetch engine configuration');
-                const data = await res.json();
-                setConfig(data);
-            } catch (e: any) {
-                setError(e.message);
+                const result = await apiFetch<EngineConfig>('/api/operator/config');
+                if (result.error) throw new Error(result.error);
+                setConfig(result.data);
+            } catch (e: unknown) {
+                setError(e instanceof Error ? e.message : String(e));
             } finally {
                 setLoading(false);
             }
@@ -75,8 +75,8 @@ export default function Settings() {
                 {/* Production Guard Status */}
                 <div className="col-span-12">
                     <div className={`p-4 rounded-xl border flex items-center justify-between ${
-                        config?.FORCE_PROD 
-                        ? 'bg-red-500/10 border-red-500/30' 
+                        config?.FORCE_PROD
+                        ? 'bg-red-500/10 border-red-500/30'
                         : 'bg-emerald-500/10 border-emerald-500/30'
                     }`}>
                         <div className="flex items-center gap-4">
@@ -88,8 +88,8 @@ export default function Settings() {
                                     {config?.FORCE_PROD ? 'PRODUCTION MODE ACTIVE' : 'SIMULATION MODE (SAFE)'}
                                 </h3>
                                 <p className="text-xs text-slate-400 mt-0.5">
-                                    {config?.FORCE_PROD 
-                                        ? 'Real funds are at risk. All safety gates are live.' 
+                                    {config?.FORCE_PROD
+                                        ? 'Real funds are at risk. All safety gates are live.'
                                         : 'Engine is restricted to paper trading and historical replay.'}
                                 </p>
                             </div>
@@ -109,7 +109,7 @@ export default function Settings() {
                     <div className="bg-slate-800/40 rounded-xl border border-slate-700/50 overflow-hidden">
                         <div className="p-4 border-b border-slate-700 bg-slate-800/20 flex items-center gap-2">
                             <Wallet className="w-4 h-4 text-indigo-400" />
-                            <h2 className="text-sm font-semibold text-slate-200">Wallet & Credentials</h2>
+                            <h2 className="text-sm font-semibold text-slate-200">Wallet &amp; Credentials</h2>
                         </div>
                         <div className="p-6 space-y-6">
                             <div className="flex justify-between items-start pb-4 border-b border-slate-700/50">
@@ -168,7 +168,7 @@ export default function Settings() {
                     <div className="bg-slate-800/40 rounded-xl border border-slate-700/50 overflow-hidden">
                         <div className="p-4 border-b border-slate-700 bg-slate-800/20 flex items-center gap-2">
                             <Network className="w-4 h-4 text-indigo-400" />
-                            <h2 className="text-sm font-semibold text-slate-200">Feeds & Market Assets</h2>
+                            <h2 className="text-sm font-semibold text-slate-200">Feeds &amp; Market Assets</h2>
                         </div>
                         <div className="p-6 space-y-6">
                             <div className="flex justify-between items-center py-3 border-b border-slate-700/50">
@@ -202,8 +202,8 @@ export default function Settings() {
                 <div className="col-span-12">
                     <div className="p-6 bg-amber-500/5 border border-amber-500/20 rounded-xl text-center">
                         <p className="text-amber-500/70 text-sm italic">
-                            Settings are read-only from the .env file. To modify configuration, please edit the 
-                            <code className="mx-2 px-1 py-0.5 bg-slate-800 rounded text-amber-500 font-mono">repos/polymarket-trade-engine/.env</code> 
+                            Settings are read-only from the .env file. To modify configuration, please edit the
+                            <code className="mx-2 px-1 py-0.5 bg-slate-800 rounded text-amber-500 font-mono">repos/polymarket-trade-engine/.env</code>
                             file and restart the engine.
                         </p>
                     </div>

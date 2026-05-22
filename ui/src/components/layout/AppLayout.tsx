@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Activity, BarChart2, Settings, FileText, PlayCircle, ShieldCheck } from 'lucide-react';
+import { Activity, BarChart2, Settings, FileText, PlayCircle, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { useTelemetry } from '../../hooks/useTelemetry';
 import { useStore } from '../../store';
 
@@ -8,6 +8,7 @@ export function AppLayout() {
     const isConnected = useStore((state) => state.isConnected);
     const bootInfo = useStore((state) => state.bootInfo);
     const operatorStatus = useStore((state) => state.operatorStatus);
+    const connectionError = useStore((state) => state.connectionError);
 
     const navItems = [
         { path: '/', label: 'Live Monitor', icon: Activity },
@@ -65,8 +66,21 @@ export function AppLayout() {
                 </div>
             </aside>
             {/* Main Content */}
-            <main className="flex-1 overflow-auto bg-slate-900">
-                <Outlet />
+            <main className="flex-1 overflow-auto bg-slate-900 flex flex-col">
+                {/* Connection / Auth Error Banner */}
+                {connectionError && (
+                    <div
+                        role="alert"
+                        className="flex items-center gap-3 px-4 py-2.5 bg-amber-900/40 border-b border-amber-700/60 text-amber-300 text-sm"
+                    >
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span className="font-medium">Connection error:</span>
+                        <span className="opacity-90">{connectionError}</span>
+                    </div>
+                )}
+                <div className="flex-1 overflow-auto">
+                    <Outlet />
+                </div>
             </main>
         </div>
     );

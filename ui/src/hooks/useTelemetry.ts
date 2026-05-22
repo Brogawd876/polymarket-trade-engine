@@ -1,13 +1,20 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import type { TelemetryEvent } from '../types/telemetry';
+import { apiFetch, WS_URL } from '../api';
 
-const WEBSOCKET_URL = "ws://127.0.0.1:3000/telemetry";
-const REST_STATUS_URL = "http://127.0.0.1:3000/api/operator/status";
 const STATUS_POLL_INTERVAL_MS = 2000;
 
 export function useTelemetry() {
-    const { processEvent, setConnected, setOperatorStatus, isConnected, clearAllTelemetry } = useStore();
+    const {
+        processEvent,
+        setConnected,
+        setOperatorStatus,
+        setConnectionError,
+        isConnected,
+        clearAllTelemetry,
+    } = useStore();
+
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -18,44 +25,54 @@ export function useTelemetry() {
         let isMounted = true;
 
         const fetchStatus = async () => {
-            try {
-                const res = await fetch(REST_STATUS_URL);
-                if (res.ok) {
-                    const status = await res.json();
-                    if (isMounted) {
-                        // Detect transition to idle and clear telemetry
-                        if (
-                            lastSessionState.current &&
-                            lastSessionState.current !== 'idle' &&
-                            status.sessionState === 'idle' &&
-                            lastEngineMode.current !== 'replay'
-                        ) {
-                            console.log("[Telemetry] Session ended, clearing telemetry state.");
-                            clearAllTelemetry();
-                        }
-                        lastSessionState.current = status.sessionState;
-                        lastEngineMode.current = status.engineMode;
-                        setOperatorStatus(status);
-                    }
-                }
-            } catch (err) {
-                console.error("Failed to fetch operator status:", err);
-            }
-        };
+            const result = await apiFetch<import('../types/telemetry').OperatorStatus>(
+                '/api/operator/status',
+            );
+            if (!isMounted) return;
 
-        const connect = () => {
-            if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+            if (result.error) {
+                // Auth error (401/403) or network failure — show prominently
+                setConnectionError(result.error);
                 return;
             }
 
-            console.log(`[Telemetry] Connecting to ${WEBSOCKET_URL}...`);
-            const ws = new WebSocket(WEBSOCKET_URL);
+            // Clear any previous error on success
+            setConnectionError(null);
+
+            const status = result.data!;
+            // Detect transition to idle and clear telemetry
+            if (
+                lastSessionState.current &&
+                lastSessionState.current !== 'idle' &&
+                status.sessionState === 'idle' &&
+                lastEngineMode.current !== 'replay'
+            ) {
+                console.log('[Telemetry] Session ended, clearing telemetry state.');
+                clearAllTelemetry();
+            }
+            lastSessionState.current = status.sessionState;
+            lastEngineMode.current = status.engineMode;
+            setOperatorStatus(status);
+        };
+
+        const connect = () => {
+            if (
+                wsRef.current &&
+                (wsRef.current.readyState === WebSocket.OPEN ||
+                    wsRef.current.readyState === WebSocket.CONNECTING)
+            ) {
+                return;
+            }
+
+            console.log(`[Telemetry] Connecting to ${WS_URL}...`);
+            const ws = new WebSocket(WS_URL);
             wsRef.current = ws;
 
             ws.onopen = () => {
-                console.log("[Telemetry] Connected.");
+                console.log('[Telemetry] Connected.');
                 if (isMounted) {
                     setConnected(true);
+                    setConnectionError(null);
                     fetchStatus(); // Fetch full status on connect
                 }
             };
@@ -65,22 +82,25 @@ export function useTelemetry() {
                     const data = JSON.parse(event.data) as TelemetryEvent;
                     if (isMounted) processEvent(data);
                 } catch (err) {
-                    console.error("[Telemetry] Failed to parse message:", err);
+                    console.error('[Telemetry] Failed to parse message:', err);
                 }
             };
 
             ws.onclose = () => {
-                console.log("[Telemetry] Disconnected.");
+                console.log('[Telemetry] Disconnected.');
                 if (isMounted) {
                     setConnected(false);
+                    setConnectionError('WebSocket disconnected — reconnecting…');
                     // Schedule reconnect
-                    reconnectTimeoutRef.current = setTimeout(connect, 3000);
+                    reconnectTimeoutRef.current = setTimeout(() => {
+                        if (isMounted) connect();
+                    }, 3000);
                 }
                 wsRef.current = null;
             };
 
-            ws.onerror = (err) => {
-                console.error("[Telemetry] WebSocket error:", err);
+            ws.onerror = () => {
+                // Errors are followed by close — just close to trigger reconnect
                 ws.close();
             };
         };
@@ -99,7 +119,8 @@ export function useTelemetry() {
                 wsRef.current = null;
             }
         };
-    }, [processEvent, setConnected, setOperatorStatus, clearAllTelemetry]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return { isConnected };
 }

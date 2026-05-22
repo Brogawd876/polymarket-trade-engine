@@ -15,7 +15,9 @@ import {
     Shield,
     Lock as LockIcon
 } from 'lucide-react';
-const API_BASE = "http://127.0.0.1:3000/api/operator";
+import { apiFetch } from '../api';
+
+type EngineConfig = Record<string, string | number | boolean | string[]>;
 
 type ReplayFixture = {
     path: string;
@@ -52,34 +54,31 @@ export default function ControlCenter() {
     const [simRounds, setSimRounds] = useState<number>(0);
     const [strategy, setStrategy] = useState<string>('simulation');
     const [isResetting, setIsResetting] = useState(false);
-    const [engineConfig, setEngineConfig] = useState<any>(null);
+    const [engineConfig, setEngineConfig] = useState<EngineConfig | null>(null);
     const [tinyLiveArmed, setTinyLiveArmed] = useState(false);
 
     useEffect(() => {
-        fetch(`${API_BASE}/config`)
-            .then(res => res.json())
-            .then(data => setEngineConfig(data))
-            .catch(err => console.error("Failed to fetch engine config", err));
+        apiFetch<EngineConfig>('/api/operator/config')
+            .then(result => { if (result.data) setEngineConfig(result.data); })
+            .catch(err => console.error('Failed to fetch engine config', err));
 
-        fetch(`${API_BASE}/replay-fixtures`)
-            .then(res => res.json())
-            .then(data => {
+        apiFetch<{ files: ReplayFixture[] }>('/api/operator/replay-fixtures')
+            .then(result => {
+                const data = result.data;
                 if (data && Array.isArray(data.files)) {
-                    const files = data.files as ReplayFixture[];
+                    const files = data.files;
                     setFixtures(files);
-                    
-                    // Default to the first valid replayable fixture
                     const defaultFile = files.find(f => f.replayable);
                     if (defaultFile && !selectedReplay) setSelectedReplay(defaultFile.path);
                 }
             })
-            .catch(err => console.error("Failed to fetch replay fixtures", err));
+            .catch(err => console.error('Failed to fetch replay fixtures', err));
 
-        fetch(`${API_BASE}/strategy-lab/strategies`)
-            .then(res => res.json())
-            .then(data => {
-                const loaded = Array.isArray(data.variants)
-                    ? data.variants as StrategyVariant[]
+        apiFetch<{ variants?: StrategyVariant[] }>('/api/operator/strategy-lab/strategies')
+            .then(result => {
+                const data = result.data;
+                const loaded = Array.isArray(data?.variants)
+                    ? data!.variants as StrategyVariant[]
                     : [
                         { id: 'simulation', label: 'simulation', strategy: 'simulation', description: '', paperEligible: true },
                         { id: 'late-entry', label: 'late-entry', strategy: 'late-entry', description: '', paperEligible: false },
@@ -89,36 +88,36 @@ export default function ControlCenter() {
                     setStrategy(loaded.find(item => item.paperEligible)?.id ?? loaded[0]?.id ?? 'simulation');
                 }
             })
-            .catch(err => console.error("Failed to fetch strategy variants", err));
+            .catch(err => console.error('Failed to fetch strategy variants', err));
 
-        fetch(`${API_BASE}/strategy/presets`)
-            .then(res => res.json())
-            .then(data => {
-                if (Array.isArray(data.presets)) {
+        apiFetch<{ presets?: StrategyPreset[] }>('/api/operator/strategy/presets')
+            .then(result => {
+                const data = result.data;
+                if (data && Array.isArray(data.presets)) {
                     setStrategyPresets(data.presets);
                     if (data.presets.some((preset: StrategyPreset) => preset.id === strategy)) return;
                     const paper = data.presets.find((preset: StrategyPreset) => preset.riskProfile === 'paper');
                     if (paper) setStrategy(paper.id);
                 }
             })
-            .catch(err => console.error("Failed to fetch strategy presets", err));
+            .catch(err => console.error('Failed to fetch strategy presets', err));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const handleStartSim = async () => {
         try {
-            const res = await fetch(`${API_BASE}/simulation/start`, {
+            const result = await apiFetch<{ success: boolean; error?: string }>('/api/operator/simulation/start', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     strategy,
                     presetId: strategyPresets.some(preset => preset.id === strategy) ? strategy : undefined,
                     rounds: simRounds > 0 ? simRounds : undefined
                 })
             });
-            const data = await res.json();
-            if (!data.success) alert(`Start failed: ${data.error}`);
-        } catch (e: any) {
-            alert(`Start failed: ${e.message}`);
+            if (result.data && !result.data.success) alert(`Start failed: ${result.data.error}`);
+            if (result.error) alert(`Start failed: ${result.error}`);
+        } catch (e: unknown) {
+            alert(`Start failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     };
 
@@ -130,42 +129,39 @@ export default function ControlCenter() {
         }
 
         try {
-            const res = await fetch(`${API_BASE}/replay/start`, {
+            const result = await apiFetch<{ success: boolean; error?: string }>('/api/operator/replay/start', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ file: selectedReplay })
             });
-            const data = await res.json();
-            if (!data.success) alert(`Replay start failed: ${data.error}`);
-        } catch (e: any) {
-            alert(`Replay start failed: ${e.message}`);
+            if (result.data && !result.data.success) alert(`Replay start failed: ${result.data.error}`);
+            if (result.error) alert(`Replay start failed: ${result.error}`);
+        } catch (e: unknown) {
+            alert(`Replay start failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     };
 
     const handleStop = async () => {
         try {
-            await fetch(`${API_BASE}/session/stop`, { method: 'POST' });
-        } catch (e: any) {
-            alert(`Stop failed: ${e.message}`);
+            await apiFetch('/api/operator/session/stop', { method: 'POST' });
+        } catch (e: unknown) {
+            alert(`Stop failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     };
 
     const handleReset = async () => {
-        if (!confirm("Are you sure you want to clear the paper simulation state? This will reset your paper balance to $50.")) return;
+        if (!confirm('Are you sure you want to clear the paper simulation state? This will reset your paper balance to $50.')) return;
         setIsResetting(true);
         try {
-            const res = await fetch(`${API_BASE}/simulation/reset-state`, { method: 'POST' });
-            const data = await res.json();
-            if (!data.success) {
-                alert(`Reset failed: ${data.error}`);
-            } else {
+            const result = await apiFetch<{ success: boolean; error?: string }>('/api/operator/simulation/reset-state', { method: 'POST' });
+            if (result.data && !result.data.success) {
+                alert(`Reset failed: ${result.data.error}`);
+            } else if (!result.error) {
                 // Refresh status
-                const statusRes = await fetch("http://127.0.0.1:3000/api/operator/status");
-                const statusData = await statusRes.json();
-                useStore.getState().setOperatorStatus(statusData);
+                const statusResult = await apiFetch<import('../types/telemetry').OperatorStatus>('/api/operator/status');
+                if (statusResult.data) useStore.getState().setOperatorStatus(statusResult.data);
             }
-        } catch (e: any) {
-            alert(`Reset failed: ${e.message}`);
+        } catch (e: unknown) {
+            alert(`Reset failed: ${e instanceof Error ? e.message : String(e)}`);
         } finally {
             setIsResetting(false);
         }

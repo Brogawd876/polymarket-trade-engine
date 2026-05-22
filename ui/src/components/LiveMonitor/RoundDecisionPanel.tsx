@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useStore } from '../../store';
+import { useStore, type MarketState } from '../../store';
+import type { DecisionFeatureSnapshot } from '../../types/telemetry';
 
 function formatCurrency(value: number | null | undefined, digits = 2) {
     return value == null ? '---' : `$${value.toFixed(digits)}`;
@@ -12,30 +13,30 @@ function formatCountdown(ms: number) {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-const MetricsRow = React.memo(({ market, latestSnapshot }: { market: any, latestSnapshot: any }) => {
+const MetricsRow = React.memo(({ market, latestSnapshot }: { market: MarketState | null, latestSnapshot: DecisionFeatureSnapshot | null }) => {
     return (
         <div className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 <div>
                     <span className="text-slate-500 block text-xs">BTC Now</span>
-                    <span className="text-slate-200 font-semibold">{formatCurrency(market.price)}</span>
+                    <span className="text-slate-200 font-semibold">{formatCurrency(market?.price)}</span>
                 </div>
                 <div>
                     <span className="text-slate-500 block text-xs">Price To Beat</span>
                     <span className="text-slate-200 font-semibold">
-                        {market.priceToBeat == null ? 'Waiting for open' : formatCurrency(market.priceToBeat)}
+                        {market?.priceToBeat == null ? 'Waiting for open' : formatCurrency(market.priceToBeat)}
                     </span>
                 </div>
                 <div>
                     <span className="text-slate-500 block text-xs">P(UP) Fair Value</span>
                     <span className="text-sky-400 font-semibold">
-                        {market.probabilityUp != null ? `${(market.probabilityUp * 100).toFixed(1)}%` : '---'}
+                        {market?.probabilityUp != null ? `${(market.probabilityUp * 100).toFixed(1)}%` : '---'}
                     </span>
                 </div>
                 <div>
                     <span className="text-slate-500 block text-xs">Realized Vol (σ)</span>
                     <span className="text-slate-200 font-semibold">
-                        {market.sigma != null ? `${(market.sigma * 100).toFixed(1)}%` : '---'}
+                        {market?.sigma != null ? `${(market.sigma * 100).toFixed(1)}%` : '---'}
                     </span>
                 </div>
             </div>
@@ -43,8 +44,8 @@ const MetricsRow = React.memo(({ market, latestSnapshot }: { market: any, latest
             <div className="pt-2 border-t border-slate-700/50 grid grid-cols-3 gap-3 text-xs">
                 <div>
                     <span className="text-slate-500 block">Gap</span>
-                    <span className={market.gap != null && market.gap >= 0 ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
-                        {market.gap == null ? '---' : `${market.gap >= 0 ? '+' : ''}${formatCurrency(market.gap)}`}
+                    <span className={market?.gap != null && market.gap >= 0 ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
+                        {market?.gap == null ? '---' : `${market.gap >= 0 ? '+' : ''}${formatCurrency(market.gap)}`}
                     </span>
                 </div>
                 <div>
@@ -69,7 +70,7 @@ export function RoundDecisionPanel() {
     const lifecycleStates = useStore(state => state.lifecycleStates);
     const roundResolutions = useStore(state => state.roundResolutions);
     const decisionSnapshots = useStore(state => state.decisionSnapshots);
-    const [nowMs, setNowMs] = useState(Date.now());
+    const [nowMs, setNowMs] = useState(() => Date.now());
 
     useEffect(() => {
         const handle = setInterval(() => setNowMs(Date.now()), 250);
@@ -165,7 +166,7 @@ export function RoundDecisionPanel() {
                         </div>
                     </div>
 
-                    <MetricsRow market={market} latestSnapshot={latestSnapshot} />
+                    {latestSnapshot != null && market != null && <MetricsRow market={market} latestSnapshot={latestSnapshot} />}
                 </div>
             ) : (
                 <div className="text-slate-500 text-sm italic">Waiting for market ticks...</div>

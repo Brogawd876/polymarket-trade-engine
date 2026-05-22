@@ -46,5 +46,17 @@ jobs:
       - name: Run utility tests
         run: bun test --max-concurrency=1 $(git ls-files 'utils/*.test.ts' 'test/utils/*.test.ts')
 
-      - name: Run UI tests
+      - name: UI lint
+        working-directory: ui
+        run: bun run lint
+
+      - name: UI tests (Vitest)
+        working-directory: ui
+        run: bunx vitest run --reporter=verbose
+
+      - name: UI build
+        working-directory: ui
+        run: bun run build
+
+      - name: Run UI tests via bun test (store + component)
         run: bun test --max-concurrency=1 $(git ls-files 'ui/src/pages/__tests__/*.tsx' 'ui/src/store/__tests__/*.ts' 'ui/src/components/LiveMonitor/__tests__/*.tsx')

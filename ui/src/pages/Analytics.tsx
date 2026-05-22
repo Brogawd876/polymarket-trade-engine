@@ -3,7 +3,7 @@ import { BarChart3, Filter, FileText, Search } from 'lucide-react';
 import { useLogs } from '../hooks/useLogs';
 import { useAnalyticsStore } from '../store/analytics';
 import { uniqueStrategies } from '../utils/analytics/aggregate';
-import { parseSlugInfo } from '../utils/analytics/parse';
+import { parseSlugInfo, type Asset, type Duration } from '../utils/analytics/parse';
 
 export default function Analytics() {
     const allRuns = useLogs();
@@ -75,7 +75,7 @@ export default function Analytics() {
                         {['BTC', 'ETH', 'XRP', 'SOL', 'DOGE'].map((a) => (
                             <button
                                 key={a}
-                                onClick={() => setAsset(a as any)}
+                                onClick={() => setAsset(a as Asset)}
                                 className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                                     asset === a 
                                     ? 'bg-indigo-500 text-white shadow-sm' 
@@ -91,7 +91,7 @@ export default function Analytics() {
                         {['5m', '15m'].map((d) => (
                             <button
                                 key={d}
-                                onClick={() => setDuration(d as any)}
+                                onClick={() => setDuration(d as Duration)}
                                 className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                                     duration === d 
                                     ? 'bg-indigo-500 text-white shadow-sm' 

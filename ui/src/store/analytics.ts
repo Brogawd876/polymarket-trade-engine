@@ -23,7 +23,8 @@ function loadEnum<T extends string>(key: string, allowed: readonly T[], fallback
   try {
     const v = localStorage.getItem(key);
     if (v && (allowed as readonly string[]).includes(v)) return v as T;
-  } catch {}
+  } catch { /* localStorage unavailable — use fallback */ }
+
   return fallback;
 }
 

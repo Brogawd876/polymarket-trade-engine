@@ -36,6 +36,7 @@ function statusClass(status: ExecutionRowStatus) {
     return 'bg-slate-700/70 text-slate-300 border-slate-600';
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function matchesExecutionFilter(row: ExecutionRow, filter: Filter) {
     switch (filter) {
         case 'open':

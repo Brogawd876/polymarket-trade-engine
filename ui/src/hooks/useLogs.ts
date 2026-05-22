@@ -2,19 +2,19 @@ import { useEffect, useState } from "react";
 import { parseLog } from "../utils/analytics/parse";
 import { useAnalyticsStore } from "../store/analytics";
 import type { ParsedRun } from "../types/analytics";
+import { OPERATOR_API } from "../api";
 
-const API_BASE = "http://127.0.0.1:3000/api/operator";
 
 async function readBackendLogs(signal?: AbortSignal): Promise<ParsedRun[]> {
   const runs: ParsedRun[] = [];
-  const listResponse = await fetch(`${API_BASE}/logs`, { signal });
+  const listResponse = await fetch(`${OPERATOR_API}/logs`, { signal });
   if (!listResponse.ok) throw new Error("Failed to fetch log list");
 
   const data = await listResponse.json() as { files?: string[] };
   for (const filename of data.files ?? []) {
     if (!filename.endsWith(".log")) continue;
     try {
-      const response = await fetch(`${API_BASE}/logs/${encodeURIComponent(filename)}`, { signal });
+      const response = await fetch(`${OPERATOR_API}/logs/${encodeURIComponent(filename)}`, { signal });
       if (!response.ok) continue;
       const parsed = parseLog(filename, await response.text());
       if (parsed) runs.push(parsed);
@@ -31,11 +31,14 @@ async function readBackendLogs(signal?: AbortSignal): Promise<ParsedRun[]> {
 // Subdirectories are skipped (matching the default source which only globs
 // `logs/*.log`). The browser's `<input webkitdirectory>` exposes nested files
 // via `webkitRelativePath` like "logs/sub/x.log" — we keep only the top-level.
+interface WebkitFile extends File {
+  readonly webkitRelativePath: string;
+}
 async function readCustom(files: File[]): Promise<ParsedRun[]> {
   const runs: ParsedRun[] = [];
   for (const file of files) {
     if (!file.name.endsWith(".log")) continue;
-    const rel = (file as any).webkitRelativePath as string | undefined;
+    const rel = (file as WebkitFile).webkitRelativePath;
     // Skip files inside subfolders (relative path has more than one separator).
     if (rel && rel.split("/").length > 2) continue;
     try {
@@ -74,7 +77,8 @@ export function useLogs(): ParsedRun[] {
 
   useEffect(() => {
     if (dataSource.kind !== "custom") {
-      setCustomRuns([]);
+      // Clearing customRuns asynchronously avoids synchronous setState-in-effect
+      Promise.resolve().then(() => setCustomRuns([]));
       return;
     }
     let cancelled = false;

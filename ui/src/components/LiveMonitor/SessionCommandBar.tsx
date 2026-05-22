@@ -1,27 +1,26 @@
 import { useStore } from '../../store';
 import { useNavigate } from 'react-router-dom';
-import { 
-    PlayCircle, 
-    Square, 
-    Settings, 
+import { apiFetch } from '../../api';
+import {
+    PlayCircle,
+    Square,
+    Settings,
     Activity
 } from 'lucide-react';
-
-const API_BASE = "http://127.0.0.1:3000/api/operator";
 
 export function SessionCommandBar() {
     const operatorStatus = useStore(state => state.operatorStatus);
     const isConnected = useStore(state => state.isConnected);
     const navigate = useNavigate();
 
-    const isRunning = operatorStatus?.sessionState === "running" || operatorStatus?.sessionState === "starting";
-    const isStopping = operatorStatus?.sessionState === "stopping";
+    const isRunning = operatorStatus?.sessionState === 'running' || operatorStatus?.sessionState === 'starting';
+    const isStopping = operatorStatus?.sessionState === 'stopping';
 
     const handleStop = async () => {
         try {
-            await fetch(`${API_BASE}/session/stop`, { method: 'POST' });
-        } catch (e: any) {
-            console.error("Stop failed", e);
+            await apiFetch('/api/operator/session/stop', { method: 'POST' });
+        } catch (e: unknown) {
+            console.error('Stop failed', e);
         }
     };
 
@@ -32,8 +31,8 @@ export function SessionCommandBar() {
             <div className="flex items-center space-x-6">
                 <div className="flex items-center">
                     <div className={`w-3 h-3 rounded-full mr-3 ${
-                        isRunning ? 'bg-emerald-500 animate-pulse' : 
-                        isStopping ? 'bg-amber-500 animate-pulse' : 
+                        isRunning ? 'bg-emerald-500 animate-pulse' :
+                        isStopping ? 'bg-amber-500 animate-pulse' :
                         'bg-slate-600'
                     }`} />
                     <div className="flex flex-col">
@@ -50,8 +49,8 @@ export function SessionCommandBar() {
                         <div className="flex flex-col">
                             <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest leading-none mb-1">Strategy / Source</span>
                             <span className="text-sm font-medium text-slate-400 leading-none">
-                                {operatorStatus?.engineMode === 'replay' 
-                                    ? operatorStatus.activeReplayFile?.split('/').pop() 
+                                {operatorStatus?.engineMode === 'replay'
+                                    ? operatorStatus.activeReplayFile?.split('/').pop()
                                     : operatorStatus?.activePreset
                                         ? `${operatorStatus.activePreset.label} (${operatorStatus.activePreset.configHash})`
                                         : operatorStatus?.engineStatus?.strategy}

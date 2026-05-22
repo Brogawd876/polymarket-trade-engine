@@ -2,13 +2,14 @@ import { SessionCommandBar } from './SessionCommandBar';
 import { SystemStatusPanel } from './SystemStatusPanel';
 import { FeedHealthPanel } from './FeedHealthPanel';
 import { PredictiveSignalPanel } from './PredictiveSignalPanel';
-import { RiskPanel } from './RiskPanel';
 import { EventTimelinePanel } from './EventTimelinePanel';
 import { SessionSummaryPanel } from './SessionSummaryPanel';
 import { PriceChartPanel } from './PriceChartPanel';
 import { RoundDecisionPanel } from './RoundDecisionPanel';
 import { MarketBookPanel } from './MarketBookPanel';
 import { ExecutionBlotterPanel } from './ExecutionBlotterPanel';
+import { WhyNoTradePanel } from './WhyNoTradePanel';
+import { CorpusSummaryPanel } from './CorpusSummaryPanel';
 
 export function LiveMonitor() {
     return (
@@ -24,7 +25,7 @@ export function LiveMonitor() {
             <SessionCommandBar />
 
             <div className="grid grid-cols-12 gap-6 pb-6">
-                {/* Top Row - Status & Key metrics */}
+                {/* Left column — Status & Key metrics */}
                 <div className="col-span-12 lg:col-span-4 space-y-6">
                     <SystemStatusPanel />
                     <RoundDecisionPanel />
@@ -32,21 +33,28 @@ export function LiveMonitor() {
                     <FeedHealthPanel />
                     <SessionSummaryPanel />
                 </div>
-                {/* Center / Main - Charts & Core Signals */}
+
+                {/* Center / Main — Charts & Core Signals */}
                 <div className="col-span-12 lg:col-span-8 space-y-6">
                     <PriceChartPanel />
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <PredictiveSignalPanel />
-                        <RiskPanel />
+                        {/* WhyNoTradePanel replaces the basic RiskPanel for detailed diagnostics */}
+                        <WhyNoTradePanel />
                     </div>
                 </div>
 
-                {/* Bottom Row - Logs */}
+                {/* Bottom Row — Execution & Events */}
                 <div className="col-span-12">
                     <ExecutionBlotterPanel />
                 </div>
                 <div className="col-span-12">
                     <EventTimelinePanel />
+                </div>
+
+                {/* Corpus & Replay Quality — always rendered, graceful 404 fallback */}
+                <div className="col-span-12">
+                    <CorpusSummaryPanel />
                 </div>
             </div>
         </div>

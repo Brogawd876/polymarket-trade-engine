@@ -112,7 +112,7 @@ export function buildRunChartData(run: ParsedRun): RunChartData {
   const el = (ts: number) => parseFloat(((ts - startTime) / 1000).toFixed(2));
 
   const snapshots: Snapshot[] = [];
-  let pendingSnap: any = null;
+  let pendingSnap: LogEntry | null = null;
   for (const e of entries) {
     if (e.type === "orderbook_snapshot") {
       pendingSnap = e;
