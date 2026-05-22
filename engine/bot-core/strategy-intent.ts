@@ -29,6 +29,12 @@ export type CancelOrderIntent = StrategyIntentBase & {
   orderIds: string[];
 };
 
+export type ModifyOrderIntent = StrategyIntentBase & {
+  action: "modify";
+  orderId: string;
+  updates: { price?: number; shares?: number };
+};
+
 export type HoldIntent = StrategyIntentBase & {
   action: "hold";
 };
@@ -36,6 +42,7 @@ export type HoldIntent = StrategyIntentBase & {
 export type StrategyIntent =
   | PlaceOrderIntent
   | CancelOrderIntent
+  | ModifyOrderIntent
   | HoldIntent;
 
 export type StrategyDecisionContext = {

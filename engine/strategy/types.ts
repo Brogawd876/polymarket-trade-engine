@@ -51,8 +51,24 @@ export type StrategyContext = {
   postOrders: (orders: OrderRequest[]) => void;
   /** Cancel orders in batch. Only removes pending orders that were actually canceled. */
   cancelOrders: (orderIds: string[]) => Promise<CancelOrderResponse>;
+  /** 
+   * Atomically modify an order (cancel and replace). This helps maintain position 
+   * in queue or react faster without manual race condition handling.
+   */
+  modifyOrder?: (orderId: string, updates: { price?: number; shares?: number }) => void;
   /** Cancel pending sells and re-place at best bid for immediate exit. Bypasses sell block. */
   emergencySells: (orderIds: string[]) => Promise<void>;
+
+  /** Live tracking of the strategy's exposure and performance */
+  position?: {
+    netExposure: number;
+    averageEntry: number;
+    realizedPnl: number;
+    unrealizedPnl: number;
+  };
+
+  /** Register a callback to be fired on every tick of the market lifecycle */
+  onTick?: (callback: () => void | Promise<void>) => void;
 
   blockBuys: () => void;
   blockSells: () => void;

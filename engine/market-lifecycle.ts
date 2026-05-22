@@ -151,6 +151,8 @@ export class MarketLifecycle {
   private _marketOpenTimer: unknown = null;
   private _marketPriceHandle: { cancel: () => void } | null = null;
   private _strategyCleanup: (() => void) | null = null;
+  private _onTickCallbacks: Array<() => void | Promise<void>> = [];
+  private _position = { netExposure: 0, averageEntry: 0, realizedPnl: 0, unrealizedPnl: 0 };
   private _feedReadinessDeadlineMs: number | null = null;
   private _setupPromise: Promise<void> | null = null;
 
@@ -1303,6 +1305,28 @@ export class MarketLifecycle {
   private _removePendingOrder(orderId: string): void {
     const idx = this._pendingOrders.findIndex((o) => o.orderId === orderId);
     if (idx !== -1) this._pendingOrders.splice(idx, 1);
+  }
+
+  private _modifyOrder(orderId: string, updates: { price?: number; shares?: number }): void {
+    const pendingIdx = this._pendingOrders.findIndex(o => o.orderId === orderId);
+    if (pendingIdx === -1) { return; }
+    const order = this._pendingOrders[pendingIdx];
+    if (!order) return;
+    this._cancelOrders([orderId], "canceled").then(() => {
+        this._postOrders([{
+            req: {
+                tokenId: order.tokenId,
+                action: order.action,
+                price: updates.price ?? order.price,
+                shares: updates.shares ?? order.shares,
+                orderType: order.orderType
+            },
+            expireAtMs: order.expireAtMs,
+            onFilled: order.onFilled,
+            onExpired: order.onExpired,
+            onFailed: order.onFailed
+        }]);
+    });
   }
 
   private async _cancelPendingBuys(): Promise<void> {
