@@ -3,20 +3,25 @@
 ## Current State
 
 - Repository: `polymarket-trade-engine`
-- Branch: `feat/phase8m-isotonic-calibration`
-- Phase: Phase 8M offline isotonic calibration scaffold.
+- Branch: `feat/phase8n-calibration-holdout-validation`
+- Phase: Phase 8N offline calibration feature comparison and holdout validation.
 
-## Recently Completed: Phase 8M
+## Recently Completed: Phase 8N
 
-Phase 8M adds an offline calibration layer on top of the Phase 8L `CalibrationRecord` dataset.
+Phase 8N extends the Phase 8M offline isotonic scaffold with multi-feature comparison and deterministic train/holdout validation.
 
 ## What Changed
 
-- Added pool-adjacent-violators isotonic regression in `engine/replay/isotonic-calibration.ts`.
-- Added calibration sample extraction, missing/invalid counts, and metrics in `engine/replay/calibration-metrics.ts`.
-- Added `scripts/run-offline-calibration.ts` for JSONL-to-summary offline runs.
-- Added tests for monotonicity, duplicate score handling, null/missing rows, insufficient data, and input immutability.
-- Added `AI_WORKSPACE/PHASE8M_ISOTONIC_CALIBRATION.md`.
+- Added `engine/replay/calibration-feature-comparison.ts`.
+  - Candidate score/label extraction.
+  - Adverse-selection and markout-derived labels.
+  - Deterministic train/holdout split.
+  - Train-only isotonic fit and holdout metrics.
+  - Bucket stability reporting.
+  - Leakage warnings for markout score fields.
+- Added `scripts/compare-offline-calibration-features.ts`.
+- Added `test/engine/calibration-feature-comparison.test.ts`.
+- Added `AI_WORKSPACE/PHASE8N_CALIBRATION_FEATURE_HOLDOUT.md`.
 
 ## Safety Boundaries
 
@@ -27,40 +32,40 @@ Phase 8M adds an offline calibration layer on top of the Phase 8L `CalibrationRe
 - No Strategy Lab ranking weight changes.
 - No readiness gate changes.
 - No profitability claim.
-- Generated `data/`, logs, and JSON summaries remain uncommitted.
+- Generated `data/` artifacts remain uncommitted.
 
-## Local Calibration Smoke
+## Local Result
 
 Command:
 
 ```bash
-bun scripts/run-offline-calibration.ts --input data/reports/phase8l-calibration.jsonl --out-json data/reports/phase8m-calibration-summary.json
+bun scripts/compare-offline-calibration-features.ts --input data/reports/phase8l-calibration.jsonl --out-json data/reports/phase8n-calibration-feature-comparison.json
 ```
 
 Result:
 
-- status: `ok`
-- score field: `fillPrice`
-- label field: `adverseSelection`
-- valid samples: 585
-- positive-label rate: 0.948718
-- missing labels dropped: 465
-- Brier score: 0.021978
-- log loss: 0.073611
-- ECE: 0.000000
+- total records: 1,050
+- malformed rows: 0
+- split: 70% train / 30% holdout
+- `fillPrice -> adverseSelection`: train 409, holdout 176, positive rate 0.948718, holdout Brier 0.015955, log loss 0.057985, ECE 0.010227.
+- `spread`: insufficient data, 1,050 missing score values.
+- `predictedProbability`: insufficient data, 1,050 missing score values.
+- markout score fields produce diagnostic comparisons only and are flagged as post-outcome/leakage risks.
 
-This validates the offline scaffold only. It does not establish a profitable strategy or a final calibration feature.
+## Interpretation
 
-## Validation
-
-- Master pre-branch validation passed:
-  - `bun run check`
-  - `bun test --max-concurrency=1`: 404 pass, 7 skip, 0 fail
-- Phase 8M validation:
-  - `bun run check`
-  - `bun test --max-concurrency=1 test/engine/isotonic-calibration.test.ts test/engine/calibration-metrics.test.ts test/engine/calibration-extractor.test.ts`
-  - `bun test --max-concurrency=1`
+The comparison harness works, but the current corpus is not ready for calibration-driven tuning. The available pre-trade-ish feature set is too thin. The project needs richer `CalibrationRecord` pre-trade fields before calibration can become decision-useful.
 
 ## Next Exact Task
 
-Phase 8N should compare offline calibration feature choices against more paired out-of-sample data. Candidate score fields should be grounded in real `CalibrationRecord` evidence and reported with sample counts, positive-label rates, missing counts, and bucket stability before any tuning or live-readiness decision.
+Phase 8O should enrich `CalibrationRecord` with fields known at quote/decision time:
+
+- quoted edge,
+- fair-value edge,
+- model probability,
+- market-implied probability,
+- spread,
+- top-of-book liquidity/depth,
+- time-to-close.
+
+Then rerun Phase 8N-style train/holdout comparisons on a larger corpus before tuning or readiness changes.
