@@ -3,36 +3,64 @@
 ## Current State
 
 - Repository: `polymarket-trade-engine`
-- Branch: `feat/phase8l-corpus-calibration`
-- HEAD: Phase 8L completed locally.
-- Phase: Phase 8L offline calibration dataset extraction is available. complete
+- Branch: `feat/phase8m-isotonic-calibration`
+- Phase: Phase 8M offline isotonic calibration scaffold.
 
-## Recently Completed: Phase 8L
+## Recently Completed: Phase 8M
 
-Phase 8L successfully built the offline corpus expansion harness and calibration record extraction framework.
+Phase 8M adds an offline calibration layer on top of the Phase 8L `CalibrationRecord` dataset.
 
-### What Changed
+## What Changed
 
-- **Corpus Expansion Harness:** Modified `scripts/run-strategy-lab-paired-corpus.ts` to process entire directories of paired corpus manifests and output aggregated metrics and JSON/JSONL datasets.
-- **Calibration Record Schema:** Created `engine/replay/calibration-extractor.ts` to map offline strategy variant results into a flat `CalibrationRecord` suitable for Platt scaling or isotonic regression models.
-- **Data Quality Preservation:** System explicitly logs missing reasons for metrics (like missing 1s, 5s, 30s markouts) and does not fake profitability or backfill unsupported values.
-- **Live Isolation:** Maintained strict isolation from live trading logic and did not alter Strategy Lab ranking weights or readiness gates.
+- Added pool-adjacent-violators isotonic regression in `engine/replay/isotonic-calibration.ts`.
+- Added calibration sample extraction, missing/invalid counts, and metrics in `engine/replay/calibration-metrics.ts`.
+- Added `scripts/run-offline-calibration.ts` for JSONL-to-summary offline runs.
+- Added tests for monotonicity, duplicate score handling, null/missing rows, insufficient data, and input immutability.
+- Added `AI_WORKSPACE/PHASE8M_ISOTONIC_CALIBRATION.md`.
 
-### Corpus Status
+## Safety Boundaries
 
-- **Latest Valid Pair:** `btc-updown-5m-1779390000`
-- **Market Trades:** 5,389 normalized prints (for this pair alone).
-- **Evidence Proof:** 70 usable fills confirmed via real trade-throughs across 15 runs.
-- **Metric Insight:** Identified a 95.2% adverse selection rate on uncalibrated market making.
+- No live execution changes.
+- No live risk gate changes.
+- No order placement changes.
+- No runtime strategy behavior changes.
+- No Strategy Lab ranking weight changes.
+- No readiness gate changes.
+- No profitability claim.
+- Generated `data/`, logs, and JSON summaries remain uncommitted.
 
-## Next Up: Calibration Modeling
+## Local Calibration Smoke
 
-Build isotonic regression or Platt scaling calibration models to correct probabilities based on the offline `CalibrationRecord` corpus.
+Command:
 
-## Constraints & Rules
+```bash
+bun scripts/run-offline-calibration.ts --input data/reports/phase8l-calibration.jsonl --out-json data/reports/phase8m-calibration-summary.json
+```
 
-- Do not commit generated NDJSON, pair manifests, or replay log files.
-- Do not tune strategies.
-- Do not change Strategy Lab ranking weights.
-- Do not change Live Readiness Gates.
-- Do not claim profitability.
+Result:
+
+- status: `ok`
+- score field: `fillPrice`
+- label field: `adverseSelection`
+- valid samples: 585
+- positive-label rate: 0.948718
+- missing labels dropped: 465
+- Brier score: 0.021978
+- log loss: 0.073611
+- ECE: 0.000000
+
+This validates the offline scaffold only. It does not establish a profitable strategy or a final calibration feature.
+
+## Validation
+
+- Master pre-branch validation passed:
+  - `bun run check`
+  - `bun test --max-concurrency=1`: 404 pass, 7 skip, 0 fail
+- Phase 8M validation:
+  - `bun run check`
+  - `bun test --max-concurrency=1 test/engine/isotonic-calibration.test.ts test/engine/calibration-metrics.test.ts test/engine/calibration-extractor.test.ts`
+  - `bun test --max-concurrency=1`
+
+## Next Exact Task
+
+Phase 8N should compare offline calibration feature choices against more paired out-of-sample data. Candidate score fields should be grounded in real `CalibrationRecord` evidence and reported with sample counts, positive-label rates, missing counts, and bucket stability before any tuning or live-readiness decision.

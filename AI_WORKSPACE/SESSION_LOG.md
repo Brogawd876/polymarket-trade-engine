@@ -507,3 +507,13 @@
 - **Action:** Updated `run-strategy-lab-paired-corpus.ts` to process multiple pair manifests automatically and output JSONL metrics.
 - **Result:** Successfully expanded corpus handling without modifying live trading risk gates or strategies. Phase 8L offline data layer is fully operational.
 
+## 2026-05-21: Phase 8M Offline Isotonic Calibration
+
+- **Action:** Synced `master` after PR #2 / Phase 8L merge and verified it with `bun run check` plus full `bun test --max-concurrency=1` before branching.
+- **Action:** Added offline isotonic regression calibration using pool-adjacent-violators, duplicate score aggregation, calibrated bucket output, prediction, and sample-rate reporting.
+- **Action:** Added calibration sample extraction and metrics with explicit missing/invalid score and label counts. Missing/null evidence is dropped, not imputed.
+- **Action:** Added `scripts/run-offline-calibration.ts` to consume Phase 8L CalibrationRecord JSONL and optionally write a JSON summary.
+- **Result:** Local Phase 8L JSONL smoke run succeeded with 585 valid `fillPrice -> adverseSelection` samples, 465 missing labels dropped, positive-label rate 0.948718, Brier 0.021978, log loss 0.073611, ECE 0.000000.
+- **Safety:** No live execution, live risk gate, order placement, runtime strategy, ranking, readiness, or profitability-claim changes.
+- **Validation:** Focused calibration tests and type check passed; full suite scheduled/run for final verification.
+
