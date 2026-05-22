@@ -103,7 +103,7 @@ export function WhyNoTradePanel() {
     return (
         <div
             id="why-no-trade-panel"
-            className="bg-slate-800 p-4 rounded-lg border border-slate-700"
+            className="glass-panel p-4 rounded-lg"
         >
             <h2 className="text-lg font-semibold text-slate-200 mb-4">Why No Trade?</h2>
 
@@ -127,7 +127,7 @@ export function WhyNoTradePanel() {
                     )}
 
                     {/* ── Risk Gate ── */}
-                    <div className="p-3 bg-slate-900/50 rounded border border-slate-700/50 space-y-2">
+                    <div className="p-3 glass-panel p-3 rounded-lg space-y-2">
                         <div className="flex items-center justify-between">
                             <SectionHeader title="Risk Gate" />
                             <StatusBadge approved={riskApproved} />
@@ -162,7 +162,7 @@ export function WhyNoTradePanel() {
                     </div>
 
                     {/* ── Feed Disagreement ── */}
-                    <div className="p-3 bg-slate-900/50 rounded border border-slate-700/50 space-y-2">
+                    <div className="p-3 glass-panel p-3 rounded-lg space-y-2">
                         <SectionHeader title="Feed Disagreement" />
                         <div className="grid grid-cols-2 gap-x-4">
                             <DataRow
@@ -199,7 +199,7 @@ export function WhyNoTradePanel() {
 
                     {/* ── Execution Quality ── */}
                     {latestSnapshot && (
-                        <div className="p-3 bg-slate-900/50 rounded border border-slate-700/50 space-y-1">
+                        <div className="p-3 glass-panel p-3 rounded-lg space-y-1">
                             <SectionHeader title="Execution Quality" />
                             <div className="grid grid-cols-2 gap-x-4">
                                 <DataRow
@@ -226,7 +226,7 @@ export function WhyNoTradePanel() {
                     )}
 
                     {/* ── Signal Quality ── */}
-                    <div className="p-3 bg-slate-900/50 rounded border border-slate-700/50 space-y-1">
+                    <div className="p-3 glass-panel p-3 rounded-lg space-y-1">
                         <SectionHeader title="Signal Quality" />
                         <div className="grid grid-cols-2 gap-x-4">
                             <DataRow label="P(UP)" value={fmtPct(probabilityUp)} valueClass="text-sky-400" />

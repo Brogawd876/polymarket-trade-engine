@@ -24,12 +24,12 @@ body {
 
 @utility glass-panel-hover {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-@utility glass-panel-hover:hover {
-  background-color: rgba(30, 41, 59, 0.6);
-  border-color: rgba(71, 85, 105, 0.6);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  &:hover {
+    background-color: rgba(30, 41, 59, 0.6);
+    border-color: rgba(71, 85, 105, 0.6);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  }
 }
 
 @utility neon-text-emerald {
