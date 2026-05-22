@@ -42,6 +42,14 @@ describe('RoundDecisionPanel', () => {
             lifecycleStates: {
                 'btc-updown-5m-1778978400': 'RUNNING',
             },
+            decisionSnapshots: [
+                {
+                    ts: Date.now(),
+                    slug: 'btc-updown-5m-1778978400',
+                    features: {},
+                    flow: { imbalance: 0.1, cvd10s: 15.5, sentiment: 'bullish' } as any
+                }
+            ],
         });
 
         const view = render(<RoundDecisionPanel />);

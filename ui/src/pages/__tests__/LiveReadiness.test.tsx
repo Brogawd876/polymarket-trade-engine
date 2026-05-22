@@ -53,7 +53,7 @@ describe('LiveReadiness', () => {
             }
             if (target.endsWith('/strategy/modules/validate')) {
                 expect(init?.method).toBe('POST');
-                return Response.json({ success: false, errors: ['Source code must include an evaluate function'] }, { status: 400 });
+                return Response.json({ success: false, errors: ['Source code must include an evaluate function'] }, { status: 200 });
             }
             return Response.json({});
         }) as typeof fetch;
