@@ -15,6 +15,7 @@ import {
 } from "./replay/markout.ts";
 import { ConservativeFillScorer, type FillScoreResult } from "./replay/fill-scoring.ts";
 import { extractClobTokenIdsFromRawL2 } from "./replay/paired-token-mapping.ts";
+import type { DecisionFeatureSnapshot } from "./decision-features.ts";
 
 export type StrategyLabBatchState = "queued" | "running" | "completed" | "failed" | "canceled";
 export type StrategyLabRunStatus = "queued" | "running" | "completed" | "failed" | "canceled";
@@ -35,9 +36,11 @@ export type ConservativeFillEvidencePoint = {
   price: number;
   shares: number;
   placedTsMs: number;
+  fillTsMs?: number;
   verdict: string;
   markouts: { "1s": number | null; "5s": number | null; "30s": number | null; };
   adverseSelection: boolean | null;
+  decisionFeature?: DecisionFeatureSnapshot;
 };
 
 export type ConservativeFillReport = {
@@ -315,8 +318,10 @@ export function deriveResultFromEvents(
   let settlementTsMs: number | null = null;
 
   // Track intent data for conservative fill scoring
-  const intentsById = new Map<string, { tokenId: string; createdAtMs: number }>();
-  const intentsBySlug = new Map<string, { tokenId: string; createdAtMs: number }[]>();
+  const intentsById = new Map<string, { tokenId: string; createdAtMs: number; decisionFeature?: DecisionFeatureSnapshot }>();
+  const intentsBySlug = new Map<string, { tokenId: string; createdAtMs: number; decisionFeature?: DecisionFeatureSnapshot }[]>();
+  const decisionFeaturesByIntentId = new Map<string, DecisionFeatureSnapshot>();
+  const decisionFeaturesByOrderId = new Map<string, DecisionFeatureSnapshot>();
   const fillEvents: Array<{
     orderId: string | null;
     intentId: string | null;
@@ -333,6 +338,15 @@ export function deriveResultFromEvents(
       case "SYSTEM_BOOT":
         break;
       case "DECISION_FEATURE_SNAPSHOT":
+        if (event.payload.intent?.id) {
+          const existing = decisionFeaturesByIntentId.get(event.payload.intent.id);
+          if (!existing || existing.event !== "consider" || event.payload.event === "consider") {
+            decisionFeaturesByIntentId.set(event.payload.intent.id, event.payload);
+          }
+        }
+        if (event.payload.outcome.orderId) {
+          decisionFeaturesByOrderId.set(event.payload.outcome.orderId, event.payload);
+        }
         if (event.payload.event === "consider" && event.payload.quant.probabilityUp !== null) {
           forecasts.push(event.payload.quant.probabilityUp);
         }
@@ -344,6 +358,7 @@ export function deriveResultFromEvents(
           const intentData = {
             tokenId: (event.payload.intent as any).tokenId,
             createdAtMs: (event.payload.intent as any).createdAtMs,
+            decisionFeature: event.payload.intent.id ? decisionFeaturesByIntentId.get(event.payload.intent.id) : undefined,
           };
           if (event.payload.intent.id) {
             intentsById.set(event.payload.intent.id, intentData);
@@ -456,7 +471,7 @@ export function deriveResultFromEvents(
     }
 
     for (const fill of fillEvents) {
-      let intent: { tokenId: string; createdAtMs: number } | undefined;
+      let intent: { tokenId: string; createdAtMs: number; decisionFeature?: DecisionFeatureSnapshot } | undefined;
 
       // 1. If fill.intentId exists: use intentsById.get(fill.intentId)
       if (fill.intentId) {
@@ -512,9 +527,13 @@ export function deriveResultFromEvents(
         price: fill.price,
         shares: fill.shares,
         placedTsMs: intent.createdAtMs,
+        fillTsMs: fill.tsMs,
         verdict: scorerResult.verdict,
         markouts: scorerResult.markouts,
         adverseSelection: scorerResult.adverseSelection,
+        decisionFeature: intent.decisionFeature
+          ?? (fill.intentId ? decisionFeaturesByIntentId.get(fill.intentId) : undefined)
+          ?? (fill.orderId ? decisionFeaturesByOrderId.get(fill.orderId) : undefined),
       });
 
       cFill.conservativeFillVerdictCounts[scorerResult.verdict] = (cFill.conservativeFillVerdictCounts[scorerResult.verdict] ?? 0) + 1;
