@@ -1,46 +1,40 @@
-# Active Task: Phase 8M Offline Isotonic Calibration
+# Active Task: Phase 8N Offline Calibration Feature Comparison
 
 ## Current Objective
 
-Add offline probability calibration scaffolding for Phase 8L `CalibrationRecord` JSONL output.
+Compare candidate calibration score fields against adverse-selection and markout-derived labels using explicit train/holdout separation.
 
 ## Status
 
-- Code repo branch: `feat/phase8m-isotonic-calibration`
-- Phase 8M verdict: implemented locally.
-- Offline isotonic regression calibration is available via `engine/replay/isotonic-calibration.ts`.
-- Calibration extraction and metrics are available via `engine/replay/calibration-metrics.ts`.
-- CLI runner is available via `scripts/run-offline-calibration.ts`.
-- This phase is offline-only and does not modify live execution, live risk gates, order placement, runtime strategy behavior, Strategy Lab ranking weights, or readiness gates.
-- Missing/null evidence is dropped with explicit counts; no fake zeros are introduced.
+- Code repo branch: `feat/phase8n-calibration-holdout-validation`
+- Phase 8N verdict: implemented locally.
+- Added offline feature comparison in `engine/replay/calibration-feature-comparison.ts`.
+- Added CLI runner `scripts/compare-offline-calibration-features.ts`.
+- Added focused tests in `test/engine/calibration-feature-comparison.test.ts`.
+- No live execution, live risk gate, order placement, runtime strategy, Strategy Lab ranking, readiness gate, or profitability-claim changes.
 - Generated `data/` artifacts remain uncommitted.
 
-## Local Calibration Smoke
-
-Using the local Phase 8L JSONL:
+## Local Holdout Run
 
 ```bash
-bun scripts/run-offline-calibration.ts --input data/reports/phase8l-calibration.jsonl --out-json data/reports/phase8m-calibration-summary.json
+bun scripts/compare-offline-calibration-features.ts --input data/reports/phase8l-calibration.jsonl --out-json data/reports/phase8n-calibration-feature-comparison.json
 ```
 
-Result:
+Headline:
 
-- status: `ok`
-- score field: `fillPrice`
-- label field: `adverseSelection`
-- valid samples: 585
-- positive-label rate: 0.948718
-- missing labels dropped: 465
-- Brier score: 0.021978
-- log loss: 0.073611
-- ECE: 0.000000
-
-This is a scaffold smoke test, not a profitability claim.
+- total records: 1,050
+- valid labeled rows for `fillPrice` comparisons: 585
+- train/holdout: 409 / 176
+- `fillPrice -> adverseSelection` holdout Brier: 0.015955
+- `fillPrice -> adverseSelection` holdout log loss: 0.057985
+- `fillPrice -> adverseSelection` holdout ECE: 0.010227
+- `spread` and `predictedProbability`: insufficient data because all scores are missing.
+- markout score fields are flagged as post-outcome/leakage diagnostics, not pre-trade calibration features.
 
 ## Updated Report
 
-- `AI_WORKSPACE/PHASE8M_ISOTONIC_CALIBRATION.md`
+- `AI_WORKSPACE/PHASE8N_CALIBRATION_FEATURE_HOLDOUT.md`
 
 ## Next Phase
 
-Phase 8N should evaluate defensible calibration feature choices offline and require enough out-of-sample paired data before using calibration to inform any strategy or readiness decision.
+Phase 8O should enrich `CalibrationRecord` with true pre-trade feature fields before any strategy tuning or readiness changes.

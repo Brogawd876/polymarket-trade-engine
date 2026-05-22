@@ -517,3 +517,13 @@
 - **Safety:** No live execution, live risk gate, order placement, runtime strategy, ranking, readiness, or profitability-claim changes.
 - **Validation:** Focused calibration tests and type check passed; full suite scheduled/run for final verification.
 
+## 2026-05-21: Phase 8N Offline Calibration Feature Comparison
+
+- **Action:** Added offline multi-feature calibration comparison with deterministic train/holdout separation.
+- **Action:** Added adverse-selection and markout-derived label support while preserving missing/null evidence honestly.
+- **Action:** Added bucket stability reporting and warnings for post-outcome markout score leakage.
+- **Action:** Added `scripts/compare-offline-calibration-features.ts`.
+- **Result:** Local Phase 8L JSONL run compared default score fields against adverse-selection and markout labels. `fillPrice` had 585 valid labeled rows and `spread`/`predictedProbability` had 0 valid score rows.
+- **Result:** `fillPrice -> adverseSelection` holdout metrics: train 409, holdout 176, positive rate 0.948718, Brier 0.015955, log loss 0.057985, ECE 0.010227.
+- **Safety:** No live execution, live risk gate, order placement, runtime strategy, ranking, readiness, or profitability-claim changes.
+
