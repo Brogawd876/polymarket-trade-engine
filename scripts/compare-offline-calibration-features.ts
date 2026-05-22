@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import * as path from "path";
 import type { CalibrationRecord } from "../engine/replay/calibration-extractor.ts";
 import {
+  type CalibrationFeatureComparisonSummary,
   compareCalibrationFeatures,
+  filterRecordsByEvidence,
   type CalibrationCandidate,
   type CalibrationLabelName,
 } from "../engine/replay/calibration-feature-comparison.ts";
@@ -12,7 +14,10 @@ type Args = {
   outJson: string;
   scoreFields: string[];
   labelFields: CalibrationLabelName[];
+  splitMode: "row" | "temporal";
+  evidenceFilter: "all" | "trade-print-backed" | "touch-only" | "missing-decision-feature-excluded";
   trainRatio: number;
+  temporalCutoffMs?: number;
   minTrainSamples: number;
   minHoldoutSamples: number;
 };
@@ -61,6 +66,8 @@ function parseArgs(): Args {
     outJson: "",
     scoreFields: DEFAULT_SCORE_FIELDS,
     labelFields: DEFAULT_LABEL_FIELDS,
+    splitMode: "row",
+    evidenceFilter: "all",
     trainRatio: 0.7,
     minTrainSamples: 30,
     minHoldoutSamples: 10,
@@ -72,7 +79,10 @@ function parseArgs(): Args {
     else if (arg === "--out-json") parsed.outJson = args[++i] || parsed.outJson;
     else if (arg === "--score-fields") parsed.scoreFields = parseCsv(args[++i] || "");
     else if (arg === "--label-fields") parsed.labelFields = parseCsv(args[++i] || "") as CalibrationLabelName[];
+    else if (arg === "--split-mode") parsed.splitMode = args[++i] as "row" | "temporal";
+    else if (arg === "--evidence-filter") parsed.evidenceFilter = (args[++i] || "all") as Args["evidenceFilter"];
     else if (arg === "--train-ratio") parsed.trainRatio = Number.parseFloat(args[++i] || String(parsed.trainRatio));
+    else if (arg === "--temporal-cutoff-ms") parsed.temporalCutoffMs = Number.parseInt(args[++i] || "", 10);
     else if (arg === "--min-train-samples") parsed.minTrainSamples = Number.parseInt(args[++i] || String(parsed.minTrainSamples), 10);
     else if (arg === "--min-holdout-samples") parsed.minHoldoutSamples = Number.parseInt(args[++i] || String(parsed.minHoldoutSamples), 10);
     else if (arg === "--help" || arg === "-h") {
@@ -84,7 +94,10 @@ function parseArgs(): Args {
         "  --out-json <path>               Optional JSON summary output",
         "  --score-fields <csv>            Numeric score fields or dotted paths",
         "  --label-fields <csv>            Labels: adverseSelection, profitableMarkout1s/5s/30s, adverseMarkout1s/5s/30s",
-        "  --train-ratio <n>               Deterministic train split ratio, default 0.7",
+        "  --split-mode <row|temporal>     Split method, default row",
+        "  --evidence-filter <filter>      all | trade-print-backed | touch-only | missing-decision-feature-excluded",
+        "  --train-ratio <n>               Train split ratio, default 0.7",
+        "  --temporal-cutoff-ms <ms>       Optional absolute cutoff ms for temporal split",
         "  --min-train-samples <n>         Minimum train rows per candidate",
         "  --min-holdout-samples <n>       Minimum holdout rows per candidate",
       ].join("\n"));
@@ -133,6 +146,13 @@ function printSummary(summary: ReturnType<typeof compareCalibrationFeatures>, ma
   console.log(`Total records: ${summary.totalRecords}`);
   console.log(`Malformed rows: ${malformedRows}`);
   console.log(`Train ratio: ${summary.trainRatio}`);
+  console.log(`Split mode: ${summary.splitMode}`);
+  if (summary.evidenceFilter) {
+    console.log(`Evidence filter: ${summary.evidenceFilter}`);
+  }
+  if (summary.temporalCutoffMs) {
+    console.log(`Temporal cutoff ms: ${summary.temporalCutoffMs} (${new Date(summary.temporalCutoffMs).toISOString()})`);
+  }
   console.log(`Min train/holdout: ${summary.minTrainSamples}/${summary.minHoldoutSamples}`);
   console.log("");
   console.log([
@@ -176,13 +196,19 @@ function printSummary(summary: ReturnType<typeof compareCalibrationFeatures>, ma
 
 async function main() {
   const args = parseArgs();
-  const { records, malformedRows } = readCalibrationJsonl(args.input);
+  let { records, malformedRows } = readCalibrationJsonl(args.input);
+  
+  records = filterRecordsByEvidence(records, args.evidenceFilter);
+
   const candidates: CalibrationCandidate[] = args.scoreFields.flatMap((scoreField) =>
     args.labelFields.map((labelField) => ({ scoreField, labelField })),
   );
 
   const summary = compareCalibrationFeatures(records, candidates, {
+    splitMode: args.splitMode,
+    evidenceFilter: args.evidenceFilter,
     trainRatio: args.trainRatio,
+    temporalCutoffMs: args.temporalCutoffMs,
     minTrainSamples: args.minTrainSamples,
     minHoldoutSamples: args.minHoldoutSamples,
   });

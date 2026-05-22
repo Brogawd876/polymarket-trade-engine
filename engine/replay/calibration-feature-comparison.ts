@@ -54,7 +54,10 @@ export type CalibrationFeatureComparisonResult = {
 
 export type CalibrationFeatureComparisonSummary = {
   status: "ok" | "insufficient_data";
+  splitMode: "row" | "temporal";
+  evidenceFilter?: string;
   trainRatio: number;
+  temporalCutoffMs?: number;
   minTrainSamples: number;
   minHoldoutSamples: number;
   totalRecords: number;
@@ -63,6 +66,8 @@ export type CalibrationFeatureComparisonSummary = {
 
 type LabeledRecord = LabeledScore & {
   sortKey: string;
+  slug: string;
+  tsMs: number;
 };
 
 function parseNumeric(value: unknown): { value?: number; missing: boolean; invalid: boolean } {
@@ -134,6 +139,8 @@ export function extractCandidateSamples(
       score: score.value,
       label: label.label,
       sortKey: recordSortKey(record, score.value, label.label),
+      slug: record.slug,
+      tsMs: record.fillTsMs ?? record.quoteTsMs ?? record.decisionTsMs ?? 0,
     });
     extraction.validRecords++;
   }
@@ -147,12 +154,61 @@ function positiveRate(samples: readonly LabeledScore[]): number | null {
   return samples.reduce((sum, sample) => sum + sample.label, 0) / samples.length;
 }
 
-function splitTrainHoldout(samples: readonly LabeledRecord[], trainRatio: number): { train: LabeledScore[]; holdout: LabeledScore[] } {
-  const trainCount = Math.min(samples.length, Math.max(0, Math.floor(samples.length * trainRatio)));
-  return {
-    train: samples.slice(0, trainCount).map(({ score, label }) => ({ score, label })),
-    holdout: samples.slice(trainCount).map(({ score, label }) => ({ score, label })),
-  };
+function splitTrainHoldout(
+  samples: readonly LabeledRecord[],
+  opts: { splitMode?: "row" | "temporal"; trainRatio: number; temporalCutoffMs?: number },
+): { train: LabeledScore[]; holdout: LabeledScore[] } {
+  if (opts.splitMode === "temporal") {
+    const slugMinTs = new Map<string, number>();
+    const slugSamples = new Map<string, LabeledRecord[]>();
+    for (const sample of samples) {
+      const minTs = slugMinTs.get(sample.slug);
+      if (minTs === undefined || sample.tsMs < minTs) {
+        slugMinTs.set(sample.slug, sample.tsMs);
+      }
+      let arr = slugSamples.get(sample.slug);
+      if (!arr) {
+        arr = [];
+        slugSamples.set(sample.slug, arr);
+      }
+      arr.push(sample);
+    }
+    
+    const sortedSlugs = Array.from(slugMinTs.keys()).sort((a, b) => slugMinTs.get(a)! - slugMinTs.get(b)!);
+    
+    const train: LabeledScore[] = [];
+    const holdout: LabeledScore[] = [];
+    
+    if (opts.temporalCutoffMs) {
+      for (const slug of sortedSlugs) {
+        const arr = slugSamples.get(slug)!;
+        if (slugMinTs.get(slug)! <= opts.temporalCutoffMs) {
+          train.push(...arr.map(({ score, label }) => ({ score, label })));
+        } else {
+          holdout.push(...arr.map(({ score, label }) => ({ score, label })));
+        }
+      }
+    } else {
+      let trainCount = 0;
+      const targetTrainCount = Math.min(samples.length, Math.max(0, Math.floor(samples.length * opts.trainRatio)));
+      for (const slug of sortedSlugs) {
+        const arr = slugSamples.get(slug)!;
+        if (trainCount < targetTrainCount || trainCount === 0) {
+          train.push(...arr.map(({ score, label }) => ({ score, label })));
+          trainCount += arr.length;
+        } else {
+          holdout.push(...arr.map(({ score, label }) => ({ score, label })));
+        }
+      }
+    }
+    return { train, holdout };
+  } else {
+    const trainCount = Math.min(samples.length, Math.max(0, Math.floor(samples.length * opts.trainRatio)));
+    return {
+      train: samples.slice(0, trainCount).map(({ score, label }) => ({ score, label })),
+      holdout: samples.slice(trainCount).map(({ score, label }) => ({ score, label })),
+    };
+  }
 }
 
 function featureWarning(candidate: CalibrationCandidate): string | undefined {
@@ -231,11 +287,18 @@ export function evaluateBucketStability(model: IsotonicModel, holdout: readonly 
 export function compareCalibrationFeatures(
   records: readonly CalibrationRecord[],
   candidates: readonly CalibrationCandidate[],
-  opts: { trainRatio: number; minTrainSamples: number; minHoldoutSamples: number },
+  opts: {
+    splitMode?: "row" | "temporal";
+    evidenceFilter?: string;
+    trainRatio: number;
+    temporalCutoffMs?: number;
+    minTrainSamples: number;
+    minHoldoutSamples: number;
+  },
 ): CalibrationFeatureComparisonSummary {
   const results = candidates.map((candidate): CalibrationFeatureComparisonResult => {
     const { samples, extraction } = extractCandidateSamples(records, candidate);
-    const { train, holdout } = splitTrainHoldout(samples, opts.trainRatio);
+    const { train, holdout } = splitTrainHoldout(samples, opts);
     const positiveLabelRate = positiveRate(samples);
     const trainPositiveLabelRate = positiveRate(train);
     const holdoutPositiveLabelRate = positiveRate(holdout);
@@ -284,12 +347,29 @@ export function compareCalibrationFeatures(
 
   return {
     status: results.some((result) => result.status === "ok") ? "ok" : "insufficient_data",
+    splitMode: opts.splitMode ?? "row",
+    evidenceFilter: opts.evidenceFilter,
     trainRatio: opts.trainRatio,
+    temporalCutoffMs: opts.temporalCutoffMs,
     minTrainSamples: opts.minTrainSamples,
     minHoldoutSamples: opts.minHoldoutSamples,
     totalRecords: records.length,
     candidates: results,
   };
+}
+
+export function filterRecordsByEvidence(
+  records: readonly CalibrationRecord[],
+  evidenceFilter: "all" | "trade-print-backed" | "touch-only" | "missing-decision-feature-excluded" | string,
+): CalibrationRecord[] {
+  if (evidenceFilter === "trade-print-backed") {
+    return records.filter((r) => r.dataQuality.hasMarketTradeEvidence);
+  } else if (evidenceFilter === "touch-only") {
+    return records.filter((r) => !r.dataQuality.hasMarketTradeEvidence);
+  } else if (evidenceFilter === "missing-decision-feature-excluded") {
+    return records.filter((r) => !r.dataQuality.missingReasons.includes("missing_decision_feature"));
+  }
+  return records.slice();
 }
 
 export function predictWithModel(model: IsotonicModel, score: number): number | null {

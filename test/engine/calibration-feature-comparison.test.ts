@@ -3,6 +3,7 @@ import type { CalibrationRecord } from "../../engine/replay/calibration-extracto
 import {
   compareCalibrationFeatures,
   extractCandidateSamples,
+  filterRecordsByEvidence,
 } from "../../engine/replay/calibration-feature-comparison.ts";
 
 function record(index: number, overrides: Partial<CalibrationRecord> = {}): CalibrationRecord {
@@ -142,5 +143,100 @@ describe("calibration feature comparison", () => {
     expect(result.extraction.validRecords).toBe(0);
     expect(result.extraction.missingLabelCount).toBe(2);
     expect(result.status).toBe("insufficient_data");
+  });
+
+  test("temporal split ordering by trainRatio", () => {
+    const records = [
+      record(1, { slug: "slug-03", fillTsMs: 300 }),
+      record(2, { slug: "slug-01", fillTsMs: 100 }),
+      record(3, { slug: "slug-02", fillTsMs: 200 }),
+      record(4, { slug: "slug-03", fillTsMs: 305 }),
+    ];
+    const summary = compareCalibrationFeatures(records, [{
+      scoreField: "fillPrice",
+      labelField: "adverseSelection",
+    }], {
+      splitMode: "temporal",
+      trainRatio: 0.5,
+      minTrainSamples: 1,
+      minHoldoutSamples: 1,
+    });
+    expect(summary.candidates[0]!.trainSampleCount).toBe(2);
+    expect(summary.candidates[0]!.holdoutSampleCount).toBe(2);
+  });
+
+  test("temporal split ordering by temporalCutoffMs", () => {
+    const records = [
+      record(1, { slug: "slug-03", fillTsMs: 300 }),
+      record(2, { slug: "slug-01", fillTsMs: 100 }),
+      record(3, { slug: "slug-02", fillTsMs: 200 }),
+      record(4, { slug: "slug-03", fillTsMs: 305 }),
+    ];
+    const summary = compareCalibrationFeatures(records, [{
+      scoreField: "fillPrice",
+      labelField: "adverseSelection",
+    }], {
+      splitMode: "temporal",
+      temporalCutoffMs: 250,
+      trainRatio: 0.5,
+      minTrainSamples: 1,
+      minHoldoutSamples: 1,
+    });
+    expect(summary.candidates[0]!.trainSampleCount).toBe(2);
+    expect(summary.candidates[0]!.holdoutSampleCount).toBe(2);
+  });
+
+  test("no leakage between train and holdout for the same pair", () => {
+    const records = Array.from({ length: 10 }, (_, index) => record(index, { slug: "same-slug" }));
+    const summary = compareCalibrationFeatures(records, [{
+      scoreField: "fillPrice",
+      labelField: "adverseSelection",
+    }], {
+      splitMode: "temporal",
+      trainRatio: 0.5,
+      minTrainSamples: 1,
+      minHoldoutSamples: 1,
+    });
+    expect(summary.candidates[0]!.trainSampleCount).toBe(10);
+    expect(summary.candidates[0]!.holdoutSampleCount).toBe(0);
+    expect(summary.status).toBe("insufficient_data");
+  });
+
+  test("missing score/label accounting with temporal split", () => {
+    const records = [
+      record(1, { slug: "s1", fillPrice: null, adverseSelection: true, fillTsMs: 100 }),
+      record(2, { slug: "s2", fillPrice: 0.5, adverseSelection: null, fillTsMs: 200 }),
+      record(3, { slug: "s3", fillPrice: 0.6, adverseSelection: true, fillTsMs: 300 }),
+      record(4, { slug: "s4", fillPrice: 0.7, adverseSelection: false, fillTsMs: 400 }),
+    ];
+    const summary = compareCalibrationFeatures(records, [{
+      scoreField: "fillPrice",
+      labelField: "adverseSelection",
+    }], {
+      splitMode: "temporal",
+      trainRatio: 0.5,
+      minTrainSamples: 1,
+      minHoldoutSamples: 1,
+    });
+    
+    const result = summary.candidates[0]!;
+    expect(result.extraction.missingScoreCount).toBe(1);
+    expect(result.extraction.missingLabelCount).toBe(1);
+    expect(result.extraction.validRecords).toBe(2);
+    expect(result.trainSampleCount).toBe(1);
+    expect(result.holdoutSampleCount).toBe(1);
+  });
+
+  test("evidence filtering works correctly", () => {
+    const records = [
+      record(1, { dataQuality: { hasMarketTradeEvidence: true, hasBookEvidence: true, hasMarkout1s: true, hasMarkout5s: true, hasMarkout30s: true, missingReasons: [] } }),
+      record(2, { dataQuality: { hasMarketTradeEvidence: false, hasBookEvidence: true, hasMarkout1s: true, hasMarkout5s: true, hasMarkout30s: true, missingReasons: [] } }),
+      record(3, { dataQuality: { hasMarketTradeEvidence: true, hasBookEvidence: true, hasMarkout1s: true, hasMarkout5s: true, hasMarkout30s: true, missingReasons: ["missing_decision_feature"] } }),
+    ];
+
+    expect(filterRecordsByEvidence(records, "all")).toHaveLength(3);
+    expect(filterRecordsByEvidence(records, "trade-print-backed")).toHaveLength(2);
+    expect(filterRecordsByEvidence(records, "touch-only")).toHaveLength(1);
+    expect(filterRecordsByEvidence(records, "missing-decision-feature-excluded")).toHaveLength(2);
   });
 });
