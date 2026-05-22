@@ -3,25 +3,25 @@
 ## Current State
 
 - Repository: `polymarket-trade-engine`
-- Branch: `feat/phase8n-calibration-holdout-validation`
-- Phase: Phase 8N offline calibration feature comparison and holdout validation.
+- Branch: `feat/phase8o-calibration-pretrade-features`
+- Phase: Phase 8O CalibrationRecord pre-trade decision feature enrichment.
 
-## Recently Completed: Phase 8N
+## Recently Completed: Phase 8O
 
-Phase 8N extends the Phase 8M offline isotonic scaffold with multi-feature comparison and deterministic train/holdout validation.
+Phase 8O enriches offline calibration rows with features available at decision/quote time. This builds on Phase 8N/8M calibration scaffolding and does not touch live trading behavior.
 
 ## What Changed
 
-- Added `engine/replay/calibration-feature-comparison.ts`.
-  - Candidate score/label extraction.
-  - Adverse-selection and markout-derived labels.
-  - Deterministic train/holdout split.
-  - Train-only isotonic fit and holdout metrics.
-  - Bucket stability reporting.
-  - Leakage warnings for markout score fields.
-- Added `scripts/compare-offline-calibration-features.ts`.
-- Added `test/engine/calibration-feature-comparison.test.ts`.
-- Added `AI_WORKSPACE/PHASE8N_CALIBRATION_FEATURE_HOLDOUT.md`.
+- `engine/strategy-lab.ts`
+  - Conservative fill evidence now carries the matched `DecisionFeatureSnapshot` when replay telemetry provides one.
+  - Fill evidence also records `fillTsMs` separately from placement/decision time.
+- `engine/replay/calibration-extractor.ts`
+  - Adds flattened pre-trade fields for model probability, fair value, implied probability, edges, order book state, liquidity, time-to-close, volatility, predictive divergence, resolution distance, side/action, strategy IDs, config hash, and timestamps.
+  - Preserves nulls and adds explicit `dataQuality.missingReasons` for missing decision/model/edge evidence.
+- `scripts/compare-offline-calibration-features.ts`
+  - Default score candidates now include the enriched pre-trade fields.
+- `test/engine/calibration-extractor.test.ts`
+  - Covers populated decision fields, DOWN-side side-adjusted probability/edge, predictive divergence fallback, and missing/null behavior.
 
 ## Safety Boundaries
 
@@ -36,36 +36,58 @@ Phase 8N extends the Phase 8M offline isotonic scaffold with multi-feature compa
 
 ## Local Result
 
-Command:
+Commands:
 
 ```bash
-bun scripts/compare-offline-calibration-features.ts --input data/reports/phase8l-calibration.jsonl --out-json data/reports/phase8n-calibration-feature-comparison.json
+bun scripts/run-strategy-lab-paired-corpus.ts --pairs data/pairs --timeout-ms 180000 --variants late-entry late-entry-flow-aware fair-value-maker --out-calibration-jsonl data/reports/phase8o-calibration.jsonl
+bun scripts/compare-offline-calibration-features.ts --input data/reports/phase8o-calibration.jsonl --out-json data/reports/phase8o-calibration-feature-comparison.json
 ```
 
-Result:
+Corpus rerun:
 
-- total records: 1,050
-- malformed rows: 0
-- split: 70% train / 30% holdout
-- `fillPrice -> adverseSelection`: train 409, holdout 176, positive rate 0.948718, holdout Brier 0.015955, log loss 0.057985, ECE 0.010227.
-- `spread`: insufficient data, 1,050 missing score values.
-- `predictedProbability`: insufficient data, 1,050 missing score values.
-- markout score fields produce diagnostic comparisons only and are flagged as post-outcome/leakage risks.
+- valid pair manifests used: 5
+- variants: `late-entry`, `late-entry-flow-aware`, `fair-value-maker`
+- calibration records written: 1,050
+- late-entry variants: no eligible fills
+- fair-value-maker: 70 / 70 usable touch-only fill evidence; still not trade-through proof
+
+Phase 8N-style comparison:
+
+- split: 409 train / 176 holdout on labeled filled rows
+- missing labels: 465
+- pre-trade fields with enough train/holdout samples:
+  - `modelProbability`
+  - `rawProbability`
+  - `fairValue`
+  - `marketImpliedProbability`
+  - `quotedEdge`
+  - `fairValueEdge`
+  - `spread`
+  - `bestBid`
+  - `bestAsk`
+  - `topOfBookLiquidity`
+  - `timeToCloseMs`
+  - `volatilityEstimate`
+  - `predictiveDivergence`
+  - `resolutionDistance`
+  - `distanceToOpenAnchor`
+
+Selected `adverseSelection` holdout metrics:
+
+| score field | train | holdout | missing score | Brier | log loss | ECE | bucket delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `modelProbability` | 409 | 176 | 15 | 0.016118 | 0.057080 | 0.012175 | 0.012175 |
+| `fairValueEdge` | 409 | 176 | 15 | 0.047594 | 0.174086 | 0.028981 | 0.028981 |
+| `spread` | 409 | 176 | 0 | 0.047822 | 0.188564 | 0.008523 | 0.008523 |
+| `bestBid` | 409 | 176 | 0 | 0.017382 | 0.079339 | 0.020833 | 0.020833 |
+| `timeToCloseMs` | 409 | 176 | 0 | 0.017149 | 0.072733 | 0.017984 | 0.017984 |
+| `predictiveDivergence` | 409 | 176 | 0 | 0.045665 | 0.161746 | 0.009834 | 0.009834 |
+| `resolutionDistance` | 409 | 176 | 0 | 0.017018 | 0.082470 | 0.016561 | 0.016561 |
 
 ## Interpretation
 
-The comparison harness works, but the current corpus is not ready for calibration-driven tuning. The available pre-trade-ish feature set is too thin. The project needs richer `CalibrationRecord` pre-trade fields before calibration can become decision-useful.
+Phase 8O removes the immediate feature sparsity blocker from Phase 8N. The calibration pipeline can now compare actual pre-trade candidate fields offline. The corpus is still too small and label-skewed for strategy tuning, and current live evidence remains touch-only rather than trade-through-heavy.
 
 ## Next Exact Task
 
-Phase 8O should enrich `CalibrationRecord` with fields known at quote/decision time:
-
-- quoted edge,
-- fair-value edge,
-- model probability,
-- market-implied probability,
-- spread,
-- top-of-book liquidity/depth,
-- time-to-close.
-
-Then rerun Phase 8N-style train/holdout comparisons on a larger corpus before tuning or readiness changes.
+Phase 8P should build a larger clean calibration corpus with explicit temporal train/holdout separation and trade-print-backed fills, then rerun feature comparison before any tuning or readiness promotion.

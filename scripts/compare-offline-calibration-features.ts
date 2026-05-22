@@ -18,12 +18,26 @@ type Args = {
 };
 
 const DEFAULT_SCORE_FIELDS = [
+  "modelProbability",
+  "rawProbability",
+  "fairValue",
+  "marketImpliedProbability",
+  "quotedEdge",
+  "fairValueEdge",
+  "spread",
+  "bestBid",
+  "bestAsk",
+  "topOfBookLiquidity",
+  "timeToCloseMs",
+  "volatilityEstimate",
+  "predictiveDivergence",
+  "resolutionDistance",
+  "distanceToOpenAnchor",
+  "predictedProbability",
   "fillPrice",
   "markout1s",
   "markout5s",
   "markout30s",
-  "spread",
-  "predictedProbability",
 ];
 
 const DEFAULT_LABEL_FIELDS: CalibrationLabelName[] = [

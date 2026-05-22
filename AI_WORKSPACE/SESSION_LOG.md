@@ -527,3 +527,12 @@
 - **Result:** `fillPrice -> adverseSelection` holdout metrics: train 409, holdout 176, positive rate 0.948718, Brier 0.015955, log loss 0.057985, ECE 0.010227.
 - **Safety:** No live execution, live risk gate, order placement, runtime strategy, ranking, readiness, or profitability-claim changes.
 
+## 2026-05-21: Phase 8O CalibrationRecord Pre-Trade Feature Enrichment
+
+- **Action:** Enriched Strategy Lab conservative fill evidence with matched decision feature snapshots for offline calibration extraction.
+- **Action:** Added decision-time `CalibrationRecord` fields for side-adjusted model probability, fair value, implied probability, quoted/fair-value edge, order book state, liquidity, time-to-close, volatility, predictive divergence, resolution distance, strategy/config IDs, side/action, and timestamps.
+- **Action:** Updated Phase 8N comparison defaults to include the new pre-trade fields.
+- **Result:** Local paired corpus rerun wrote 1,050 Phase 8O calibration rows; 409 train / 176 holdout labeled filled rows were available for the enriched field comparison.
+- **Result:** `modelProbability`, `fairValueEdge`, `spread`, `bestBid`, `bestAsk`, `topOfBookLiquidity`, `timeToCloseMs`, `volatilityEstimate`, `predictiveDivergence`, and `resolutionDistance` now have enough train/holdout samples for offline comparison.
+- **Safety:** No live execution, live risk gate, order placement, runtime strategy, ranking, readiness, or profitability-claim changes.
+
