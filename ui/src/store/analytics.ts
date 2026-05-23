@@ -1,3 +1,4 @@
+ 
 import { create } from 'zustand';
 import type { Tz, DataSource } from '../utils/analytics/time';
 import type { Asset, Duration } from '../utils/analytics/parse';
@@ -23,7 +24,7 @@ function loadEnum<T extends string>(key: string, allowed: readonly T[], fallback
   try {
     const v = localStorage.getItem(key);
     if (v && (allowed as readonly string[]).includes(v)) return v as T;
-  } catch {}
+  } catch { /* noop */ }
   return fallback;
 }
 

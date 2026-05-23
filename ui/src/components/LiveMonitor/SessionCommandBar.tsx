@@ -1,3 +1,4 @@
+ 
 import { useStore } from '../../store';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -20,7 +21,7 @@ export function SessionCommandBar() {
     const handleStop = async () => {
         try {
             await fetch(`${API_BASE}/session/stop`, { method: 'POST' });
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error("Stop failed", e);
         }
     };

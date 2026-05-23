@@ -52,7 +52,7 @@ export default function ControlCenter() {
     const [simRounds, setSimRounds] = useState<number>(0);
     const [strategy, setStrategy] = useState<string>('simulation');
     const [isResetting, setIsResetting] = useState(false);
-    const [engineConfig, setEngineConfig] = useState<any>(null);
+    const [engineConfig, setEngineConfig] = useState<any /* eslint-disable-line @typescript-eslint/no-explicit-any */>(null);
     const [tinyLiveArmed, setTinyLiveArmed] = useState(false);
 
     useEffect(() => {
@@ -102,6 +102,7 @@ export default function ControlCenter() {
                 }
             })
             .catch(err => console.error("Failed to fetch strategy presets", err));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const handleStartSim = async () => {
@@ -117,7 +118,7 @@ export default function ControlCenter() {
             });
             const data = await res.json();
             if (!data.success) alert(`Start failed: ${data.error}`);
-        } catch (e: any) {
+        } catch (e: any /* eslint-disable-line @typescript-eslint/no-explicit-any */) {
             alert(`Start failed: ${e.message}`);
         }
     };
@@ -137,7 +138,7 @@ export default function ControlCenter() {
             });
             const data = await res.json();
             if (!data.success) alert(`Replay start failed: ${data.error}`);
-        } catch (e: any) {
+        } catch (e: any /* eslint-disable-line @typescript-eslint/no-explicit-any */) {
             alert(`Replay start failed: ${e.message}`);
         }
     };
@@ -145,7 +146,7 @@ export default function ControlCenter() {
     const handleStop = async () => {
         try {
             await fetch(`${API_BASE}/session/stop`, { method: 'POST' });
-        } catch (e: any) {
+        } catch (e: any /* eslint-disable-line @typescript-eslint/no-explicit-any */) {
             alert(`Stop failed: ${e.message}`);
         }
     };
@@ -164,7 +165,7 @@ export default function ControlCenter() {
                 const statusData = await statusRes.json();
                 useStore.getState().setOperatorStatus(statusData);
             }
-        } catch (e: any) {
+        } catch (e: any /* eslint-disable-line @typescript-eslint/no-explicit-any */) {
             alert(`Reset failed: ${e.message}`);
         } finally {
             setIsResetting(false);

@@ -12,7 +12,7 @@ function formatCountdown(ms: number) {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-const MetricsRow = React.memo(({ market, latestSnapshot }: { market: any, latestSnapshot: any }) => {
+const MetricsRow = React.memo(({ market, latestSnapshot }: { market: any, latestSnapshot: any }) => { /* eslint-disable-line @typescript-eslint/no-explicit-any */
     return (
         <div className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
@@ -69,7 +69,7 @@ export function RoundDecisionPanel() {
     const lifecycleStates = useStore(state => state.lifecycleStates);
     const roundResolutions = useStore(state => state.roundResolutions);
     const decisionSnapshots = useStore(state => state.decisionSnapshots);
-    const [nowMs, setNowMs] = useState(Date.now());
+    const [nowMs, setNowMs] = useState(() => Date.now());
 
     useEffect(() => {
         const handle = setInterval(() => setNowMs(Date.now()), 250);

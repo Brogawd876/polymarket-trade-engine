@@ -43,3 +43,8 @@ __tmp_state__
 
 # Archived local diagnostic probes from live-auth investigations
 scripts/archive/
+
+# generated artifacts
+data/
+corpus-runs/
+test-pipeline-runs/

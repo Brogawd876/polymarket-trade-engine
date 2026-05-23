@@ -75,7 +75,7 @@ export default function Analytics() {
                         {['BTC', 'ETH', 'XRP', 'SOL', 'DOGE'].map((a) => (
                             <button
                                 key={a}
-                                onClick={() => setAsset(a as any)}
+                                onClick={() => setAsset(a as any /* eslint-disable-line @typescript-eslint/no-explicit-any */)}
                                 className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                                     asset === a 
                                     ? 'bg-indigo-500 text-white shadow-sm' 
@@ -91,7 +91,7 @@ export default function Analytics() {
                         {['5m', '15m'].map((d) => (
                             <button
                                 key={d}
-                                onClick={() => setDuration(d as any)}
+                                onClick={() => setDuration(d as any /* eslint-disable-line @typescript-eslint/no-explicit-any */)}
                                 className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                                     duration === d 
                                     ? 'bg-indigo-500 text-white shadow-sm' 

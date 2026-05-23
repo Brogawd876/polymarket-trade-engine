@@ -1,3 +1,4 @@
+ 
 import type { LogEntry, ParsedRun, Resolution, Outcome, SlugInfo } from "../../types/analytics";
 
 export type Asset = "BTC" | "ETH" | "XRP" | "SOL" | "DOGE";
@@ -26,7 +27,7 @@ export function parseAllJson(text: string): LogEntry[] {
     } else if (c === "}" && --depth === 0 && start !== -1) {
       try {
         results.push(JSON.parse(text.slice(start, i + 1)));
-      } catch {}
+      } catch { /* noop */ }
       start = -1;
     }
   }

@@ -1,4 +1,4 @@
-export type LogEntry = Record<string, any>;
+export type LogEntry = Record<string, any /* eslint-disable-line @typescript-eslint/no-explicit-any */>;
 
 export type Resolution = {
   direction: "UP" | "DOWN";

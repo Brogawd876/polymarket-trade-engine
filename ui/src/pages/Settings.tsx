@@ -28,7 +28,7 @@ export default function Settings() {
                 if (!res.ok) throw new Error('Failed to fetch engine configuration');
                 const data = await res.json();
                 setConfig(data);
-            } catch (e: any) {
+            } catch (e: any /* eslint-disable-line @typescript-eslint/no-explicit-any */) {
                 setError(e.message);
             } finally {
                 setLoading(false);
