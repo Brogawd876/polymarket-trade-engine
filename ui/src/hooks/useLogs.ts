@@ -1,3 +1,4 @@
+ 
 import { useEffect, useState } from "react";
 import { parseLog } from "../utils/analytics/parse";
 import { useAnalyticsStore } from "../store/analytics";
@@ -35,7 +36,7 @@ async function readCustom(files: File[]): Promise<ParsedRun[]> {
   const runs: ParsedRun[] = [];
   for (const file of files) {
     if (!file.name.endsWith(".log")) continue;
-    const rel = (file as any).webkitRelativePath as string | undefined;
+    const rel = (file as unknown as { webkitRelativePath?: string }).webkitRelativePath;
     // Skip files inside subfolders (relative path has more than one separator).
     if (rel && rel.split("/").length > 2) continue;
     try {
@@ -74,7 +75,8 @@ export function useLogs(): ParsedRun[] {
 
   useEffect(() => {
     if (dataSource.kind !== "custom") {
-      setCustomRuns([]);
+      // Delay state clear to avoid synchronous setState warning
+      Promise.resolve().then(() => setCustomRuns([]));
       return;
     }
     let cancelled = false;

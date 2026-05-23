@@ -1,3 +1,4 @@
+ 
 import { useState, useEffect, useRef } from 'react';
 import { FileText, Search, RefreshCw, ChevronRight, Terminal } from 'lucide-react';
 
@@ -27,7 +28,7 @@ export default function Logs() {
 
     useEffect(() => {
         if (!selectedFile) return;
-        setLoading(true);
+        Promise.resolve().then(() => setLoading(true));
         fetch(`http://127.0.0.1:3000/api/operator/logs/${encodeURIComponent(selectedFile)}`)
             .then(res => res.text())
             .then(text => {

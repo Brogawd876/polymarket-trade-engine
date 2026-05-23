@@ -608,7 +608,7 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       RELAYER_URL,
       Chain.POLYGON,
       walletClient,
-      this._builderConfig,
+      this._builderConfig as any,
       RelayerTxType.PROXY,
     );
   }

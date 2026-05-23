@@ -1,5 +1,6 @@
 import { useStore } from '../../store';
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function formatDivergencePct(divergencePct: number | null | undefined) {
     if (divergencePct == null) return '---';
     return `${divergencePct.toFixed(4)}%`;

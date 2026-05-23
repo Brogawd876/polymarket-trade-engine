@@ -53,7 +53,7 @@ async function main() {
   }
 
   const validManifests = manifests.filter(m => m.manifest.pairValidity === "valid");
-  if (validManifests.length < minValidPairs) {
+  if (validManifests.length < minValidPairs && !values["dry-run"]) {
     console.error(`Found ${validManifests.length} valid pairs, but min-valid-pairs is ${minValidPairs}. Aborting.`);
     process.exit(1);
   }
