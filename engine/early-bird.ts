@@ -68,6 +68,7 @@ export type EarlyBirdRuntimeOptions = {
   eventWriter?: EventWriter;
   marketLogMode?: "normal" | "disabled";
   replayVenueMetadata?: Partial<VenueMetadata>;
+  conservativeFill?: boolean;
 };
 
 export type EngineStatus = {
@@ -117,6 +118,7 @@ export class EarlyBird {
   private _replayReader: ReplayLogReader | null = null;
   private _clock: Clock;
   private _persistState = true;
+  private _conservativeFill = false;
   private _telemetry: TelemetrySink;
   private _eventWriter: EventWriter;
   private readonly _marketLogMode: "normal" | "disabled";
@@ -167,6 +169,7 @@ export class EarlyBird {
       });
     this._orderBookFactory = runtime.orderBookFactory;
     const persistState = runtime.persistState ?? !replayFile;
+    const conservativeFill = runtime.conservativeFill ?? false;
 
     if (replayFile) {
       log.write(`[startup] Replay mode enabled: ${replayFile}`);
@@ -227,15 +230,20 @@ export class EarlyBird {
           if (snap) return snap;
         }
         return {
-          bestAsk: null,
-          bestAskLiquidity: null,
-          bestBid: null,
-          bestBidLiquidity: null,
+          bids: [],
+          asks: [],
+          lastTradePrice: null,
+          lastTradeSize: null,
         };
-      }, { clock: this._clock, fixedDelayMs: replayFile ? 0 : undefined });
+      }, {
+        clock: this._clock,
+        fixedDelayMs: replayFile ? 0 : undefined,
+        conservativeFill: runtime.conservativeFill,
+      });
     }
 
     this._persistState = persistState;
+    this._conservativeFill = conservativeFill;
 
     this._telemetry.push({
       ts: this._clock.nowMs(),
@@ -298,14 +306,15 @@ export class EarlyBird {
                 if (snap) return snap;
               }
               return {
-                bestAsk: null,
-                bestAskLiquidity: null,
-                bestBid: null,
-                bestBidLiquidity: null,
+                bids: [],
+                asks: [],
+                lastTradePrice: null,
+                lastTradeSize: null,
               };
             },
             cancelCallbacks: simClient.cancelCallbacks,
             clock: this._clock,
+            conservativeFill: this._conservativeFill,
           });
       }
 

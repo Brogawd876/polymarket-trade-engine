@@ -68,6 +68,8 @@ export class OrderBook {
   protected books = new Map<string, AssetBook>();
   protected tickSizes = new Map<string, string>(); // tokenId -> tickSize
   protected feeRates = new Map<string, number>(); // tokenId -> feeRateBps
+  protected lastTradePrices = new Map<string, number>(); // tokenId -> price
+  protected lastTradeSizes = new Map<string, number>(); // tokenId -> shares
   private listeners = new Set<() => void>();
   private _isTerminallyBroken = false;
   private _tradeTape?: TradeTapeTracker;
@@ -160,14 +162,19 @@ export class OrderBook {
     } else if (data.event_type === "last_trade_price") {
       const msg = data as LastTradePriceMessage;
       this.feeRates.set(msg.asset_id, parseFloat(msg.fee_rate_bps));
+      this.lastTradePrices.set(msg.asset_id, parseFloat(msg.price));
       this._recordTapeTrade(msg);
     } else if (data.event_type === "trades") {
       const msg = data as TradeMessage;
+      const price = parseFloat(msg.price);
+      const size = parseFloat(msg.size);
+      this.lastTradePrices.set(msg.asset_id, price);
+      this.lastTradeSizes.set(msg.asset_id, size);
       if (this._tradeTape) {
         this._tradeTape.recordTrade({
           assetId: msg.asset_id,
-          price: parseFloat(msg.price),
-          size: parseFloat(msg.size),
+          price,
+          size,
           side: msg.side,
           ts: parseInt(msg.timestamp)
         });
@@ -176,7 +183,7 @@ export class OrderBook {
     this.notify();
   }
 
-  private getOrCreateBook(assetId: string): AssetBook {
+  protected getOrCreateBook(assetId: string): AssetBook {
     let book = this.books.get(assetId);
     if (!book) {
       book = {
@@ -351,6 +358,24 @@ export class OrderBook {
     if (price === null) return null;
     const size = book.asks.get(price) ?? 0;
     return { price, liquidity: price * size };
+  }
+
+  /** Last trade price and size for the given asset. */
+  lastTradeInfo(assetId: string): { price: number | null; size: number | null } {
+    return {
+      price: this.lastTradePrices.get(assetId) ?? null,
+      size: this.lastTradeSizes.get(assetId) ?? null,
+    };
+  }
+
+  /** Full book entries (bids/asks) for the given asset. */
+  getBookLevels(assetId: string): { bids: [number, number][]; asks: [number, number][] } {
+    const book = this.books.get(assetId);
+    if (!book) return { bids: [], asks: [] };
+    return {
+      bids: book.bids.top(100),
+      asks: book.asks.top(100),
+    };
   }
 
   /** Structured snapshot of both books for logging. */

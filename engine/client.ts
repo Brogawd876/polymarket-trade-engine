@@ -1,4 +1,5 @@
-import type { Order, CancelOrderResponse } from "../utils/trading";
+import type { Order, CancelOrderResponse, OrderType } from "../utils/trading";
+
 import {
   ClobClient,
   Side,
@@ -24,6 +25,8 @@ import { polygon } from "viem/chains";
 import { Env } from "../utils/config";
 import { POLYGON_CONTRACTS } from "../utils/contracts.ts";
 import { type Clock, RealClock } from "./bot-core/data-sources.ts";
+import { ConservativeMakerFillModel, type FillModelBook, type FillModelOrder } from "./replay/fill-model.ts";
+
 
 const RELAYER_URL = "https://relayer-v2.polymarket.com";
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
@@ -154,16 +157,57 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
   readonly cancelCallbacks = new Map<string, () => void>();
   private readonly _clock: Clock;
   private readonly _fixedDelayMs?: number;
+  private readonly _conservativeFill: boolean;
 
   constructor(
-    private getBook: (tokenId: string) => BookSnapshot,
-    opts: { clock?: Clock; fixedDelayMs?: number } = {},
+    private getBook: (tokenId: string) => FillModelBook | BookSnapshot | null,
+    opts: { clock?: Clock; fixedDelayMs?: number; conservativeFill?: boolean } = {},
   ) {
     this._clock = opts.clock ?? new RealClock();
     this._fixedDelayMs = opts.fixedDelayMs;
+    this._conservativeFill = opts.conservativeFill ?? false;
   }
 
   async init(): Promise<void> {}
+
+  private _checkFill(
+    order: { action: "buy" | "sell"; price: number; shares: number; orderType?: OrderType },
+    bookData: FillModelBook | BookSnapshot | null,
+  ): boolean {
+    if (!bookData) return false;
+
+    const isConservative =
+      this._conservativeFill ||
+      process.env.CONSERVATIVE_FILL === "true" ||
+      process.env.PESSIMISTIC_FILL === "true";
+
+    if (isConservative && "bids" in bookData && "asks" in bookData) {
+      const model = new ConservativeMakerFillModel();
+      const result = model.evaluate(
+        {
+          action: order.action,
+          side: "UP", // side is not used for maker/taker classification logic
+          price: order.price,
+          shares: order.shares,
+          orderType: (order.orderType as any) ?? "GTC",
+        },
+        bookData as FillModelBook,
+      );
+      return result.filled;
+    }
+
+    // Fallback to optimistic
+    const snap: BookSnapshot = ("bids" in bookData)
+      ? {
+          bestAsk: (bookData as FillModelBook).asks[0]?.[0] ?? null,
+          bestAskLiquidity: (bookData as FillModelBook).asks[0]?.[1] ?? null,
+          bestBid: (bookData as FillModelBook).bids[0]?.[0] ?? null,
+          bestBidLiquidity: (bookData as FillModelBook).bids[0]?.[1] ?? null,
+        }
+      : (bookData as BookSnapshot);
+
+    return isSimFilled(order, snap);
+  }
 
   async postMultipleOrders(
     orders: MultiOrderRequest[],
@@ -186,7 +230,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
       // FOK: fill immediately or reject — matches real CLOB behavior
       if (req.orderType === "FOK") {
         const book = this.getBook(req.tokenId);
-        if (isSimFilled(req, book)) {
+        if (this._checkFill(req, book)) {
           const orderId = crypto.randomUUID();
           this._orders.set(orderId, {
             id: orderId,
@@ -236,7 +280,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
     for (const order of this._orders.values()) {
       if (order.status !== "live") continue;
       const book = this.getBook(order.tokenId);
-      if (isSimFilled(order, book)) {
+      if (this._checkFill(order, book)) {
         this._orders.set(order.id, {
           ...order,
           status: "filled",
@@ -261,7 +305,7 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
 
     if (order.status === "live") {
       const book = this.getBook(order.tokenId);
-      if (isSimFilled(order, book)) {
+      if (this._checkFill(order, book)) {
         const updated: Order = {
           ...order,
           status: "filled",

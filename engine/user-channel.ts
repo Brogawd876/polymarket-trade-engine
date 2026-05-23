@@ -2,6 +2,7 @@ import type { OrderRequest } from "./strategy/types.ts";
 import type { EarlyBirdClient, BookSnapshot } from "./client.ts";
 import { isSimFilled } from "./client.ts";
 import { type Clock, RealClock } from "./bot-core/data-sources.ts";
+import { ConservativeMakerFillModel, type FillModelBook } from "./replay/fill-model.ts";
 import { 
   createReconnectingWs, 
   type ReconnectingWs 
@@ -304,19 +305,22 @@ export class PolymarketUserChannel extends UserChannelBase {
 
 export class SimUserChannel extends UserChannelBase {
   private _interval: any = null;
-  private readonly _getBook: (tokenId: string) => BookSnapshot;
+  private readonly _getBook: (tokenId: string) => FillModelBook | BookSnapshot | null;
   private readonly _cancelCallbacks: Map<string, () => void> | null;
   private readonly _clock: Clock;
+  private readonly _conservativeFill: boolean;
 
   constructor(opts: {
-    getBook: (tokenId: string) => BookSnapshot;
+    getBook: (tokenId: string) => FillModelBook | BookSnapshot | null;
     cancelCallbacks?: Map<string, () => void>;
     clock?: Clock;
+    conservativeFill?: boolean;
   }) {
     super();
     this._getBook = opts.getBook;
     this._cancelCallbacks = opts.cancelCallbacks ?? null;
     this._clock = opts.clock ?? new RealClock();
+    this._conservativeFill = opts.conservativeFill ?? false;
   }
 
   subscribe(_conditionId: string): void {
@@ -349,12 +353,51 @@ export class SimUserChannel extends UserChannelBase {
     if (!wasMatched) this._cancelCallbacks?.delete(orderId);
   }
 
+  private _checkFill(
+    order: { action: "buy" | "sell"; price: number; shares: number; orderType?: "GTC" | "FOK" },
+    bookData: FillModelBook | BookSnapshot | null,
+  ): boolean {
+    if (!bookData) return false;
+
+    const isConservative =
+      this._conservativeFill ||
+      process.env.CONSERVATIVE_FILL === "true" ||
+      process.env.PESSIMISTIC_FILL === "true";
+
+    if (isConservative && "bids" in bookData && "asks" in bookData) {
+      const model = new ConservativeMakerFillModel();
+      const result = model.evaluate(
+        {
+          action: order.action,
+          side: "UP", // side is not used for maker/taker classification logic
+          price: order.price,
+          shares: order.shares,
+          orderType: (order.orderType as any) ?? "GTC",
+        },
+        bookData as FillModelBook,
+      );
+      return result.filled;
+    }
+
+    // Fallback to optimistic
+    const snap: BookSnapshot = ("bids" in bookData)
+      ? {
+          bestAsk: (bookData as FillModelBook).asks[0]?.[0] ?? null,
+          bestAskLiquidity: (bookData as FillModelBook).asks[0]?.[1] ?? null,
+          bestBid: (bookData as FillModelBook).bids[0]?.[0] ?? null,
+          bestBidLiquidity: (bookData as FillModelBook).bids[0]?.[1] ?? null,
+        }
+      : (bookData as BookSnapshot);
+
+    return isSimFilled(order, snap);
+  }
+
   private _check(): void {
     for (const [orderId, t] of this.tracked) {
       if (t.matched) continue;
       const { req } = t.request;
       const book = this._getBook(req.tokenId);
-      if (!isSimFilled(req, book)) continue;
+      if (!this._checkFill(req, book)) continue;
 
       const tradeId = crypto.randomUUID();
       this.processOrderEvent({

@@ -76,6 +76,8 @@ class MockOrderBook {
   getTickSize() { return "0.01"; }
   getFeeRate() { return 1000; }
   getTokenId(_: "UP" | "DOWN") { return ""; }
+  lastTradeInfo() { return { price: null, size: null }; }
+  getBookLevels() { return { bids: [], asks: [] }; }
 }
 
 beforeAll(() => {

@@ -973,6 +973,7 @@ export class StrategyLabBatchManager {
           replayVenueMetadata: tokenMapping?.status === "ok"
             ? { clobTokenIds: tokenMapping.tokenIds }
             : undefined,
+          conservativeFill: true,
         });
         this.currentBots.set(batchId, bot);
         const reader = bot.replayReader;

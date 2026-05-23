@@ -39,7 +39,10 @@ import {
   type TelemetrySink, 
   NullTelemetrySink 
 } from "./telemetry/index.ts";
+import { ConservativeMakerFillModel, type FillModelBook } from "./replay/fill-model.ts";
+import type { BookLevel } from "./event-store/events.ts";
 import { createDecisionFeatureSnapshot } from "./decision-features.ts";
+
 import type { EventWriter } from "./event-store/writer.ts";
 import type { ProfitEventPayload, ProfitEventType } from "./event-store/events.ts";
 
@@ -292,20 +295,16 @@ export class MarketLifecycle {
     return this._strategyName;
   }
 
-  /** Returns orderbook snapshot for a tokenId owned by this lifecycle. */
-  getBookSnapshot(tokenId: string) {
+  /** Returns full book and trade info for a tokenId owned by this lifecycle. */
+  getBookSnapshot(tokenId: string): FillModelBook | null {
     if (!this._clobTokenIds) return null;
-    let side: "UP" | "DOWN" | null = null;
-    if (tokenId === this._clobTokenIds[0]) side = "UP";
-    else if (tokenId === this._clobTokenIds[1]) side = "DOWN";
-    if (!side) return null;
-    const askInfo = this._orderBook.bestAskInfo(side);
-    const bidInfo = this._orderBook.bestBidInfo(side);
+    const levels = this._orderBook.getBookLevels(tokenId);
+    const trade = this._orderBook.lastTradeInfo(tokenId);
     return {
-      bestAsk: askInfo?.price ?? null,
-      bestAskLiquidity: askInfo?.liquidity ?? null,
-      bestBid: bidInfo?.price ?? null,
-      bestBidLiquidity: bidInfo?.liquidity ?? null,
+      bids: levels.bids,
+      asks: levels.asks,
+      lastTradePrice: trade.price,
+      lastTradeSize: trade.size,
     };
   }
 

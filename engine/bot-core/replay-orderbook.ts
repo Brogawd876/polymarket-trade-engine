@@ -49,21 +49,49 @@ export class ReplayOrderBook extends OrderBook {
   }
 
   private handleEvent(evt: ReplayEvent) {
-    if (evt.type !== "orderbook_snapshot") return;
+    if (evt.type === "orderbook_snapshot") {
+      this.lastUp = evt.up || this.lastUp;
+      this.lastDown = evt.down || this.lastDown;
 
-    this.lastUp = evt.up || this.lastUp;
-    this.lastDown = evt.down || this.lastDown;
+      if (!this.assetIds[0] || !this.assetIds[1]) return;
 
-    if (!this.assetIds[0] || !this.assetIds[1]) return;
-
-    this.applyReplaySnapshot(this.assetIds[0], this._parseBidsAsks(evt.up));
-    this.applyReplaySnapshot(this.assetIds[1], this._parseBidsAsks(evt.down));
+      this.applyReplaySnapshot(this.assetIds[0], this._parseBidsAsks(evt.up));
+      this.applyReplaySnapshot(this.assetIds[1], this._parseBidsAsks(evt.down));
+    } else if (evt.type === "market_book_snapshot") {
+      this.applyReplaySnapshot(evt.payload.tokenId, evt.payload);
+    } else if (evt.type === "market_book_delta") {
+      const book = this.getOrCreateBook(evt.payload.tokenId);
+      if (evt.payload.bidChanges) {
+        for (const [p, s] of evt.payload.bidChanges) {
+          if (s === 0) book.bids.delete(p);
+          else book.bids.set(p, s);
+        }
+      }
+      if (evt.payload.askChanges) {
+        for (const [p, s] of evt.payload.askChanges) {
+          if (s === 0) book.asks.delete(p);
+          else book.asks.set(p, s);
+        }
+      }
+    } else if (evt.type === "market_trade" || evt.type === "last_trade_price") {
+      const price = evt.payload.price;
+      const size = evt.payload.shares;
+      if (price !== undefined) {
+        this.lastTradePrices.set(evt.payload.tokenId, price);
+      }
+      if (size !== undefined) {
+        this.lastTradeSizes.set(evt.payload.tokenId, size);
+      }
+      // Trigger update for tape if needed
+    } else {
+      return;
+    }
     
     // Mock some defaults if missing
-    if (!this.tickSizes.has(this.assetIds[0])) this.tickSizes.set(this.assetIds[0], "0.001");
-    if (!this.tickSizes.has(this.assetIds[1])) this.tickSizes.set(this.assetIds[1], "0.001");
-    if (!this.feeRates.has(this.assetIds[0])) this.feeRates.set(this.assetIds[0], 10);
-    if (!this.feeRates.has(this.assetIds[1])) this.feeRates.set(this.assetIds[1], 10);
+    if (this.assetIds[0] && !this.tickSizes.has(this.assetIds[0])) this.tickSizes.set(this.assetIds[0], "0.001");
+    if (this.assetIds[1] && !this.tickSizes.has(this.assetIds[1])) this.tickSizes.set(this.assetIds[1], "0.001");
+    if (this.assetIds[0] && !this.feeRates.has(this.assetIds[0])) this.feeRates.set(this.assetIds[0], 10);
+    if (this.assetIds[1] && !this.feeRates.has(this.assetIds[1])) this.feeRates.set(this.assetIds[1], 10);
 
     // Notify listeners (like MarketLifecycle)
     this.notify();

@@ -95,6 +95,8 @@ function makeOrderBook() {
     bestBidInfo: () => ({ price: 0.48, liquidity: 100 }),
     bestBidPrice: () => 0.48,
     bestAskPrice: () => 0.49,
+    lastTradeInfo: () => ({ price: null, size: null }),
+    getBookLevels: () => ({ bids: [], asks: [] }),
   };
 }
 
