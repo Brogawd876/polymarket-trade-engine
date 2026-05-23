@@ -127,6 +127,8 @@ export async function validatePair(
         validationErrors.push("Raw L2 log is empty");
       } else if (rawL2BookEventCount === 0 && rawL2TradeEventCount === 0) {
         validationErrors.push("Raw L2 log contains zero useful book or trade events.");
+      } else if (rawL2TradeEventCount === 0) {
+        validationWarnings.push("Raw L2 log has zero trade events (book-only data). Coverage is diagnostic only.");
       }
 
       if (rawL2SlugFound && rawL2SlugFound !== slug) {
@@ -171,6 +173,8 @@ export async function validatePair(
   } else if (recorderExitCode !== null && recorderExitCode !== 0) {
     recorderStopReason = "crashed";
     validationErrors.push(`Recorder crashed with exit code ${recorderExitCode}`);
+  } else if (recorderStopReason === "unknown") {
+    validationWarnings.push("Recorder stop reason is unknown. Recorder may not have shut down cleanly.");
   }
 
   let strategyLabStatus: "completed" | "timed_out" | "failed" | "skipped" = "skipped";

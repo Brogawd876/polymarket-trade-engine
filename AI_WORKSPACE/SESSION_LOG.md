@@ -543,3 +543,20 @@
 - Task attempted: Phase 8S Cleanup and Validation.
 - Outcome: Repairing CI, stabilizing scripts, updating package.json, and completing backend/UI validation.
 - Handoff reference: AI_WORKSPACE/HANDOFF.md
+
+## 2026-05-23T05:33:00Z
+
+- Agent used: Antigravity
+- Task attempted: Phase 8T Corpus Collection and Readiness Validation.
+- Outcome: Validated that the pipeline runs cleanly and respects the readiness gates. Ran a live background capture of 1 additional valid pair. Pipeline evaluation of the 6 valid pairs showed the corpus is BLOCKED due to insufficient sample counts (1458/5000 total records, 900/2000 trade-print-backed records) and lack of temporal spread. Generated PHASE8T_CORPUS_READINESS.md detailing the findings and defining the next collection targets (19 more valid pairs across varied timeframes).
+- Safety: No live execution behavior changed. No risk gates relaxed. No artifact data committed to git.
+- Handoff reference: AI_WORKSPACE/HANDOFF.md
+
+## 2026-05-23T06:03:00Z
+
+- Agent used: Antigravity
+- Task attempted: Phase 8U Capture Quality Hardening
+- Branch: phase8u-capture-quality-hardening
+- Outcome: Audited Chainlink truth path (all fields verified, fail-closed). Added missing_chainlink_anchor and missing_chainlink_round_id to missingReasons. Hardened pair-validator with zero-trade-event and unknown-stop-reason warnings. Created scripts/audit-capture-quality.ts (pass/warn/fail gate). Created 15 tests in test/scripts/audit-capture-quality.test.ts. Added 7 new tests across chainlink-resolution-adapter and paired-l2. Full suite: 468 pass / 0 fail (baseline 445). Typecheck clean. Real corpus audit: capture_quality_warn (2 warnings on pre-8U pairs; no anchor failures, no feature failures). Controlled capture is ALLOWED.
+- Safety: No live execution. No risk gates relaxed. No data committed.
+- Handoff reference: AI_WORKSPACE/HANDOFF.md

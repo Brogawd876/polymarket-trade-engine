@@ -154,6 +154,14 @@ export function extractCalibrationRecords(
       if (!evidence.decisionFeature) missingReasons.push("missing_decision_feature");
       if (fields.modelProbability === null) missingReasons.push("missing_model_probability");
       if (fields.fairValueEdge === null) missingReasons.push("missing_fair_value_edge");
+      if (evidence.decisionFeature?.settlementTruth.settlementAnchorPrice === null ||
+          evidence.decisionFeature?.settlementTruth.settlementAnchorPrice === undefined) {
+        missingReasons.push("missing_chainlink_anchor");
+      }
+      if (evidence.decisionFeature?.settlementTruth.roundId === null ||
+          evidence.decisionFeature?.settlementTruth.roundId === undefined) {
+        missingReasons.push("missing_chainlink_round_id");
+      }
 
       records.push({
         schemaVersion: 1,

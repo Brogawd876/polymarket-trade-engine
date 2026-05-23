@@ -198,4 +198,89 @@ describe("Pair Validator", () => {
     expect(manifest.pairValidity).toBe("valid");
   });
 
+
+  // Phase 8U: Capture Quality Hardening Tests
+
+  test("zero trade events (book-only) produces warning but not error", async () => {
+    const replayLog = path.join(tmpDir, "bookonly.log");
+    const l2Log = path.join(tmpDir, "bookonly.ndjson");
+
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    // Only book events, no trade events
+    fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_book_delta", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: 0 },
+    });
+
+    expect(manifest.rawL2TradeEventCount).toBe(0);
+    expect(manifest.rawL2BookEventCount).toBeGreaterThan(0);
+    // Should be a warning, not an error
+    expect(manifest.validationWarnings.some(w => w.includes("zero trade events"))).toBeTrue();
+    expect(manifest.validationErrors.some(e => e.includes("zero trade events"))).toBeFalse();
+    // Coverage can still be complete
+    expect(manifest.coverageVerdict).toBe("complete");
+    // Pair is still valid (book-only is a warning not a blocker)
+    expect(manifest.pairValidity).toBe("valid");
+  });
+
+  test("recorder stop reason unknown produces warning", async () => {
+    const replayLog = path.join(tmpDir, "unknownstop.log");
+    const l2Log = path.join(tmpDir, "unknownstop.ndjson");
+
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
+
+    // No recorderExitCode, no signal = unknown stop reason from metadata
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: null, recorderSignal: null, recorderStopReason: "unknown" },
+    });
+
+    expect(manifest.recorderStopReason).toBe("unknown");
+    expect(manifest.validationWarnings.some(w => w.includes("Recorder stop reason is unknown"))).toBeTrue();
+    // Unknown stop reason alone is a warning, not an error
+    expect(manifest.validationErrors.some(e => e.includes("stop reason"))).toBeFalse();
+    // Pair is still valid if coverage is complete
+    expect(manifest.pairValidity).toBe("valid");
+  });
+
+  test("recorder SIGINT without recorder_completed event produces error", async () => {
+    const replayLog = path.join(tmpDir, "sigintnoc.log");
+    const l2Log = path.join(tmpDir, "sigintnoc.ndjson");
+
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    // No recorder_completed event in L2 file
+    fs.writeFileSync(l2Log, JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n");
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: null, recorderSignal: "SIGINT" },
+    });
+
+    expect(manifest.validationErrors.some(e => e.includes("SIGINT") && e.includes("recorder_completed"))).toBeTrue();
+    expect(manifest.pairValidity).toBe("invalid");
+  });
+
+  test("recorder_completed event seen with SIGINT produces expected_sigint stop reason", async () => {
+    const replayLog = path.join(tmpDir, "sigintwithcomplete.log");
+    const l2Log = path.join(tmpDir, "sigintwithcomplete.ndjson");
+
+    fs.writeFileSync(replayLog, JSON.stringify({ ts: 2000, slug: "btc-updown-5m-100" }) + "\n" + JSON.stringify({ ts: 4000, slug: "btc-updown-5m-100" }) + "\n");
+    // recorder_completed event IS present
+    fs.writeFileSync(l2Log,
+      JSON.stringify({ eventType: "market_book_snapshot", receivedTsMs: 1000, slug: "btc-updown-5m-100" }) + "\n" +
+      JSON.stringify({ eventType: "market_trade", receivedTsMs: 5000, slug: "btc-updown-5m-100" }) + "\n" +
+      JSON.stringify({ eventType: "recorder_completed", receivedTsMs: 5100, slug: "btc-updown-5m-100" }) + "\n"
+    );
+
+    const manifest = await validatePair("btc-updown-5m-100", replayLog, l2Log, "late-entry", {
+      metadata: { recorderExitCode: null, recorderSignal: "SIGINT" },
+    });
+
+    expect(manifest.recorderStopReason).toBe("expected_sigint");
+    expect(manifest.recorderCompletedEventSeen).toBeTrue();
+    // No error for clean SIGINT with completed event
+    expect(manifest.validationErrors.some(e => e.includes("SIGINT"))).toBeFalse();
+    expect(manifest.pairValidity).toBe("valid");
+  });
+
 });
