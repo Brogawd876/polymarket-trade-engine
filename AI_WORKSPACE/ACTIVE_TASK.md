@@ -1,59 +1,24 @@
 # Current Active Task
 
-**Objective:** Phase 8U — Capture Quality Hardening
+**Objective:** Phase 8U / Phase 8T — Capture Quality Hardening & Corpus Expansion
 
-**Status:** ✅ Completed. All tests pass. Audit gate implemented.
+**Status:** ⏸️ Paused (Session ended). Phase 8U hardening completed. Phase 8T corpus expansion started but interrupted.
 
-**Branch:** `phase8u-capture-quality-hardening`
+**Branch:** `master` (Phase 8U PR #10 merged)
 
-**Work done:**
+**Work done this session:**
+1. **Phase 8U Hardening:** Added explicit capture-quality audit gate (`scripts/audit-capture-quality.ts`). Added missing Chainlink anchor logic and diagnostic logging. Added pair-validator warnings for zero-trade and unknown-stop-reason cases. Verified with 15 new tests.
+2. **Review & Merge:** Merged `phase8u-capture-quality-hardening` to `master` (PR #10).
+3. **Tests:** Full test suite passed on master (468 pass, 0 fail).
+4. **Corpus Expansion:** Started background run of `bun scripts/capture-calibration-corpus.ts` to gather 25 valid pairs. Interrupted to close session cleanly.
 
-### 1. Chainlink Settlement Truth Hardening
-- Audited `chainlink-resolution-adapter.ts` — confirmed authoritative Chainlink-only anchor, fail-closed missing anchor behavior, all required metadata recorded.
-- Added 3 new tests in `test/engine/chainlink-resolution-adapter.test.ts`:
-  - `priceToBeat` returns null when no qualifying events exist before round start
-  - `priceToBeat` returns null when all observed events are stale
-  - `priceToBeat` returns valid anchor when fresh event exists before round start
+**Current corpus state:**
+- Total valid pairs: 6
+- Capture quality: `capture_quality_warn` (acceptable, no feature/anchor failures).
+- Readiness: **BLOCKED** due to lack of samples (~1,458 records currently, need 5,000+).
 
-### 2. Raw L2 / Pair Validator Hardening
-- Added zero-trade-event **warning** (not error) to `engine/replay/pair-validator.ts`
-- Added unknown recorder stop reason **warning** to `engine/replay/pair-validator.ts`
-- Added 4 new tests in `test/engine/paired-l2.test.ts`:
-  - Book-only (zero trade events) produces warning, pair is still valid
-  - Unknown stop reason produces warning (not error)
-  - SIGINT without `recorder_completed` event produces error
-  - SIGINT with `recorder_completed` event produces `expected_sigint` (clean)
-
-### 3. Calibration Extractor — Chainlink Missing Reasons
-- Added `missing_chainlink_anchor` and `missing_chainlink_round_id` tracking in `engine/replay/calibration-extractor.ts`
-
-### 4. Capture-Quality Audit Script
-- Created `scripts/audit-capture-quality.ts` with:
-  - Reads `*.pair.json` manifests from `--pairs-dir`
-  - Reads optional calibration NDJSON from `--calibration-jsonl`
-  - Writes JSON and Markdown reports
-  - Overall verdict: `capture_quality_pass` | `capture_quality_warn` | `capture_quality_fail`
-  - Fail conditions: zero pairs, below min-valid, invalid ≥ valid (≥10 pairs), zero L2 events on valid pair, incomplete coverage on valid pair, missing Chainlink anchor, missing feature rate > 5%
-  - Warn conditions: low trade events, weak temporal spread, unknown stop reason, touch-only heavy
-
-### 5. Audit Script Tests
-- Created `test/scripts/audit-capture-quality.test.ts` with 15 tests covering all major branches
-
-### 6. Phase 8U Audit Documentation
-- Created `AI_WORKSPACE/PHASE8U_CAPTURE_QUALITY_AUDIT.md` with field classification table (A/B/C/D), Chainlink audit, L2 audit, decision-feature audit, and current verdict.
-
-**Current corpus audit result:**
-- Decision: `capture_quality_warn`
-- 6 valid pairs, 5 invalid pairs
-- 1.88M raw L2 events, 25,362 trade events
-- 2 warnings: 2 older valid pairs have unknown recorder stop reason (pre-Phase 8U captures)
-- No Chainlink anchor failures
-- No decision-feature failures
-
-**Controlled capture may continue.** Serious large-scale capture should proceed after collecting more pairs.
-
-**Safety confirmation:**
-- No live execution behavior changed
-- No live risk gates changed
-- No order placement behavior changed
-- No generated data artifacts committed
+**Next step upon resume:**
+- Resume running `bun scripts/capture-calibration-corpus.ts --target-valid-pairs 25 --reuse-existing-pairs data/pairs --max-attempts 40` to collect the remaining ~19 valid pairs.
+- Run `bun scripts/audit-capture-quality.ts --pairs-dir data/pairs` before/after each batch.
+- Run the readiness pipeline once target sample size and temporal spread are met.
+- **Do not move to model training yet.**
