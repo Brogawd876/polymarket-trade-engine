@@ -51,3 +51,16 @@ Smoke result:
 
 - `btc-updown-5m-1779643200` was captured into `data/pairs-clean` with complete coverage and valid pair status.
 - Audit result was `capture_quality_warn` only because a single smoke pair has weak temporal spread. It reported 1 valid pair, 0 invalid pairs, 343,156 raw L2 events, and 2,788 raw L2 trade events.
+
+Follow-up capture result:
+
+- A longer 25-pair capture was started after the fix and then intentionally stopped on 2026-05-24.
+- The run preserved 5 valid complete pairs in `data/pairs-clean` and 0 rejected manifests in `data/pairs-rejected`.
+- Latest audit reported 5 valid pairs, 0 invalid pairs, complete coverage for all 5, 1,707,270 raw L2 events, and 13,316 raw L2 trade events.
+- The run exposed a separate strategy/quote hygiene issue: repeated simulated extreme quotes such as `BUY UP @ 0.94`, usually blocked by risk gates. This is not a capture orchestration failure, but corpus expansion is paused until the strategy/shared quote path is audited.
+
+Recommended next work:
+
+- Audit all strategies and shared quote/execution paths, not only the currently active fair-value path.
+- Quantify extreme quote rate, duplicate blocked-intent rate, blocked rate, and fill behavior per strategy.
+- Add `no quote`/throttling/deduplication rules where appropriate before resuming corpus expansion.
