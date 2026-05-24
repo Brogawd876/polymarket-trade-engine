@@ -4,6 +4,12 @@ import { validatePair } from "../engine/replay/pair-validator.ts";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import * as path from "path";
 import { gitCommitFromEnv } from "../engine/event-store/events.ts";
+import {
+  manifestIsCompleteAndValid,
+  pairManifestPath,
+  rawL2LogPath as makeRawL2LogPath,
+  replayLogPath as makeReplayLogPath,
+} from "./capture-corpus-utils.ts";
 
 function execProcess(
   cmd: string, 
@@ -35,6 +41,9 @@ async function main() {
   let rounds = 1;
   let slotOffset = 1;
   let strategyLabTimeoutMs = 120000;
+  let pairsDir = path.join("data", "pairs");
+  let rawL2Dir = path.join("data", "raw-l2");
+  let invalidPairsDir: string | null = null;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -42,6 +51,9 @@ async function main() {
     else if (arg === "--rounds") rounds = parseInt(args[++i] || "1", 10);
     else if (arg === "--slot-offset") slotOffset = parseInt(args[++i] || "1", 10);
     else if (arg === "--strategy-lab-timeout-ms") strategyLabTimeoutMs = parseInt(args[++i] || "120000", 10);
+    else if (arg === "--pairs-dir") pairsDir = args[++i] || pairsDir;
+    else if (arg === "--raw-l2-dir") rawL2Dir = args[++i] || rawL2Dir;
+    else if (arg === "--invalid-pairs-dir") invalidPairsDir = args[++i] || invalidPairsDir;
     else if (arg === "--prod" || arg === "--live") {
       console.error("Live/prod flags are forbidden in this capture script.");
       process.exit(1);
@@ -59,15 +71,13 @@ async function main() {
   console.log(`[Orchestrator] Resolved target slug: ${slug}`);
   console.log(`[Orchestrator] Slot window: ${new Date(slot.startTime).toISOString()} to ${new Date(slot.endTime).toISOString()}`);
 
-  const rawL2Dir = path.join("data", "raw-l2");
   if (!existsSync(rawL2Dir)) mkdirSync(rawL2Dir, { recursive: true });
-  
-  const pairsDir = path.join("data", "pairs");
   if (!existsSync(pairsDir)) mkdirSync(pairsDir, { recursive: true });
+  const rejectedPairsDir = invalidPairsDir ?? pairsDir;
+  if (!existsSync(rejectedPairsDir)) mkdirSync(rejectedPairsDir, { recursive: true });
 
-  const replayLogPath = path.join("logs", `early-bird-${slug}.log`);
-  const rawL2LogPath = path.join(rawL2Dir, `raw-l2-${slug}.ndjson`);
-  const manifestPath = path.join(pairsDir, `${slug}.pair.json`);
+  const replayLogPath = makeReplayLogPath(slug);
+  const rawL2LogPath = makeRawL2LogPath(rawL2Dir, slug);
 
   const captureStartedAtMs = Date.now();
 
@@ -159,10 +169,23 @@ async function main() {
   
   // Recorder failure check is now handled inside validatePair using SIGINT logic
 
+  const manifestValid = manifestIsCompleteAndValid(manifest);
+  const manifestPath = pairManifestPath(
+    manifestValid ? pairsDir : rejectedPairsDir,
+    slug,
+  );
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-  if (manifest.validationErrors.length > 0) {
-    console.error(`[Orchestrator] Validation failed with errors:`, manifest.validationErrors);
+  if (!manifestValid) {
+    console.error(`[Orchestrator] Validation failed.`);
+    if (manifest.validationErrors.length > 0) {
+      console.error(`[Orchestrator] Validation errors:`, manifest.validationErrors);
+    }
+    if (manifest.parseErrors.length > 0) {
+      console.error(`[Orchestrator] Parse errors:`, manifest.parseErrors);
+    }
+    console.error(`[Orchestrator] Pair validity: ${manifest.pairValidity}`);
+    console.error(`[Orchestrator] Coverage: ${manifest.coverageVerdict}`);
     console.log(`[Orchestrator] Manifest written to: ${manifestPath}`);
     process.exit(1);
   } else {

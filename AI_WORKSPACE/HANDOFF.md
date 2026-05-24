@@ -2,63 +2,72 @@
 
 ## Current State
 
-- Repository: polymarket-trade-engine
-- Branch: `master`
-- Phase: Phase 8T — Corpus Collection (Resuming)
+- Repository: `polymarket-trade-engine`
+- Branch: `master` with local Phase 8V changes
+- Phase: Phase 8V / Capture Orchestration Fix implemented and smoke-tested
 
-## Recently Completed: Phase 8U
+## Recently Completed
 
-### 1. Files Changed
-- `engine/replay/calibration-extractor.ts`
-- `engine/replay/pair-validator.ts`
-- `test/engine/chainlink-resolution-adapter.test.ts`
-- `test/engine/paired-l2.test.ts`
-- `scripts/audit-capture-quality.ts` (NEW)
-- `test/scripts/audit-capture-quality.test.ts` (NEW)
-- `AI_WORKSPACE/PHASE8U_CAPTURE_QUALITY_AUDIT.md` (NEW)
+The 2026-05-24 background corpus capture run was stopped because the wrapper was producing mostly partial pairs.
 
-### 2. Contract Changes
-- No system architectural contracts changed. Added missing data diagnostics to `missingReasons` enum/logic in calibration. 
+Root cause:
 
-### 3. Tests Added or Updated
-- Added 15 tests for `audit-capture-quality`.
-- Added 3 Chainlink null-anchor tests.
-- Added 4 Phase 8U hardening tests for paired-l2.
-- Total full suite tests: 468 pass, 0 fail.
+- `scripts/capture-calibration-corpus.ts` incremented `slotOffset` after each attempt.
+- `slotOffset` is relative to wall-clock time, so later attempts chased farther future markets and raw L2 coverage no longer aligned with bot replay coverage.
+- `scripts/capture-paired-replay-l2.ts` also exited successfully for partial/invalid manifests.
 
-### 4. Commands Run
-- `bun run check` (typecheck clean)
-- `bun test --max-concurrency=1`
-- `bun scripts/audit-capture-quality.ts --pairs-dir data/pairs`
-- `git remote prune origin`, `git branch -d` (deleted 36 merged feature branches locally to clean workspace state)
+Salvaged artifact:
 
-### 5. Risks or Follow-ups
-- Capture quality currently returns `capture_quality_warn` due to pre-Phase-8U pairs with unknown recorder stop reasons. This is expected and acceptable.
-- Readiness is still BLOCKED due to insufficient pair counts and lack of temporal spread.
+- `btc-updown-5m-1779638100` is valid and complete.
 
-## Current Status
+Smoke artifact:
 
-- **Capture Quality Layer**: Hardened and operational.
-- **Corpus Readiness**: **BLOCKED**
-  - Current count: 6 valid pairs
-  - Target count: ~25 valid pairs
-  - Current records: ~1,458
-  - Target records: 5,000+
-  - Target trade-print-backed records: 2,000+
-  - Temporal spread: Needs variation across hours/days.
+- `btc-updown-5m-1779643200` was captured into `data/pairs-clean` with valid pair status and complete coverage.
+
+Diagnostic-only artifacts:
+
+- `btc-updown-5m-1779639000`
+- `btc-updown-5m-1779640200`
+- `btc-updown-5m-1779641700`
+
+## Files Changed
+
+- `scripts/capture-corpus-utils.ts` (new)
+- `scripts/capture-calibration-corpus.ts`
+- `scripts/capture-paired-replay-l2.ts`
+- `test/scripts/capture-calibration-corpus.test.ts`
+- `AI_WORKSPACE/PHASE8V_CAPTURE_ORCHESTRATION_FIX.md` (new)
+- `AI_WORKSPACE/ACTIVE_TASK.md`
+- `AI_WORKSPACE/HANDOFF.md`
+
+## Verification
+
+Completed:
+
+```powershell
+bun run check
+bun test --max-concurrency=1 test/scripts/capture-calibration-corpus.test.ts test/engine/paired-l2.test.ts test/scripts/audit-capture-quality.test.ts
+bun test --max-concurrency=1
+bun scripts/capture-calibration-corpus.ts --target-valid-pairs 1 --max-attempts 2 --pairs-dir data/pairs-clean --invalid-pairs-dir data/pairs-rejected
+bun scripts/audit-capture-quality.ts --pairs-dir data/pairs-clean
+```
+
+The clean-directory audit returned `capture_quality_warn` only because the smoke has one pair and weak temporal spread. It reported 1 valid pair, 0 invalid pairs, 343,156 raw L2 events, and 2,788 raw L2 trade events.
 
 ## Next Exact Task
 
-1. Resume `master` branch.
-2. Continue controlled capture batches to reach ~25 valid pairs.
-   ```powershell
-   bun scripts/capture-calibration-corpus.ts --target-valid-pairs 25 --reuse-existing-pairs data/pairs --max-attempts 40
-   ```
-3. Before each new batch, run the audit gate to ensure quality is maintained:
-   ```powershell
-   bun scripts/audit-capture-quality.ts --pairs-dir data/pairs
-   ```
-4. Once targets are hit (~25 valid pairs, 5,000+ records, 2,000+ trade-print records, good temporal spread), re-run the readiness pipeline to clear the block.
-5. **DO NOT move to model training yet.**
+Resume controlled capture with clean valid/rejected directories:
 
-*Note: Phase 8T capture was briefly started but interrupted to close the session safely. Some incomplete logs may be present in `data/corpus-runs`, but the actual pair valid count is preserved.*
+```powershell
+bun scripts/capture-calibration-corpus.ts --target-valid-pairs 25 --max-attempts 40 --slot-offset 1 --pairs-dir data/pairs-clean --invalid-pairs-dir data/pairs-rejected
+```
+
+Then audit only the clean valid directory:
+
+```powershell
+bun scripts/audit-capture-quality.ts --pairs-dir data/pairs-clean
+```
+
+Do not move to model training, strategy tuning, paper trading, or live trading yet.
+
+No live trading behavior, strategy logic, risk gates, or order placement behavior changed.
