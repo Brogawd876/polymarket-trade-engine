@@ -1,53 +1,54 @@
 # Current Active Task
 
-**Objective:** Phase 8V / Capture Orchestration Fix, then Phase 8T Corpus Expansion
+**Objective:** Phase 9A preparation: strategy quote hygiene plus blocked-decision counterfactual audit.
 
-**Status:** Phase 8V implemented and smoke-tested locally. Phase 8T corpus expansion is paused pending strategy/quote hygiene audit.
+**Status:** Final 25-pair calibration corpus exists and the first one-round paper shadow completed, but readiness remains blocked. Do not collect more live paper/shadow rounds until strategy behavior is cleaner and blocked decisions are audited.
 
-**Branch:** `master`
+**Branch:** `capture/controlled-corpus-expansion` at `origin/master` (`b006de7` before this closing checkpoint).
 
-## Work done
+## Work Done
 
-1. Phase 8U capture-quality hardening was already completed and merged.
-2. A 2026-05-24 background corpus capture run was stopped because it started producing mostly partial pairs.
-3. The salvageable artifact from that run is `btc-updown-5m-1779638100`, which is valid and complete.
-4. Old partial pairs from the stopped run remain diagnostic only and should not be used as clean calibration corpus inputs.
-5. Phase 8V fixed capture orchestration:
-   - stable relative `--slot-offset`
-   - duplicate-artifact skipping
-   - clean valid/rejected output directory support
-   - strict paired-capture exit semantics
-   - watchdog timeout for stuck capture attempts
-6. A controlled smoke capture wrote `btc-updown-5m-1779643200` to `data/pairs-clean` as a valid complete pair.
-7. A longer 25-pair capture was started, then intentionally stopped on 2026-05-24 after repeated extreme simulated quotes (`BUY UP @ 0.94`) showed a strategy/quote hygiene issue worth investigating before collecting more corpus.
+1. Phase 8U/8V capture hardening and orchestration fixes are merged on `origin/master`.
+2. `data/pairs` now contains exactly 25 valid complete paired replay/L2 manifests used by the final calibration run.
+3. Final calibration pipeline completed in `data/calibration-run-final-25`:
+   - 75 Strategy Lab runs: 25 pairs x 3 variants.
+   - 27,498 calibration records.
+   - 23,523 trade-print-backed labeled records.
+   - 478 conservative fill events.
+   - Global readiness decision: `BLOCKED`.
+4. Strategy performance from the final replay tournament:
+   - `late-entry`: 25 runs, 0 trades, $0.00 PnL.
+   - `late-entry-flow-aware`: 25 runs, 0 trades, $0.00 PnL.
+   - `fair-value-maker`: 25 runs, 25 trade-active rounds, -$48.40 total PnL, 94.15% conservative adverse-selection rate.
+5. A one-round live paper/sim shadow run completed for `btc-updown-5m-1779833100`:
+   - Strategy: `fair-value-maker`.
+   - Result: resolved `DOWN`, 0 fills, $0.00 PnL.
+   - Generated 303 blocked BUY intents, all blocked because `predictive aggregate disagreement is true`.
+   - Direction-only hindsight showed 163/303 blocked intents were on the winning side, but this is not execution-realistic evidence.
 
-## Current Corpus State
+## Current Interpretation
 
-- Legacy `data/pairs` contains 7 usable valid pairs after salvaging `btc-updown-5m-1779638100`.
-- Legacy `data/pairs` may fail the capture-quality audit because old invalid/partial manifests remain there as diagnostics.
-- Clean `data/pairs-clean` contains 5 valid complete pairs:
-  - `btc-updown-5m-1779643200`
-  - `btc-updown-5m-1779644100`
-  - `btc-updown-5m-1779644700`
-  - `btc-updown-5m-1779645300`
-  - `btc-updown-5m-1779645900`
-- Clean `data/pairs-rejected` has no rejected manifests from the run.
-- Latest clean audit reported 5 valid, 0 invalid, complete coverage for all 5, 1,707,270 raw L2 events, and 13,316 raw L2 trade events.
-- Readiness is still blocked due to insufficient sample count and temporal spread.
+- The capture/calibration machinery works and is producing useful diagnostics.
+- The strategies are not ready for live or paper-scale deployment.
+- `fair-value-maker` still shows toxic maker behavior under realistic fill scoring.
+- The risk gate may be protective, overly strict, or both; the project cannot know until blocked decisions are scored counterfactually.
+- Continuing paper/shadow collection before fixing quote hygiene will likely generate more noisy examples of the same failure modes.
 
 ## Next Step
 
-Audit strategy and shared quote/execution hygiene before collecting more corpus:
+Build a replay-only blocked-decision counterfactual audit before any more paper/shadow collection:
 
-- Identify all strategy modules and shared quote-building paths.
-- Measure extreme quote rate, duplicate blocked-intent rate, blocked rate, fill behavior, and usable/not-usable status per strategy.
-- Investigate why the fair-value path repeatedly emits clamped near-max bids such as `0.94` while the risk gate blocks them.
-- Decide whether saturated probabilities should become `no quote`, whether blocked duplicate intents should be throttled/deduped, and whether disagreement/stale-feed states should prevent quote generation earlier.
+- For every blocked intent, score whether it would realistically fill.
+- For maker strategies, use raw L2 and the conservative maker fill scorer.
+- For late-entry variants, evaluate a taker/cross-spread counterfactual separately from maker fills.
+- Report markout 1s/5s/30s, settlement result, hypothetical PnL, and block verdict by strategy and block reason.
+- Add an explicit replay-only permissive risk mode only if it cannot be used in live/prod.
 
-Audit the clean output before and after capture batches:
+Also fix quote hygiene:
 
-```powershell
-bun scripts/audit-capture-quality.ts --pairs-dir data/pairs-clean
-```
+- Stop saturated fair-value probabilities from emitting near-max bids like `0.94`.
+- Prevent negative candidate quote logging.
+- Move predictive-disagreement/stale-feed checks before quote generation where possible.
+- Deduplicate or throttle repeated blocked intents.
 
-Do not move to model training, strategy tuning, paper trading, or live trading yet.
+Do not claim profitability. Do not relax production risk gates. Do not run live trading.

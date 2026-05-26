@@ -48,3 +48,7 @@ scripts/archive/
 data/
 corpus-runs/
 test-pipeline-runs/
+run_result*.txt
+capture_replay_after_stop.txt
+controlled_capture_*.txt
+state_btc-updown-5m-*/

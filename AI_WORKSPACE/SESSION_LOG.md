@@ -451,6 +451,25 @@
   - `bun run scripts/check-clob.ts` authenticated and reported open-order count `0`.
   - `bun run scripts/verify-raw-order.ts` passed with maker/signer set to the corrected deposit wallet and `signatureType=3`.
 
+## 2026-05-26T18:55:00-04:00
+
+- Agent used: OpenAI Codex
+- Task attempted: Close-out checkpoint after final 25-pair calibration, one paper/shadow run, and blocked-decision counterfactual planning.
+- Outcome:
+  - Confirmed `data/calibration-run-final-25` completed with 25 valid pairs, 75 Strategy Lab runs, 27,498 calibration records, 23,523 trade-print-backed labeled records, and global readiness `BLOCKED`.
+  - Summarized strategy performance: `late-entry` and `late-entry-flow-aware` had zero trades and $0.00 PnL; `fair-value-maker` traded all 25 rounds but ended at -$48.40 with about 94.15% conservative adverse selection.
+  - Analyzed one paper/sim run for `btc-updown-5m-1779833100`: resolved `DOWN`, 0 fills, $0.00 PnL, 303 blocked BUY intents, all blocked by `predictive aggregate disagreement is true`.
+  - Direction-only hindsight showed 163/303 blocked intents were on the winning side, but this is not sufficient evidence because fill realism, duplicate intents, inventory, fees, and markouts must be scored.
+  - Updated `AI_WORKSPACE/ACTIVE_TASK.md` and `AI_WORKSPACE/HANDOFF.md` so the next session starts with quote hygiene and blocked-decision counterfactual audit instead of more paper/shadow collection.
+- Next exact task:
+  - Build a replay-only blocked-decision counterfactual audit script/report.
+  - Consider a replay-only permissive/selective risk mode that cannot be used in live/prod.
+  - Fix fair-value-maker quote hygiene and blocked-intent spam before collecting more data.
+- Safety:
+  - No live trading.
+  - No production risk-gate relaxation.
+  - No profitability or paper-candidate claim.
+
 ## 2026-05-21T10:45:00-04:00
 
 - Agent used: Codex

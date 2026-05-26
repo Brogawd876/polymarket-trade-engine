@@ -1,37 +1,67 @@
-# Phase 8G Paired Corpus Report
+# Phase 8G/8F Paired Corpus Report
 
 ## Aggregate Counts
-- **Total manifests scanned:** 4
-- **Valid pairs:** 3
-- **Invalid pairs:** 0
-- **Skipped old-schema pairs:** 1
-- **Malformed pairs:** 0
 
-## Valid Pairs Evidence Verdicts
-- **Complete coverage count:** 3
-- **Partial/Missing/Unknown coverage count:** 0
-- **Usable evidence count:** 0
-- **Unavailable (No Fills) count:** 3
-- **Unavailable (Insufficient Data) count:** 0
-- **Unavailable (Missing Mapping) count:** 0
-- **Failed SL Evaluation count:** 0
+Source: `data/calibration-run-final-25/corpus-summary.json`.
 
-## Strategy Lab Paired-Corpus Runner
-- **Status:** not_run
+- **Total manifests scanned:** 32
+- **Valid pairs:** 25
+- **Invalid pairs:** 7
+- **Complete coverage count:** 25
+- **Total raw L2 trade events:** 57,605
+- **Calibration records:** 27,498
+- **Labeled records:** 23,523
+- **Trade-print-backed records:** 23,523
+- **Touch-only records:** 3,975
+- **Global adverse-selection rate:** 92.55%
+- **Approximate temporal span:** 135.92 hours
 
-## Corpus Summary Table
+## Strategy Lab Final Run
 
-| Slug | Strategy | Validity | Coverage | SL Verdict | Replay Ev | L2 Ev (Book/Trade) | Errors/Warnings |
-|------|----------|----------|----------|------------|-----------|---------------------|-----------------|
-| btc-updown-5m-1779343200 | late-entry | undefined | complete | unavailable_no_fills | 2130 | 182549 (174397/0) | 0 / 0 |
-| btc-updown-5m-1779371700 | late-entry | valid | complete | unavailable_no_fills | 1926 | 187475 (171276/0) | 1 / 0 |
-| btc-updown-5m-1779372300 | late-entry | valid | complete | unavailable_no_fills | 2638 | 141187 (130092/0) | 1 / 0 |
-| btc-updown-5m-1779372900 | late-entry | valid | complete | unavailable_no_fills | 2643 | 119894 (110114/0) | 1 / 0 |
+- **Status:** completed
+- **Total runs:** 75
+- **Completed:** 75
+- **Failed:** 0
+- **Canceled:** 0
+- **Variants:** `late-entry`, `late-entry-flow-aware`, `fair-value-maker`
+- **Readiness decision:** BLOCKED
+- **Paper candidates:** 0
+
+## Strategy Summary
+
+| Strategy | Runs | Trade Rate | Total PnL | Avg PnL | Best | Worst | Key Finding |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `late-entry` | 25 | 0% | $0.00 | $0.00 | $0.00 | $0.00 | No trades fired. |
+| `late-entry-flow-aware` | 25 | 0% | $0.00 | $0.00 | $0.00 | $0.00 | No trades fired. |
+| `fair-value-maker` | 25 | 100% | -$48.40 | -$1.936 | +$26.55 | -$34.45 | Active but heavily adverse-selected. |
+
+## Fair-Value-Maker Execution Diagnostics
+
+- Conservative fill samples: 478
+- Trade-through fills: 409
+- Touch-only fills: 69
+- Conservative adverse-selection rate: 94.15%
+- Conservative 1s markout: -0.0531
+- Conservative 5s markout: -0.0569
+- Conservative 30s markout: -0.0518
+- Average turnover: $48.67
+- Blocked decisions: 1,848
+- Problems flagged: 1,017
 
 ## Interpretation
-- **What the corpus proves:** The evaluation plumbing works correctly to pair live shadows with L2 data.
-- **What it does not prove:** Any profitability claim. We are still establishing the data foundation.
-- **Data missing:** We need to ensure strategies are actually taking trades so we have sufficient usable evidence for markout reporting.
+
+- The paired replay/L2 evaluation machinery is now useful and reproducible.
+- The final corpus is large enough to expose strategy and risk-gate behavior, but not enough to pass strict readiness gates.
+- `fair-value-maker` remains vulnerable to toxic fills and adverse selection.
+- The late-entry variants are not producing fills under the current execution model.
+- More paper/shadow collection should wait until quote hygiene and blocked-decision counterfactuals are implemented.
 
 ## Next Recommendation
-Proceed to run Strategy Lab paired corpus batch over these generated datasets, or capture more if usable evidence is low.
+
+Add a blocked-decision counterfactual audit and quote-hygiene pass before more corpus expansion:
+
+- Score blocked decisions using realistic maker/taker execution assumptions.
+- Compare normal Strategy Lab behavior against a replay-only permissive/selective risk mode.
+- Prevent saturated probabilities, negative quote candidates, and repeated blocked-intent spam from polluting future calibration data.
+
+No profitability claim. No paper-candidate claim. No live trading behavior changed.
