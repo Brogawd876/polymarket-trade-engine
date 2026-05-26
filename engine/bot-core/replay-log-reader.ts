@@ -9,6 +9,7 @@ export type ReplayEvent =
   | { ts: number; type: "slot"; action: "start" | "end"; slug: string; startTime: number; endTime: number; strategy: string }
   | { ts: number; type: "market_price"; openPrice: number; gap?: number; priceToBeat?: number }
   | { ts: number; type: "chainlink_resolution"; price: number; rawOracleAnswer?: string; roundId?: string; answeredInRound?: string; chainUpdatedAtMs?: number | null; localReceivedAtMs?: number; oracleLagMs?: number | null; quality?: string; stalenessStatus?: string; source?: string; sourceType?: string; contractAddress?: string }
+  | { ts: number; type: "resolution"; direction?: "UP" | "DOWN"; openPrice: number; closePrice: number; unfilledShares?: number; payout?: number; pnl?: number }
   | { ts: number; type: string; [key: string]: any };
 
 export class ReplayLogReader {

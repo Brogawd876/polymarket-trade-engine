@@ -217,4 +217,218 @@ describe("ReplayRunner", () => {
         },
     );
   });
+
+  test("applies replay resolution so STOPPING with pending=0 completes", async () => {
+    await withTempLog(
+      [
+        JSON.stringify({
+          ts: 1000,
+          type: "slot",
+          action: "start",
+          slug: "btc-updown-5m-1000",
+          startTime: 1000,
+          endTime: 1300,
+          strategy: "simulation",
+        }),
+        JSON.stringify({
+          ts: 1001,
+          type: "orderbook_snapshot",
+          up: { bids: [], asks: [] },
+          down: { bids: [], asks: [] },
+        }),
+        JSON.stringify({
+          ts: 1301,
+          type: "resolution",
+          direction: "UP",
+          openPrice: 100,
+          closePrice: 101,
+          unfilledShares: 0,
+          payout: 0,
+          pnl: 0,
+        }),
+        JSON.stringify({
+          ts: 1302,
+          type: "slot",
+          action: "end",
+          slug: "btc-updown-5m-1000",
+          startTime: 1000,
+          endTime: 1300,
+          strategy: "simulation",
+        }),
+      ].join("\n"),
+      async (path) => {
+        const reader = new ReplayLogReader(path);
+        const clock = new VirtualClock();
+        const applied: unknown[] = [];
+        let activeLifecycleCount = 1;
+        let isShuttingDown = false;
+        let shutdownCalls = 0;
+        const bot: ReplayBot = {
+          get activeLifecycleCount() {
+            return activeLifecycleCount;
+          },
+          get isShuttingDown() {
+            return isShuttingDown;
+          },
+          replayStateSummary: () => "btc-updown-5m-1000:STOPPING(pending=0)",
+          start: async () => {},
+          tickOnce: async () => {
+            if (applied.length > 0) {
+              activeLifecycleCount = 0;
+              isShuttingDown = true;
+            }
+          },
+          startShutdown: () => {
+            shutdownCalls++;
+            isShuttingDown = true;
+          },
+          applyReplayMarketResult: (result) => {
+            applied.push(result);
+          },
+        };
+
+        const result = await new ReplayRunner(reader, bot, clock).run();
+
+        expect(result.completed).toBe(true);
+        expect(applied).toEqual([
+          {
+            slug: "btc-updown-5m-1000",
+            startTime: 1_000_000,
+            endTime: 1_300_000,
+            completed: true,
+            openPrice: 100,
+            closePrice: 101,
+          },
+        ]);
+        expect(shutdownCalls).toBe(1);
+      },
+    );
+  });
+
+  test("does not emit STALL DETECTED when STOPPING pending=0 finalizes from replay resolution", async () => {
+    await withTempLog(
+      [
+        JSON.stringify({
+          ts: 1000,
+          type: "slot",
+          action: "start",
+          slug: "btc-updown-5m-1000",
+          startTime: 1000,
+          endTime: 1300,
+          strategy: "simulation",
+        }),
+        JSON.stringify({
+          ts: 1001,
+          type: "orderbook_snapshot",
+          up: { bids: [], asks: [] },
+          down: { bids: [], asks: [] },
+        }),
+        JSON.stringify({
+          ts: 1301,
+          type: "resolution",
+          openPrice: 100,
+          closePrice: 101,
+        }),
+      ].join("\n"),
+      async (path) => {
+        const reader = new ReplayLogReader(path);
+        const clock = new VirtualClock();
+        let settled = false;
+        let activeLifecycleCount = 1;
+        let isShuttingDown = false;
+        const errors: string[] = [];
+        const originalError = console.error;
+        console.error = (...args: unknown[]) => {
+          errors.push(args.map(String).join(" "));
+        };
+        try {
+          const bot: ReplayBot = {
+            get activeLifecycleCount() {
+              return activeLifecycleCount;
+            },
+            get isShuttingDown() {
+              return isShuttingDown;
+            },
+            replayStateSummary: () => "btc-updown-5m-1000:STOPPING(pending=0)",
+            start: async () => {},
+            tickOnce: async () => {
+              if (settled) {
+                activeLifecycleCount = 0;
+                isShuttingDown = true;
+              }
+            },
+            startShutdown: () => {
+              isShuttingDown = true;
+            },
+            applyReplayMarketResult: () => {
+              settled = true;
+            },
+          };
+
+          await new ReplayRunner(reader, bot, clock).run();
+        } finally {
+          console.error = originalError;
+        }
+
+        expect(errors.some((line) => line.includes("STALL DETECTED"))).toBe(false);
+      },
+    );
+  });
+
+  test("still emits STALL DETECTED when STOPPING has pending work and no progress", async () => {
+    await withTempLog(
+      [
+        JSON.stringify({
+          ts: 1000,
+          type: "slot",
+          action: "start",
+          slug: "btc-updown-5m-1000",
+          startTime: 1000,
+          endTime: 1300,
+          strategy: "simulation",
+        }),
+        JSON.stringify({
+          ts: 1001,
+          type: "orderbook_snapshot",
+          up: { bids: [], asks: [] },
+          down: { bids: [], asks: [] },
+        }),
+      ].join("\n"),
+      async (path) => {
+        const reader = new ReplayLogReader(path);
+        const clock = new VirtualClock();
+        const errors: string[] = [];
+        const originalError = console.error;
+        console.error = (...args: unknown[]) => {
+          errors.push(args.map(String).join(" "));
+        };
+        try {
+          const bot: ReplayBot = {
+            get activeLifecycleCount() {
+              return 1;
+            },
+            get isShuttingDown() {
+              return false;
+            },
+            replayStateSummary: () => "btc-updown-5m-1000:STOPPING(pending=1)",
+            nextReplayDeadlineMs: () => null,
+            start: async () => {},
+            tickOnce: async () => {},
+            startShutdown: () => {},
+          };
+
+          await expect(
+            new ReplayRunner(reader, bot, clock, undefined, {
+              stallTimeoutMs: 0,
+              stallCheckEveryTicks: 1,
+            }).run(),
+          ).rejects.toThrow("Replay stalled");
+        } finally {
+          console.error = originalError;
+        }
+
+        expect(errors.some((line) => line.includes("STALL DETECTED"))).toBe(true);
+      },
+    );
+  });
 });

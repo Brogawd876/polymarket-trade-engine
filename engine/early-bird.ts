@@ -32,6 +32,7 @@ import {
   ReplayResolutionAdapter,
   ReplayTickerTracker,
   ReplayOrderBook,
+  type ReplayMarketResult,
   type ResolutionSourceAdapter,
   type PredictiveFeedAdapter,
   type VenueDataAdapter,
@@ -478,6 +479,17 @@ export class EarlyBird {
 
   startShutdown(reason: string): void {
     this._startShutdown(reason);
+  }
+
+  applyReplayMarketResult(result: ReplayMarketResult): void {
+    if (!this._replayReader) return;
+    this._apiQueue.marketResult.set(result.startTime, {
+      startTime: result.startTime,
+      endTime: result.endTime,
+      completed: result.completed,
+      openPrice: result.openPrice,
+      closePrice: result.closePrice,
+    });
   }
 
   async stop(): Promise<void> {
