@@ -44,6 +44,9 @@ async function main() {
   let pairsDir = path.join("data", "pairs");
   let rawL2Dir = path.join("data", "raw-l2");
   let invalidPairsDir: string | null = null;
+  let tailBufferMs = 60000;
+  let recorderDurationMs: number | undefined;
+  let recorderSafetyBufferMs = 10000;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -54,6 +57,9 @@ async function main() {
     else if (arg === "--pairs-dir") pairsDir = args[++i] || pairsDir;
     else if (arg === "--raw-l2-dir") rawL2Dir = args[++i] || rawL2Dir;
     else if (arg === "--invalid-pairs-dir") invalidPairsDir = args[++i] || invalidPairsDir;
+    else if (arg === "--tail-buffer-ms") tailBufferMs = parseInt(args[++i] || "60000", 10);
+    else if (arg === "--recorder-duration-ms") recorderDurationMs = parseInt(args[++i] || "0", 10);
+    else if (arg === "--recorder-safety-buffer-ms") recorderSafetyBufferMs = parseInt(args[++i] || "10000", 10);
     else if (arg === "--prod" || arg === "--live") {
       console.error("Live/prod flags are forbidden in this capture script.");
       process.exit(1);
@@ -81,11 +87,16 @@ async function main() {
 
   const captureStartedAtMs = Date.now();
 
-  console.log(`[Orchestrator] Starting Raw L2 Recorder (saving to ${rawL2LogPath})...`);
+  const timeToSlotEnd = Math.max(0, slot.endTime - Date.now());
+  const finalDurationMs = recorderDurationMs !== undefined 
+    ? recorderDurationMs 
+    : timeToSlotEnd + 30000 + tailBufferMs + recorderSafetyBufferMs;
+
+  console.log(`[Orchestrator] Starting Raw L2 Recorder (saving to ${rawL2LogPath}, duration ${finalDurationMs}ms)...`);
   const recorderStartedAtMs = Date.now();
   let recorderReady = false;
   
-  const recorderCmd = ["bun", "scripts/record-raw-l2.ts", "--slug", slug, "--out", rawL2LogPath, "--duration-ms", "600000"];
+  const recorderCmd = ["bun", "scripts/record-raw-l2.ts", "--slug", slug, "--out", rawL2LogPath, "--duration-ms", finalDurationMs.toString()];
   const recorder = execProcess(recorderCmd[0]!, recorderCmd.slice(1), (data) => {
     process.stdout.write(`[Recorder] ${data}`);
     if (data.includes("Recorder is running")) {
@@ -116,8 +127,8 @@ async function main() {
   const runtimeEndedAtMs = Date.now();
   console.log(`[Orchestrator] Bot runtime exited with code ${runtimeExitCode}`);
 
-  console.log(`[Orchestrator] Waiting 2 seconds for L2 tail buffer...`);
-  await new Promise(r => setTimeout(r, 2000));
+  console.log(`[Orchestrator] Waiting ${tailBufferMs}ms for L2 tail buffer...`);
+  await new Promise(r => setTimeout(r, tailBufferMs));
 
   console.log(`[Orchestrator] Attempting clean recorder shutdown via stdin...`);
   recorder.process.stdin?.write("stop\n");
