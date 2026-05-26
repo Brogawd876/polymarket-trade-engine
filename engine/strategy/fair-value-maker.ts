@@ -1,4 +1,4 @@
-import type { Strategy, StrategyContext } from "./types.ts";
+import type { OrderRequest, Strategy, StrategyContext } from "./types.ts";
 import { Env } from "../../utils/config.ts";
 import { digitalCallProbability } from "../../utils/math.ts";
 
@@ -28,6 +28,8 @@ export interface FairValueMakerConfig {
   highVolExtraMargin?: number;
   /** Do not emit maker BUY bids above this price until calibration proves they are safe. */
   maxMakerBidPrice?: number;
+  /** Suppress repeated identical exposure-limit rejections for this long. */
+  exposureBlockCooldownMs?: number;
 }
 
 const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
@@ -44,6 +46,7 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
   maxSigma: 1.5,
   highVolExtraMargin: 0.02,
   maxMakerBidPrice: 0.89,
+  exposureBlockCooldownMs: 10_000,
 };
 
 /**
@@ -56,6 +59,7 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
  */
 export const fairValueMaker: Strategy = async (ctx) => {
   const config = { ...DEFAULT_CONFIG, ...(ctx.strategyConfig as FairValueMakerConfig) };
+  const exposureBlockCooldowns = new Map<string, number>();
   
   const releaseLock = ctx.hold?.() ?? (() => {});
 
@@ -135,7 +139,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const existingUp = ctx.pendingOrders.find(o => o.tokenId === upTokenId && o.action === "buy");
     const existingDown = ctx.pendingOrders.find(o => o.tokenId === downTokenId && o.action === "buy");
 
-    const ordersToPost = [];
+    const ordersToPost: OrderRequest[] = [];
 
     // Use a 1-cent tolerance to avoid churn
     const TOLERANCE = 0.01;
@@ -158,16 +162,20 @@ export const fairValueMaker: Strategy = async (ctx) => {
           ctx.cancelOrders([existingUp.orderId]);
         }
         if (inventoryUp < config.maxInventory) {
-          ordersToPost.push({
-            req: {
-              tokenId: upTokenId,
-              action: "buy" as const,
-              price: bidPriceUp,
-              shares: config.shares,
-              orderType: "GTC" as const
-            },
-            expireAtMs: ctx.clock.nowMs() + 10000
-          });
+          const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, config.shares);
+          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "UP", bidPriceUp, config.shares)) {
+            ordersToPost.push({
+              req: {
+                tokenId: upTokenId,
+                action: "buy" as const,
+                price: bidPriceUp,
+                shares: config.shares,
+                orderType: "GTC" as const,
+              },
+              expireAtMs: ctx.clock.nowMs() + 10000,
+              onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
+            });
+          }
         }
       }
     } else if (existingUp) {
@@ -181,16 +189,20 @@ export const fairValueMaker: Strategy = async (ctx) => {
           ctx.cancelOrders([existingDown.orderId]);
         }
         if (inventoryUp > -config.maxInventory) {
-          ordersToPost.push({
-            req: {
-              tokenId: downTokenId,
-              action: "buy" as const,
-              price: bidPriceDown,
-              shares: config.shares,
-              orderType: "GTC" as const
-            },
-            expireAtMs: ctx.clock.nowMs() + 10000
-          });
+          const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, config.shares);
+          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "DOWN", bidPriceDown, config.shares)) {
+            ordersToPost.push({
+              req: {
+                tokenId: downTokenId,
+                action: "buy" as const,
+                price: bidPriceDown,
+                shares: config.shares,
+                orderType: "GTC" as const,
+              },
+              expireAtMs: ctx.clock.nowMs() + 10000,
+              onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
+            });
+          }
         }
       }
     } else if (existingDown) {
@@ -335,6 +347,53 @@ function makerBidWithinMax(
     "yellow",
   );
   return false;
+}
+
+function exposureBlockKey(ctx: StrategyContext, side: "UP" | "DOWN", price: number, shares: number): string {
+  return `buy:${side}:${price.toFixed(2)}:${shares.toFixed(4)}:${exposureStateFingerprint(ctx)}`;
+}
+
+function exposureStateFingerprint(ctx: StrategyContext): string {
+  const history = ctx.orderHistory
+    .map((order) => `${order.action}:${order.tokenId}:${order.price.toFixed(2)}:${order.shares.toFixed(4)}`)
+    .join("|");
+  const pending = ctx.pendingOrders
+    .map((order) => `${order.action}:${order.tokenId}:${order.price.toFixed(2)}:${order.shares.toFixed(4)}`)
+    .sort()
+    .join("|");
+  return `${history}::${pending}`;
+}
+
+function recordExposureBlock(
+  ctx: StrategyContext,
+  cooldowns: Map<string, number>,
+  key: string,
+  reason: string,
+  cooldownMs: number,
+): void {
+  if (!reason.includes("open exposure would exceed max exposure limit")) return;
+  cooldowns.set(key, ctx.clock.nowMs() + cooldownMs);
+}
+
+function isExposureBlocked(
+  ctx: StrategyContext,
+  cooldowns: Map<string, number>,
+  key: string,
+  side: "UP" | "DOWN",
+  price: number,
+  shares: number,
+): boolean {
+  const until = cooldowns.get(key);
+  if (until === undefined) return false;
+  if (ctx.clock.nowMs() >= until) {
+    cooldowns.delete(key);
+    return false;
+  }
+  ctx.log(
+    `[fair-value] No quote: duplicate exposure-limit blocked intent suppressed side=${side} price=${price.toFixed(2)} shares=${shares}`,
+    "yellow",
+  );
+  return true;
 }
 
 function flowAllowsSide(
