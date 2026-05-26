@@ -360,6 +360,257 @@ describe("Strategy Logic Verification", () => {
     if (cleanup) cleanup();
   });
 
+  test("fair-value-maker suppresses repeated exposure-limit blocked BUY UP intent", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 10_000 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.65,
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(),
+      postOrders: (orders) => { postedOrders.push(...orders); },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: (message) => { logs.push(message); },
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    const upOrder = postedOrders.find(o => o.req.tokenId === "up-id");
+    expect(upOrder).toBeDefined();
+    upOrder.onFailed?.("open exposure would exceed max exposure limit");
+
+    postedOrders.length = 0;
+    clock.setNowMs(2000);
+
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeUndefined();
+    expect(logs.some(line => line.includes("duplicate exposure-limit blocked intent suppressed side=UP"))).toBe(true);
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker suppresses repeated exposure-limit blocked BUY DOWN intent", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 95_000 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: true, exposureBlockCooldownMs: 10_000 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.05,
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(0.65, 0.65),
+      postOrders: (orders) => { postedOrders.push(...orders); },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: (message) => { logs.push(message); },
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    const downOrder = postedOrders.find(o => o.req.tokenId === "down-id");
+    expect(downOrder).toBeDefined();
+    downOrder.onFailed?.("open exposure would exceed max exposure limit");
+
+    postedOrders.length = 0;
+    clock.setNowMs(2000);
+
+    expect(postedOrders.find(o => o.req.tokenId === "down-id")).toBeUndefined();
+    expect(logs.some(line => line.includes("duplicate exposure-limit blocked intent suppressed side=DOWN"))).toBe(true);
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker allows materially different price during exposure cooldown", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    let upAsk = 0.65;
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: true, exposureBlockCooldownMs: 10_000 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.65,
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: {
+        ...makerBook(),
+        bestAskPrice: (side: "UP" | "DOWN") => side === "UP" ? upAsk : 0.70,
+      } as any,
+      postOrders: (orders) => { postedOrders.push(...orders); },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: () => {},
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    const firstUp = postedOrders.find(o => o.req.tokenId === "up-id");
+    expect(firstUp.req.price).toBe(0.64);
+    firstUp.onFailed?.("open exposure would exceed max exposure limit");
+
+    postedOrders.length = 0;
+    upAsk = 0.63;
+    clock.setNowMs(2000);
+
+    const changedUp = postedOrders.find(o => o.req.tokenId === "up-id");
+    expect(changedUp.req.price).toBe(0.62);
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker exposure suppression expires after cooldown", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 1500 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.65,
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(),
+      postOrders: (orders) => { postedOrders.push(...orders); },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: () => {},
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    const upOrder = postedOrders.find(o => o.req.tokenId === "up-id");
+    upOrder.onFailed?.("open exposure would exceed max exposure limit");
+
+    postedOrders.length = 0;
+    clock.setNowMs(2000);
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeUndefined();
+
+    postedOrders.length = 0;
+    clock.setNowMs(3000);
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeDefined();
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker exposure suppression resets when exposure state changes", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const orderHistory: StrategyContext["orderHistory"] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory,
+      pendingOrders: [],
+      strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 10_000 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.65,
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(),
+      postOrders: (orders) => { postedOrders.push(...orders); },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: () => {},
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    const upOrder = postedOrders.find(o => o.req.tokenId === "up-id");
+    upOrder.onFailed?.("open exposure would exceed max exposure limit");
+
+    postedOrders.length = 0;
+    orderHistory.push({ tokenId: "down-id", action: "buy", shares: 1, price: 0.35 });
+    clock.setNowMs(2000);
+
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeDefined();
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker does not suppress non-exposure risk failures", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 10_000 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.65,
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(),
+      postOrders: (orders) => { postedOrders.push(...orders); },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: () => {},
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    const upOrder = postedOrders.find(o => o.req.tokenId === "up-id");
+    upOrder.onFailed?.("resolution feed is stale by received age threshold");
+
+    postedOrders.length = 0;
+    clock.setNowMs(2000);
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeDefined();
+    if (cleanup) cleanup();
+  });
+
   test("fair-value-maker counts DOWN inventory as negative UP exposure", async () => {
     const clock = new VirtualClock();
     const postedOrders: any[] = [];
