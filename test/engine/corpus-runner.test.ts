@@ -87,6 +87,25 @@ describe("Corpus Runner (run-strategy-lab-paired-corpus.ts)", () => {
     expect(fs.existsSync(outJson)).toBe(true);
   }, 120000);
 
+  test("completes repeated sequential runs on a valid corpus", async () => {
+    for (let i = 1; i <= 2; i++) {
+      const outJson = path.join(reportsDir, `repeat-${i}-summary.json`);
+      const { stdout, stderr, code } = await runScript([
+        "--pairs-dir", pairsDir,
+        "--out-json", outJson,
+        "--variants", "simulation"
+      ]);
+
+      if (code !== 0) {
+        console.error("STDOUT:", stdout);
+        console.error("STDERR:", stderr);
+      }
+      expect(code).toBe(0);
+      expect(stdout).toContain("Strategy Lab Batch Completed. State: completed");
+      expect(fs.existsSync(outJson)).toBe(true);
+    }
+  }, 120000);
+
   test("timeout with incomplete runs returns non-zero code and marked as timed_out", async () => {
     // To make it time out before completion, we'll override Date.now() to jump ahead
     const wrapperScript = path.join(__dirname, ".tmp-timeout-runner.ts");
