@@ -249,6 +249,117 @@ describe("Strategy Logic Verification", () => {
     if (cleanup) cleanup();
   });
 
+  test("fair-value-maker does not emit extreme BUY UP maker bids by default", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 105_000 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: true },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.2,
+          probabilityUp: 0.95,
+          jumpDetected: false,
+          volatilityRegime: "normal",
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(0.95, 0.95),
+      postOrders: async (orders) => { postedOrders.push(...orders); return []; },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: (message) => { logs.push(message); },
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeUndefined();
+    expect(logs.some(line => line.includes("candidate maker bid exceeds max maker bid price"))).toBe(true);
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker does not emit extreme BUY DOWN maker bids by default", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 95_000 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: true },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.2,
+          probabilityUp: 0.05,
+          jumpDetected: false,
+          volatilityRegime: "normal",
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(0.95, 0.95),
+      postOrders: async (orders) => { postedOrders.push(...orders); return []; },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: (message) => { logs.push(message); },
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    expect(postedOrders.find(o => o.req.tokenId === "down-id")).toBeUndefined();
+    expect(logs.some(line => line.includes("candidate maker bid exceeds max maker bid price"))).toBe(true);
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker obeys lower configured max maker bid", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 105_000 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      strategyConfig: { makerOnly: true, maxMakerBidPrice: 0.75 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.2,
+          probabilityUp: 0.95,
+          jumpDetected: false,
+          volatilityRegime: "normal",
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(0.80, 0.80),
+      postOrders: async (orders) => { postedOrders.push(...orders); return []; },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      log: (message) => { logs.push(message); },
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeUndefined();
+    expect(logs.some(line => line.includes("max=0.75"))).toBe(true);
+    if (cleanup) cleanup();
+  });
+
   test("fair-value-maker counts DOWN inventory as negative UP exposure", async () => {
     const clock = new VirtualClock();
     const postedOrders: any[] = [];
@@ -321,6 +432,45 @@ describe("Strategy Logic Verification", () => {
 
     expect(postedOrders.length).toBe(0);
     expect(canceled.flat()).toContain("old");
+    if (cleanup) cleanup();
+  });
+
+  test("fair-value-maker blocks quotes above max sigma", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const canceled: string[][] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_050 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [{ orderId: "old", tokenId: "up-id", action: "buy", price: 0.5, shares: 1, expireAtMs: 999999 } as any],
+      strategyConfig: { makerOnly: true, maxSigma: 0.5 },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.8,
+          probabilityUp: 0.55,
+          jumpDetected: false,
+          volatilityRegime: "normal",
+        }),
+        subscribe: () => () => {}
+      } as any,
+      orderBook: makerBook(),
+      postOrders: async (orders) => { postedOrders.push(...orders); return []; },
+      cancelOrders: async (ids) => { canceled.push(ids); return { canceled: ids, not_canceled: {} }; },
+      log: (message) => { logs.push(message); },
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    expect(postedOrders.length).toBe(0);
+    expect(canceled.flat()).toContain("old");
+    expect(logs.some(line => line.includes("high-vol sigma"))).toBe(true);
     if (cleanup) cleanup();
   });
 

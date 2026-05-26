@@ -26,6 +26,8 @@ export interface FairValueMakerConfig {
   maxSigma?: number;
   /** Widen quotes during high-vol regimes instead of crossing into taker flow. */
   highVolExtraMargin?: number;
+  /** Do not emit maker BUY bids above this price until calibration proves they are safe. */
+  maxMakerBidPrice?: number;
 }
 
 const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
@@ -41,6 +43,7 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
   blockOnJump: true,
   maxSigma: 1.5,
   highVolExtraMargin: 0.02,
+  maxMakerBidPrice: 0.89,
 };
 
 /**
@@ -145,8 +148,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const flow = ctx.orderFlow?.latest() ?? null;
     const allowUpFlow = flowAllowsSide(flow, "UP", config, ctx);
     const allowDownFlow = flowAllowsSide(flow, "DOWN", config, ctx);
+    const allowUpMaxBid = makerBidWithinMax(ctx, "UP", bidPriceUp, config.maxMakerBidPrice);
+    const allowDownMaxBid = makerBidWithinMax(ctx, "DOWN", bidPriceDown, config.maxMakerBidPrice);
 
-    if (bidPriceUp !== null && bidPriceUp > 0.01 && bidPriceUp < 0.99 && evUp.edge >= config.minEdge && allowUpFlow) {
+    if (bidPriceUp !== null && bidPriceUp > 0.01 && bidPriceUp < 0.99 && allowUpMaxBid && evUp.edge >= config.minEdge && allowUpFlow) {
       if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
         if (existingUp) {
           ctx.log(`[fair-value] Replacing UP quote: ${existingUp.price} -> ${bidPriceUp} (P=${probUp.toFixed(3)})`, "dim");
@@ -169,7 +174,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
       ctx.cancelOrders([existingUp.orderId]);
     }
 
-    if (bidPriceDown !== null && bidPriceDown > 0.01 && bidPriceDown < 0.99 && evDown.edge >= config.minEdge && allowDownFlow) {
+    if (bidPriceDown !== null && bidPriceDown > 0.01 && bidPriceDown < 0.99 && allowDownMaxBid && evDown.edge >= config.minEdge && allowDownFlow) {
       if (!existingDown || Math.abs(existingDown.price - bidPriceDown) > (TOLERANCE + EPSILON)) {
         if (existingDown) {
           ctx.log(`[fair-value] Replacing DOWN quote: ${existingDown.price} -> ${bidPriceDown}`, "dim");
@@ -316,6 +321,20 @@ function makerSafePrice(
   const bid = ctx.orderBook.bestBidPrice(side);
   if (bid === null) return null;
   return parseFloat(Math.max(targetPrice, bid + safeTick).toFixed(2));
+}
+
+function makerBidWithinMax(
+  ctx: StrategyContext,
+  side: "UP" | "DOWN",
+  price: number | null,
+  maxMakerBidPrice: number,
+): boolean {
+  if (price === null || price <= maxMakerBidPrice) return true;
+  ctx.log(
+    `[fair-value] No quote: candidate maker bid exceeds max maker bid price side=${side} price=${price.toFixed(2)} max=${maxMakerBidPrice.toFixed(2)}`,
+    "yellow",
+  );
+  return false;
 }
 
 function flowAllowsSide(
