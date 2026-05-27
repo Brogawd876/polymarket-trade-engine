@@ -619,6 +619,7 @@ export class MarketLifecycle {
       slotEndMs: this.slotEndMs,
       clobTokenIds: this._clobTokenIds,
       orderBook: this._orderBook,
+      get walletBalanceUsd() { return self.tracker.balance; },
       log: this._log,
       getOrderById: this.client.getOrderById.bind(this.client),
       postOrders: this._postOrders.bind(this),

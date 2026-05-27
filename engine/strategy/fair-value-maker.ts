@@ -3,6 +3,10 @@ import { Env } from "../../utils/config.ts";
 import { digitalCallProbability } from "../../utils/math.ts";
 
 export interface FairValueMakerConfig {
+  /** Position sizing mode. Defaults to 'fixed'. */
+  sharesMode?: "fixed" | "pct_of_balance";
+  /** Percentage of current wallet balance to use per trade if sharesMode is 'pct_of_balance'. (e.g. 0.10 for 10%) */
+  sharePct?: number;
   shares?: number;
   /** Fixed profit margin buffer (e.g. 0.01 = 1 cent) */
   margin?: number;
@@ -33,6 +37,8 @@ export interface FairValueMakerConfig {
 }
 
 const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
+  sharesMode: "fixed",
+  sharePct: 0.10,
   shares: 10,
   margin: 0.01,
   inventorySkew: 0.05, // Skew price by 5% of fair value per maxInventory unit
@@ -135,6 +141,14 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const bidPriceUp = makerSafePrice(ctx, "UP", "buy", rawBidPriceUp, config.makerOnly);
     const bidPriceDown = makerSafePrice(ctx, "DOWN", "buy", rawBidPriceDown, config.makerOnly);
 
+    // 3.5. Position Sizing
+    const balance = ctx.walletBalanceUsd;
+    let targetShares = config.shares;
+    if (config.sharesMode === "pct_of_balance" && balance > 0) {
+      targetShares = balance * config.sharePct;
+      if (targetShares < 1) targetShares = 1; // Floor to at least 1 share if we try to quote
+    }
+
     // 4. Update Orders
     const existingUp = ctx.pendingOrders.find(o => o.tokenId === upTokenId && o.action === "buy");
     const existingDown = ctx.pendingOrders.find(o => o.tokenId === downTokenId && o.action === "buy");
@@ -162,14 +176,14 @@ export const fairValueMaker: Strategy = async (ctx) => {
           ctx.cancelOrders([existingUp.orderId]);
         }
         if (inventoryUp < config.maxInventory) {
-          const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, config.shares);
-          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "UP", bidPriceUp, config.shares)) {
+          const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, targetShares);
+          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "UP", bidPriceUp, targetShares)) {
             ordersToPost.push({
               req: {
                 tokenId: upTokenId,
                 action: "buy" as const,
                 price: bidPriceUp,
-                shares: config.shares,
+                shares: targetShares,
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
@@ -189,14 +203,14 @@ export const fairValueMaker: Strategy = async (ctx) => {
           ctx.cancelOrders([existingDown.orderId]);
         }
         if (inventoryUp > -config.maxInventory) {
-          const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, config.shares);
-          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "DOWN", bidPriceDown, config.shares)) {
+          const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, targetShares);
+          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "DOWN", bidPriceDown, targetShares)) {
             ordersToPost.push({
               req: {
                 tokenId: downTokenId,
                 action: "buy" as const,
                 price: bidPriceDown,
-                shares: config.shares,
+                shares: targetShares,
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
@@ -208,6 +222,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
     } else if (existingDown) {
       ctx.cancelOrders([existingDown.orderId]);
     }
+
     if (ordersToPost.length > 0) {
       ctx.log(`[fair-value] Posting ${ordersToPost.length} maker-safe orders. Bids: UP=${bidPriceUp ?? "skip"} (EV=${evUp.edge.toFixed(4)}) DOWN=${bidPriceDown ?? "skip"} (EV=${evDown.edge.toFixed(4)}) settlementAnchor=${fairValue.settlementAnchorPrice?.toFixed(2) ?? "n/a"} predictiveComposite=${fairValue.predictiveCompositePrice?.toFixed(2) ?? "n/a"}`, "cyan");
       ctx.postOrders(ordersToPost);
