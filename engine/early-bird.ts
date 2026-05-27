@@ -56,6 +56,8 @@ import {
   type EventWriter,
 } from "./event-store/writer.ts";
 import type { VenueMetadata } from "./bot-core/index.ts";
+import { CounterfactualRiskGate, type CounterfactualRiskMode } from "./replay/counterfactual-risk-gate.ts";
+import { type RiskGate } from "./bot-core/risk-gate.ts";
 
 const SAVE_INTERVAL_MS = 5000;
 
@@ -70,6 +72,8 @@ export type EarlyBirdRuntimeOptions = {
   marketLogMode?: "normal" | "disabled";
   replayVenueMetadata?: Partial<VenueMetadata>;
   conservativeFill?: boolean;
+  riskMode?: CounterfactualRiskMode;
+  bypassRiskReasons?: string[];
 };
 
 export type EngineStatus = {
@@ -124,6 +128,7 @@ export class EarlyBird {
   private _eventWriter: EventWriter;
   private readonly _marketLogMode: "normal" | "disabled";
   private readonly _replayVenueMetadata?: Partial<VenueMetadata>;
+  private readonly _riskGate: RiskGate;
   private _runCompletedEventEmitted = false;
   private _tickInterval: unknown = null;
   private readonly _orderBookFactory?: (
@@ -171,6 +176,12 @@ export class EarlyBird {
     this._orderBookFactory = runtime.orderBookFactory;
     const persistState = runtime.persistState ?? !replayFile;
     const conservativeFill = runtime.conservativeFill ?? false;
+
+    this._riskGate = new CounterfactualRiskGate({
+      mode: runtime.riskMode ?? "normal",
+      bypassReasons: runtime.bypassRiskReasons,
+      replayOnly: !!replayFile,
+    });
 
     if (replayFile) {
       log.write(`[startup] Replay mode enabled: ${replayFile}`);
@@ -553,6 +564,7 @@ export class EarlyBird {
             maintenance: this._maintenance,
             venue,
             orderBook,
+            riskGate: this._riskGate,
             clock: this._clock,
             telemetry: this._telemetry,
             alwaysLog: this._alwaysLog,
