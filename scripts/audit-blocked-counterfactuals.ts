@@ -294,8 +294,8 @@ function summarizeRecords(records: BlockedCounterfactualRecord[], runDiagnostics
        else ttcBucket = "120s+";
     }
     if (!byTimeToCloseBucket[ttcBucket]) byTimeToCloseBucket[ttcBucket] = { blockedCount: 0, uniqueCount: 0 };
-    byTimeToCloseBucket[ttcBucket].blockedCount++;
-    if (isUnique) byTimeToCloseBucket[ttcBucket].uniqueCount++;
+    byTimeToCloseBucket[ttcBucket]!.blockedCount++;
+    if (isUnique) byTimeToCloseBucket[ttcBucket]!.uniqueCount++;
 
     // Predictive Disagreement
     const diag = (record as any).predictiveDisagreement;
