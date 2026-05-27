@@ -112,32 +112,35 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     },
     paperEligible: false,
   },
+  "late-entry-flow-aware": {
+    id: "late-entry-flow-aware",
+    label: "late-entry (flow-aware)",
+    strategy: "late-entry",
+    description: "Same as late-entry, but disables triggers if inferred retail flow heavily opposes the entry.",
+    config: {
+      ...LATE_ENTRY_DEFAULT,
+      minFlowImbalance: 0.1, // Require slightly favorable or neutral flow
+    },
+    paperEligible: true,
+  },
   "fair-value-maker": {
     id: "fair-value-maker",
     label: "Fair Value Maker (Institutional)",
     strategy: "fair-value-maker",
-    description: "Mathematical fair-value quoting using Black-Scholes digital option pricing and inventory skew.",
-    config: {
-      shares: 5,
-      margin: 0.05,
-      inventorySkew: 0.1,
-      maxInventory: 50,
-    },
+    description: "v1.1.1+: Event-driven maker strategy with flow toxicity gates.",
+    config: {}, // Uses defaults which now include toxicity gates
     paperEligible: true,
   },
-  "late-entry-flow-aware": {
-    id: "late-entry-flow-aware",
-    label: "late-entry (Flow Aware)",
-    strategy: "late-entry",
-    description: "Standard late-entry reinforced with Order Book Imbalance and Whale protection.",
+  "fair-value-maker-v1-1-0": {
+    id: "fair-value-maker-v1-1-0",
+    label: "Fair Value Maker (v1.1.0 High PnL)",
+    strategy: "fair-value-maker",
+    description: "v1.1.0: Event-driven quote hygiene but WITHOUT toxicity gates. Highly profitable but vulnerable to adverse selection.",
     config: {
-      ...LATE_ENTRY_DEFAULT,
-      certaintyPrice: 0.75,
-      minImbalance: 0.1,
-      minGapSafety: 20,
-      blockOnHostileWhale: true,
+      minCvd10s: Number.NEGATIVE_INFINITY,
+      minImbalance: -1,
     },
-    paperEligible: true,
+    paperEligible: false,
   },
 };
 
