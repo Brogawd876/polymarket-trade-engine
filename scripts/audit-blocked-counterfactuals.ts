@@ -6,23 +6,24 @@ import { type PairManifest } from "../engine/replay/pair-manifest.ts";
 import { evaluateBlockedIntent, deduplicateBlockedRecords, type BlockedCounterfactualRecord } from "../engine/replay/blocked-counterfactual.ts";
 import { extractClobTokenIdsFromRawL2 } from "../engine/replay/paired-token-mapping.ts";
 
-const { values } = parseArgs({
-  args: Bun.argv.slice(2),
-  options: {
-    "pairs-dir": { type: "string", default: "data/pairs" },
-    "pair": { type: "string" },
-    "out-json": { type: "string", default: "data/reports/blocked-counterfactuals.json" },
-    "out-md": { type: "string", default: "data/reports/blocked-counterfactuals.md" },
-    "variants": { type: "string", multiple: true, default: ["late-entry", "late-entry-flow-aware", "fair-value-maker"] },
-    "dedupe-window-ms": { type: "string", default: "1000" },
-    "include-raw-records": { type: "boolean", default: false },
-    "allow-contaminated": { type: "boolean", default: false },
-  },
-  strict: true,
-  allowPositionals: true,
-});
 
 async function main() {
+  const { values } = parseArgs({
+    args: Bun.argv.slice(2),
+    options: {
+      "pairs-dir": { type: "string", default: "data/pairs" },
+      "pair": { type: "string" },
+      "out-json": { type: "string", default: "data/reports/blocked-counterfactuals.json" },
+      "out-md": { type: "string", default: "data/reports/blocked-counterfactuals.md" },
+      "variants": { type: "string", multiple: true, default: ["late-entry", "late-entry-flow-aware", "fair-value-maker"] },
+      "dedupe-window-ms": { type: "string", default: "1000" },
+      "include-raw-records": { type: "boolean", default: false },
+      "allow-contaminated": { type: "boolean", default: false },
+    },
+    strict: true,
+    allowPositionals: true,
+  });
+
   const pairsDir = values["pairs-dir"] as string;
   const outJson = values["out-json"] as string;
   const outMd = values["out-md"] as string;
