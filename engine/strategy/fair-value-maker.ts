@@ -67,8 +67,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const quant = ctx.quant?.latest();
     const sigma = quant?.sigma;
     const quoteRegime = quant as ({ jumpDetected?: boolean; volatilityRegime?: string } & typeof quant);
-    const fairValue = calculateSettlementAnchoredFairValue(ctx, sigma);
-    const probUp = fairValue.probabilityUp;
+    const aggregate = ctx.predictive?.aggregate?.latest() ?? null;
     
     const remainingSecs = (ctx.slotEndMs - ctx.clock.nowMs()) / 1000;
     
@@ -77,9 +76,22 @@ export const fairValueMaker: Strategy = async (ctx) => {
         releaseLock();
         return;
     }
+
+    // 1. Hygiene: Early abort on disagreement to prevent blocked intent spam
+    if (aggregate?.disagreement === true) {
+      if (ctx.clock.nowMs() % 10000 === 0) {
+        ctx.log("[fair-value] No quote: predictive aggregate disagreement", "dim");
+      }
+      ctx.cancelOrders(ctx.pendingOrders.map(o => o.orderId));
+      return;
+    }
+
+    const fairValue = calculateSettlementAnchoredFairValue(ctx, sigma);
+    const probUp = fairValue.probabilityUp;
+    
     if (probUp === null || probUp === undefined || sigma === null || sigma === undefined) {
       ctx.cancelOrders(ctx.pendingOrders.map(o => o.orderId));
-      if (fairValue.noTradeReason) {
+      if (fairValue.noTradeReason && ctx.clock.nowMs() % 5000 === 0) {
         ctx.log(`[fair-value] No quote: ${fairValue.noTradeReason}`, "dim");
       }
       return;
@@ -95,12 +107,16 @@ export const fairValueMaker: Strategy = async (ctx) => {
     }
     if (config.blockOnJump && quoteRegime?.jumpDetected) {
       ctx.cancelOrders(ctx.pendingOrders.map(o => o.orderId));
-      ctx.log("[fair-value] No quote: jump regime detected", "yellow");
+      if (ctx.clock.nowMs() % 5000 === 0) {
+        ctx.log("[fair-value] No quote: jump regime detected", "yellow");
+      }
       return;
     }
     if (sigma > config.maxSigma) {
       ctx.cancelOrders(ctx.pendingOrders.map(o => o.orderId));
-      ctx.log(`[fair-value] No quote: high-vol sigma ${sigma.toFixed(4)} exceeds ${config.maxSigma.toFixed(4)}`, "yellow");
+      if (ctx.clock.nowMs() % 5000 === 0) {
+        ctx.log(`[fair-value] No quote: high-vol sigma ${sigma.toFixed(4)} exceeds ${config.maxSigma.toFixed(4)}`, "yellow");
+      }
       return;
     }
 
@@ -118,8 +134,6 @@ export const fairValueMaker: Strategy = async (ctx) => {
     }
     
     // 2. Calculate Avellaneda-style reservation probability.
-    // Inventory pushes quotes away from the side we already hold; volatility and
-    // time-to-expiry widen the required margin rather than pretending alpha is larger.
     const timeFraction = Math.max(0, Math.min(1, remainingSecs / 300));
     const inventoryRatio = inventoryUp / config.maxInventory;
     const skew = inventoryRatio * config.inventorySkew * Math.max(0.25, timeFraction);
@@ -128,12 +142,15 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const quoteMargin = config.margin + volatilityBuffer + (quoteRegime?.volatilityRegime === "high_vol" ? config.highVolExtraMargin : 0);
 
     // 3. Define Quotes
-    // We want to buy UP at adjustedProbUp - margin
-    // We want to buy DOWN at (1 - adjustedProbUp) - margin
-    const rawBidPriceUp = parseFloat((adjustedProbUp - quoteMargin).toFixed(2));
-    const rawBidPriceDown = parseFloat(((1 - adjustedProbUp) - quoteMargin).toFixed(2));
-    const bidPriceUp = makerSafePrice(ctx, "UP", "buy", rawBidPriceUp, config.makerOnly);
-    const bidPriceDown = makerSafePrice(ctx, "DOWN", "buy", rawBidPriceDown, config.makerOnly);
+    // Hygiene: Strictly bound raw quotes before attempting maker adjustments
+    let rawBidPriceUp = parseFloat((adjustedProbUp - quoteMargin).toFixed(2));
+    let rawBidPriceDown = parseFloat(((1 - adjustedProbUp) - quoteMargin).toFixed(2));
+    
+    if (rawBidPriceUp <= 0.01 || rawBidPriceUp > config.maxMakerBidPrice) rawBidPriceUp = NaN;
+    if (rawBidPriceDown <= 0.01 || rawBidPriceDown > config.maxMakerBidPrice) rawBidPriceDown = NaN;
+
+    const bidPriceUp = Number.isFinite(rawBidPriceUp) ? makerSafePrice(ctx, "UP", "buy", rawBidPriceUp, config.makerOnly) : null;
+    const bidPriceDown = Number.isFinite(rawBidPriceDown) ? makerSafePrice(ctx, "DOWN", "buy", rawBidPriceDown, config.makerOnly) : null;
 
     // 4. Update Orders
     const existingUp = ctx.pendingOrders.find(o => o.tokenId === upTokenId && o.action === "buy");
@@ -152,10 +169,8 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const flow = ctx.orderFlow?.latest() ?? null;
     const allowUpFlow = flowAllowsSide(flow, "UP", config, ctx);
     const allowDownFlow = flowAllowsSide(flow, "DOWN", config, ctx);
-    const allowUpMaxBid = makerBidWithinMax(ctx, "UP", bidPriceUp, config.maxMakerBidPrice);
-    const allowDownMaxBid = makerBidWithinMax(ctx, "DOWN", bidPriceDown, config.maxMakerBidPrice);
 
-    if (bidPriceUp !== null && bidPriceUp > 0.01 && bidPriceUp < 0.99 && allowUpMaxBid && evUp.edge >= config.minEdge && allowUpFlow) {
+    if (bidPriceUp !== null && bidPriceUp > 0.01 && bidPriceUp < 0.99 && evUp.edge >= config.minEdge && allowUpFlow) {
       if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
         if (existingUp) {
           ctx.log(`[fair-value] Replacing UP quote: ${existingUp.price} -> ${bidPriceUp} (P=${probUp.toFixed(3)})`, "dim");
@@ -182,7 +197,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
       ctx.cancelOrders([existingUp.orderId]);
     }
 
-    if (bidPriceDown !== null && bidPriceDown > 0.01 && bidPriceDown < 0.99 && allowDownMaxBid && evDown.edge >= config.minEdge && allowDownFlow) {
+    if (bidPriceDown !== null && bidPriceDown > 0.01 && bidPriceDown < 0.99 && evDown.edge >= config.minEdge && allowDownFlow) {
       if (!existingDown || Math.abs(existingDown.price - bidPriceDown) > (TOLERANCE + EPSILON)) {
         if (existingDown) {
           ctx.log(`[fair-value] Replacing DOWN quote: ${existingDown.price} -> ${bidPriceDown}`, "dim");
