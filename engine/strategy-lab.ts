@@ -16,6 +16,7 @@ import {
 import { ConservativeFillScorer, type FillScoreResult } from "./replay/fill-scoring.ts";
 import { extractClobTokenIdsFromRawL2 } from "./replay/paired-token-mapping.ts";
 import type { DecisionFeatureSnapshot } from "./decision-features.ts";
+import type { CounterfactualRiskMode } from "./replay/counterfactual-risk-gate.ts";
 
 export type StrategyLabBatchState = "queued" | "running" | "completed" | "failed" | "canceled";
 export type StrategyLabRunStatus = "queued" | "running" | "completed" | "failed" | "canceled";
@@ -26,6 +27,8 @@ export type StrategyLabBatchRequest = {
   variants?: string[];
   files: string[];
   l2Files?: Record<string, string>; // mapping from fixture path to l2 log path
+  riskMode?: CounterfactualRiskMode;
+  bypassReasons?: string[];
 };
 
 export type ConservativeFillEvidencePoint = {
@@ -200,6 +203,8 @@ export type StrategyLabBatch = {
   runs: StrategyLabRunResult[];
   summary: StrategyLabBatchSummary;
   l2Files?: Record<string, string>;
+  riskMode?: CounterfactualRiskMode;
+  bypassReasons?: string[];
   error?: string;
 };
 
@@ -911,6 +916,8 @@ export class StrategyLabBatchManager {
       runs,
       summary: emptySummary(totalRuns),
       l2Files: request.l2Files,
+      riskMode: request.riskMode,
+      bypassReasons: request.bypassReasons,
     } as any;
     this.batches.set(batch.id, batch);
 
@@ -965,6 +972,14 @@ export class StrategyLabBatchManager {
         const sink = new CollectingTelemetrySink();
         const l2File = batch.l2Files?.[run.file];
         const tokenMapping = l2File ? extractClobTokenIdsFromRawL2(l2File) : null;
+        
+        // Counterfactual runs are never paper eligible
+        const useRiskMode = batch.riskMode ?? "normal";
+        const isCounterfactual = useRiskMode !== "normal";
+        if (isCounterfactual) {
+          run.paperEligible = false;
+        }
+
         const bot = new EarlyBird(run.strategy, 1, false, 1, false, run.file, {
           clock,
           persistState: false,
@@ -974,6 +989,8 @@ export class StrategyLabBatchManager {
             ? { clobTokenIds: tokenMapping.tokenIds }
             : undefined,
           conservativeFill: true,
+          riskMode: useRiskMode,
+          bypassRiskReasons: batch.bypassReasons,
         });
         this.currentBots.set(batchId, bot);
         const reader = bot.replayReader;
