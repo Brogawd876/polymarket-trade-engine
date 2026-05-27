@@ -163,8 +163,11 @@ export class ReplayRunner {
 
         let hasData = false;
         const unsubscribe = this.reader.subscribe((evt) => {
-          if (evt.type === "orderbook_snapshot" && evt.up && evt.down) {
-              console.log(`[ReplayRunner] Found non-null orderbook snapshot at ts=${evt.ts}`);        
+          if (
+            (evt.type === "orderbook_snapshot" && evt.up && evt.down) ||
+            evt.type === "market_book_snapshot"
+          ) {
+              console.log(`[ReplayRunner] Found non-null orderbook snapshot or market book snapshot at ts=${evt.ts}`);        
               hasData = true;
           }
         });

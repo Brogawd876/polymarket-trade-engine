@@ -3,6 +3,8 @@ import { Env } from "../../utils/config.ts";
 import { digitalCallProbability } from "../../utils/math.ts";
 
 export interface FairValueMakerConfig {
+  /** If true, bypasses 'Quote Hygiene' (early aborts on disagreement and price bounding). Use for backtesting only. */
+  skipHygiene?: boolean;
   /** Position sizing mode. Defaults to 'fixed'. */
   sharesMode?: "fixed" | "pct_of_balance";
   /** Percentage of current wallet balance to use per trade if sharesMode is 'pct_of_balance'. (e.g. 0.10 for 10%) */
@@ -84,7 +86,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
     }
 
     // 1. Hygiene: Early abort on disagreement to prevent blocked intent spam
-    if (aggregate?.disagreement === true) {
+    if (!config.skipHygiene && aggregate?.disagreement === true) {
       if (ctx.clock.nowMs() % 10000 === 0) {
         ctx.log("[fair-value] No quote: predictive aggregate disagreement", "dim");
       }
@@ -152,8 +154,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
     let rawBidPriceUp = parseFloat((adjustedProbUp - quoteMargin).toFixed(2));
     let rawBidPriceDown = parseFloat(((1 - adjustedProbUp) - quoteMargin).toFixed(2));
     
-    if (rawBidPriceUp <= 0.01 || rawBidPriceUp > config.maxMakerBidPrice) rawBidPriceUp = NaN;
-    if (rawBidPriceDown <= 0.01 || rawBidPriceDown > config.maxMakerBidPrice) rawBidPriceDown = NaN;
+    if (!config.skipHygiene) {
+      if (rawBidPriceUp <= 0.01 || rawBidPriceUp > config.maxMakerBidPrice) rawBidPriceUp = NaN;
+      if (rawBidPriceDown <= 0.01 || rawBidPriceDown > config.maxMakerBidPrice) rawBidPriceDown = NaN;
+    }
 
     const bidPriceUp = Number.isFinite(rawBidPriceUp) ? makerSafePrice(ctx, "UP", "buy", rawBidPriceUp, config.makerOnly) : null;
     const bidPriceDown = Number.isFinite(rawBidPriceDown) ? makerSafePrice(ctx, "DOWN", "buy", rawBidPriceDown, config.makerOnly) : null;
