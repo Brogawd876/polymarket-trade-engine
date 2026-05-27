@@ -33,6 +33,7 @@ describe("Strategy Logic Verification", () => {
       },
       predictive: {
         aggregate: {
+          subscribe: () => () => {},
           latest: () => ({
             asset: "btc",
             timestampMs: clock.nowMs(),
@@ -100,6 +101,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: false },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -149,6 +151,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: false },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -224,6 +227,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: true },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -262,6 +266,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: true },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -299,6 +304,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: true },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -336,6 +342,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: true, maxMakerBidPrice: 0.75 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -373,6 +380,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 10_000 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -415,6 +423,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: true, exposureBlockCooldownMs: 10_000 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -457,6 +466,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: true, exposureBlockCooldownMs: 10_000 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -502,6 +512,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 1500 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -545,6 +556,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 10_000 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -585,6 +597,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: false, exposureBlockCooldownMs: 10_000 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -625,6 +638,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [],
       strategyConfig: { makerOnly: false },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -662,6 +676,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [{ orderId: "old", tokenId: "up-id", action: "buy", price: 0.5, shares: 1, expireAtMs: 999999 } as any],
       strategyConfig: { makerOnly: true, blockOnJump: true },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -700,6 +715,7 @@ describe("Strategy Logic Verification", () => {
       pendingOrders: [{ orderId: "old", tokenId: "up-id", action: "buy", price: 0.5, shares: 1, expireAtMs: 999999 } as any],
       strategyConfig: { makerOnly: true, maxSigma: 0.5 },
       quant: {
+        subscribe: () => () => {},
         latest: () => ({
           asset: "btc",
           timestampMs: clock.nowMs(),
@@ -745,6 +761,7 @@ describe("Strategy Logic Verification", () => {
         getTokenId: (side: any) => side === "UP" ? "up-id" : "down-id"
       } as any,
       orderFlow: {
+        subscribe: () => () => {},
         latest: () => ({
           imbalanceUp: -0.5, 
           cvd10s: { up: 0, down: 1000 },
