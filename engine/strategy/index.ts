@@ -142,6 +142,54 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     },
     paperEligible: false,
   },
+  "fvm-v1.1.0-raw-ungated": {
+    id: "fvm-v1.1.0-raw-ungated",
+    label: "FVM v1.1.0 (Raw, Ungated)",
+    strategy: "fair-value-maker",
+    description: "Original champion: event-driven hygiene but NO disagreement abort or toxicity gates.",
+    config: {
+      skipHygiene: true,
+      minCvd10s: Number.NEGATIVE_INFINITY,
+      shares: 10,
+    },
+    paperEligible: false,
+  },
+  "fvm-v1.1.1-raw-gated": {
+    id: "fvm-v1.1.1-raw-gated",
+    label: "FVM v1.1.1 (Raw, Gated)",
+    strategy: "fair-value-maker",
+    description: "Original gated: event-driven hygiene + toxicity gates, but NO early aborts.",
+    config: {
+      skipHygiene: true,
+      minCvd10s: -100,
+      shares: 10,
+    },
+    paperEligible: false,
+  },
+  "fvm-v1.2.0-hygienic-ungated": {
+    id: "fvm-v1.2.0-hygienic-ungated",
+    label: "FVM v1.2.0 (Hygienic, Ungated)",
+    strategy: "fair-value-maker",
+    description: "New baseline: early aborts on disagreement + strict bounds + NO toxicity gates.",
+    config: {
+      skipHygiene: false,
+      minCvd10s: Number.NEGATIVE_INFINITY,
+      shares: 10,
+    },
+    paperEligible: false,
+  },
+  "fvm-v1.2.1-hygienic-gated": {
+    id: "fvm-v1.2.1-hygienic-gated",
+    label: "FVM v1.2.1 (Hygienic, Gated)",
+    strategy: "fair-value-maker",
+    description: "Full protection: early aborts + strict bounds + toxicity gates.",
+    config: {
+      skipHygiene: false,
+      minCvd10s: -100,
+      shares: 10,
+    },
+    paperEligible: false,
+  },
 };
 
 export function listStrategyVariants(): StrategyVariant[] {

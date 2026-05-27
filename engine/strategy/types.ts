@@ -39,6 +39,7 @@ export type StrategyContext = {
   slotEndMs: number;
   clobTokenIds: [string, string];
   orderBook: OrderBook;
+  readonly walletBalanceUsd: number;
   log: (msg: string, color?: LogColor) => void;
 
   getOrderById: (orderId: string) => Promise<Order | null>;
