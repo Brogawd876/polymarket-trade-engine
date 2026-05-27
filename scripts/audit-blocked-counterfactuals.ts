@@ -169,21 +169,10 @@ async function main() {
       let slotEndMs: number | null = manifest.slotEndMs;
 
       // Extract predictives and quant for state
-      const predictiveState = new Map<number, boolean>();
-      const quantState = new Map<number, number>();
-      let lastDisagreement = false;
-      let lastSigma = 0;
+      // (State is now pulled directly from the risk gate decision feature payload)
 
       for (const event of allEventsForRun) {
-        if ((event.eventType as string) === "predictive_aggregate_snapshot") {
-           const p = event.payload as any;
-           lastDisagreement = p.disagreement;
-           predictiveState.set(event.processedTsMs, lastDisagreement);
-        } else if ((event.eventType as string) === "quant_snapshot") {
-           const q = event.payload as any;
-           lastSigma = q.sigma;
-           quantState.set(event.processedTsMs, lastSigma);
-        } else if (event.eventType === "order_intent") {
+        if (event.eventType === "order_intent") {
           const payload = event.payload as any;
           if (payload.intentId) intentsByIntentId.set(payload.intentId, event as any);
         } else if (event.eventType === "risk_gate_decision") {
@@ -209,16 +198,16 @@ async function main() {
           if (slotEndMs) {
              (record as any).timeToCloseSecs = (slotEndMs - ts) / 1000;
           }
-          // Find closest preceding states
+          // Extract states directly from the risk gate decision feature snapshot
           let diag = false;
           let sig = null;
-          let bestDiagTs = 0;
-          let bestSigTs = 0;
-          for (const [k, v] of predictiveState.entries()) {
-             if (k <= ts && k > bestDiagTs) { bestDiagTs = k; diag = v; }
+          const pFeeds = (decisionEvent.payload as any).decisionFeature?.feeds;
+          const pQuant = (decisionEvent.payload as any).decisionFeature?.quant;
+          if (pFeeds && typeof pFeeds.predictiveDisagreement === "boolean") {
+            diag = pFeeds.predictiveDisagreement;
           }
-          for (const [k, v] of quantState.entries()) {
-             if (k <= ts && k > bestSigTs) { bestSigTs = k; sig = v; }
+          if (pQuant && typeof pQuant.sigma === "number") {
+            sig = pQuant.sigma;
           }
           (record as any).predictiveDisagreement = diag;
           (record as any).sigma = sig;
