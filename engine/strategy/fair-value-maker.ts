@@ -39,6 +39,7 @@ export interface FairValueMakerConfig {
 }
 
 const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
+  skipHygiene: false,
   sharesMode: "fixed",
   sharePct: 0.10,
   shares: 10,
