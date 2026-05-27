@@ -87,6 +87,8 @@ export class Env {
     PRIVATE_KEY: "",
     POLY_FUNDER_ADDRESS: "",
     POLY_SIGNATURE_TYPE: -1, // Force explicit config
+    POLY_API_KEY_NONCE: 1,
+    POLYGON_RPC_URL: "https://polygon-bor-rpc.publicnode.com",
     BUILDER_KEY: "",
     BUILDER_SECRET: "",
     BUILDER_PASSPHRASE: "",

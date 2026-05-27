@@ -29,7 +29,7 @@ import { ConservativeMakerFillModel, type FillModelBook, type FillModelOrder } f
 
 
 const RELAYER_URL = "https://relayer-v2.polymarket.com";
-const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
+const POLYGON_RPC = Env.get("POLYGON_RPC_URL");
 const CTF_ADDRESS = POLYGON_CONTRACTS.CONDITIONAL_TOKENS as `0x${string}`;
 const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 const pUSD_ADDRESS = POLYGON_CONTRACTS.PUSD as `0x${string}`;

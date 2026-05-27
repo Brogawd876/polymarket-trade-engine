@@ -50,6 +50,8 @@ HELP = {
     "PRIVATE_KEY": "Private key for the dedicated MetaMask bot account. Hidden.",
     "POLY_FUNDER_ADDRESS": "Type 3 deposit wallet derived from the PRIVATE_KEY owner; do not copy between owners.",
     "POLY_SIGNATURE_TYPE": "Use 3 for the proven POLY_1271 deposit-wallet flow.",
+    "POLY_API_KEY_NONCE": "Integer nonce used to derive CLOB API keys. Default is 1.",
+    "POLYGON_RPC_URL": "Primary Polygon JSON-RPC endpoint.",
     "BUILDER_KEY": "Optional Polymarket Builder Code key.",
     "BUILDER_SECRET": "Optional Polymarket Builder Code secret. Hidden.",
     "BUILDER_PASSPHRASE": "Optional Polymarket Builder Code passphrase. Hidden.",
