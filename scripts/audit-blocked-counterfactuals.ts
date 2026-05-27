@@ -16,6 +16,7 @@ const { values } = parseArgs({
     "variants": { type: "string", multiple: true, default: ["late-entry", "late-entry-flow-aware", "fair-value-maker"] },
     "dedupe-window-ms": { type: "string", default: "1000" },
     "include-raw-records": { type: "boolean", default: false },
+    "allow-contaminated": { type: "boolean", default: false },
   },
   strict: true,
   allowPositionals: true,
@@ -26,6 +27,7 @@ async function main() {
   const outJson = values["out-json"] as string;
   const outMd = values["out-md"] as string;
   const dedupeWindowMs = parseInt(values["dedupe-window-ms"] as string, 10);
+  const allowContaminated = values["allow-contaminated"] as boolean;
 
   if (!existsSync(path.dirname(outJson))) mkdirSync(path.dirname(outJson), { recursive: true });
   if (!existsSync(path.dirname(outMd))) mkdirSync(path.dirname(outMd), { recursive: true });
@@ -101,6 +103,12 @@ async function main() {
       diagnostic.contaminated = true;
     }
 
+    if (diagnostic.contaminated && !allowContaminated) {
+      runDiagnostics.push(diagnostic);
+      console.warn(`Skipping contaminated pair ${manifest.slug} (use --allow-contaminated to include)`);
+      continue;
+    }
+
     console.log(`Processing ${manifest.slug} (${eventFiles.length} runs)...`);
     
     // Load Raw L2 events once per manifest
@@ -146,6 +154,10 @@ async function main() {
       for (const s of strategyIds) {
         if (!diagnostic.strategyIdsDetected.includes(s)) diagnostic.strategyIdsDetected.push(s);
       }
+
+      diagnostic.predictiveDisagreementMismatchCount = diagnostic.predictiveDisagreementMismatchCount || 0;
+      diagnostic.unmatchedBlockedDecisionCount = diagnostic.unmatchedBlockedDecisionCount || 0;
+      diagnostic.unmatchedBlockedDecisionIds = diagnostic.unmatchedBlockedDecisionIds || [];
 
       const allEventsForRun = [...botEvents, ...l2Events].sort((a, b) => a.processedTsMs - b.processedTsMs);
 
@@ -210,7 +222,16 @@ async function main() {
           (record as any).predictiveDisagreement = diag;
           (record as any).sigma = sig;
 
+          if (record.reasons.some(r => r.includes("predictive aggregate disagreement is true")) && diag !== true) {
+            diagnostic.predictiveDisagreementMismatchCount++;
+          }
+
           allRecords.push(record);
+        } else if (!intentEvent) {
+          diagnostic.unmatchedBlockedDecisionCount++;
+          if (diagnostic.unmatchedBlockedDecisionIds.length < 10) {
+            diagnostic.unmatchedBlockedDecisionIds.push(intentId);
+          }
         }
       }
     }
@@ -222,7 +243,7 @@ async function main() {
   const processedRecords = deduplicateBlockedRecords(allRecords, dedupeWindowMs);
 
   // 4. Summarize
-  const summary = summarizeRecords(processedRecords, runDiagnostics);
+  const summary = summarizeRecords(processedRecords, runDiagnostics, allowContaminated);
 
   // 5. Write reports
   if (values["include-raw-records"]) {
@@ -241,7 +262,7 @@ async function main() {
   console.log(`Markdown report: ${outMd}`);
 }
 
-function summarizeRecords(records: BlockedCounterfactualRecord[], runDiagnostics: any[]) {
+export function summarizeRecords(records: BlockedCounterfactualRecord[], runDiagnostics: any[], allowContaminated: boolean = false) {
   const strategies = [...new Set(records.map(r => r.strategy))];
   const byStrategy: Record<string, any> = {};
 
@@ -338,9 +359,19 @@ function summarizeRecords(records: BlockedCounterfactualRecord[], runDiagnostics
     };
   }
 
+  let totalUnmatchedBlockedDecisionCount = 0;
+  let totalPredictiveDisagreementMismatchCount = 0;
+  for (const diag of runDiagnostics) {
+    totalUnmatchedBlockedDecisionCount += diag.unmatchedBlockedDecisionCount || 0;
+    totalPredictiveDisagreementMismatchCount += diag.predictiveDisagreementMismatchCount || 0;
+  }
+
   return {
     totalBlocked: records.length,
     totalUnique: records.filter(r => r.duplicateVerdict === "unique").length,
+    totalUnmatchedBlockedDecisionCount,
+    totalPredictiveDisagreementMismatchCount,
+    allowContaminatedUsed: allowContaminated,
     byStrategy,
     byBlockReason,
     bySide,
@@ -359,18 +390,31 @@ function average(vals: (number | null)[]): number | null {
   return filtered.reduce((a, b) => a + b, 0) / filtered.length;
 }
 
-function generateMarkdownReport(summary: any): string {
+export function generateMarkdownReport(summary: any): string {
   let md = `# Blocked Counterfactual Audit\n\n`;
-  md += `> **Warning:** Diagnostic-only replay report. This is not live trading evidence and is not proof of profitability. Missing raw L2 data, ambiguous fill evidence, duplicate intents, and wallet/inventory uncertainty are preserved as inconclusive rather than fabricated.\n\n`;
+  md += `> **Warning:** Diagnostic-only replay report. This does not imply proof of profitability, paper readiness, or definitive risk-gate correctness. Missing raw L2 data, ambiguous fill evidence, duplicate intents, and wallet/inventory uncertainty are preserved as inconclusive rather than fabricated.\n\n`;
 
   const contaminatedRuns = summary.runDiagnostics.filter((d: any) => d.contaminated).length;
   if (contaminatedRuns > 0) {
-    md += `> **WARNING:** Detected ${contaminatedRuns} potentially contaminated pairs (multiple runs found for the same slug). Summary data may be inflated.\n\n`;
+    if (summary.allowContaminatedUsed) {
+      md += `> **WARNING:** Detected ${contaminatedRuns} contaminated pairs (multiple runs found for the same slug). These contaminated results are directional evidence only.\n\n`;
+    } else {
+      md += `> **WARNING:** Detected ${contaminatedRuns} contaminated pairs. They were skipped from the summary.\n\n`;
+    }
   }
 
   md += `## Global Summary\n`;
   md += `- **Total Blocked Intents:** ${summary.totalBlocked}\n`;
-  md += `- **Unique Blocked Intents:** ${summary.totalUnique}\n\n`;
+  md += `- **Unique Blocked Intents:** ${summary.totalUnique}\n`;
+  md += `- **Unmatched Blocked Decisions:** ${summary.totalUnmatchedBlockedDecisionCount}\n`;
+  if (summary.totalUnmatchedBlockedDecisionCount > 0) {
+    const samples = summary.runDiagnostics.flatMap((d: any) => d.unmatchedBlockedDecisionIds || []).slice(0, 10);
+    md += `  - Sample IDs: ${samples.join(", ")}\n`;
+  }
+  md += `- **Predictive Disagreement State Mismatches:** ${summary.totalPredictiveDisagreementMismatchCount}\n\n`;
+  if (summary.totalPredictiveDisagreementMismatchCount > 0) {
+    md += `> **WARNING:** Predictive disagreement state mismatches detected. Do not use byPredictiveDisagreementState as evidence of predictive-disagreement gate quality until resolved.\n\n`;
+  }
 
   md += `## By Strategy\n\n`;
   md += `| Strategy | Blocked | Unique | Would Fill | Good Block | Bad Block | No Fill | Inconclusive | Avg PnL |\n`;
@@ -420,4 +464,6 @@ function generateMarkdownReport(summary: any): string {
   return md;
 }
 
-main().catch(console.error);
+if (import.meta.main) {
+  main().catch(console.error);
+}

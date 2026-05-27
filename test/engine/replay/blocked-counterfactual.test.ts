@@ -224,5 +224,33 @@ describe("Blocked Counterfactual Engine", () => {
       expect(record.side).toBe("UP");
     });
   });
+
+  describe("Audit Script Reporting", () => {
+    it("should summarize unmatched blocked decisions and mismatches", async () => {
+      const { summarizeRecords } = await import("../../../scripts/audit-blocked-counterfactuals.ts");
+      const summary = summarizeRecords([], [{
+         unmatchedBlockedDecisionCount: 5,
+         predictiveDisagreementMismatchCount: 2,
+      }]);
+      expect(summary.totalUnmatchedBlockedDecisionCount).toBe(5);
+      expect(summary.totalPredictiveDisagreementMismatchCount).toBe(2);
+    });
+
+    it("should adjust markdown based on allow-contaminated", async () => {
+      const { generateMarkdownReport } = await import("../../../scripts/audit-blocked-counterfactuals.ts");
+      const summary1 = {
+         runDiagnostics: [{ contaminated: true }],
+         allowContaminatedUsed: false,
+         totalBlocked: 0, totalUnique: 0, totalUnmatchedBlockedDecisionCount: 0, totalPredictiveDisagreementMismatchCount: 0,
+         byStrategy: {}, byFillEvidence: {}, bySide: {}, byBlockReason: {}, byTimeToCloseBucket: {}, byPredictiveDisagreementState: {}, byUnavailableReason: {}
+      };
+      const md1 = generateMarkdownReport(summary1);
+      expect(md1).toContain("They were skipped from the summary");
+
+      const summary2 = { ...summary1, allowContaminatedUsed: true };
+      const md2 = generateMarkdownReport(summary2);
+      expect(md2).toContain("These contaminated results are directional evidence only");
+    });
+  });
 });
 
