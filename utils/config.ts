@@ -10,6 +10,8 @@ export type Config = {
   PRIVATE_KEY: string;
   POLY_FUNDER_ADDRESS: string;
   POLY_SIGNATURE_TYPE: number;
+  POLY_API_KEY_NONCE: number;
+  POLYGON_RPC_URL: string;
   BUILDER_KEY: string;
   BUILDER_SECRET: string;
   BUILDER_PASSPHRASE: string;

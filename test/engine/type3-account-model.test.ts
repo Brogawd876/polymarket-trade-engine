@@ -62,9 +62,9 @@ describe("Type 3 account model guardrails", () => {
     expect(Number(order.signatureType)).toBe(3);
   });
 
-  test("active sample config keeps the proven funder and blocks old funders as live values", async () => {
+  test("active sample config keeps the proven funder placeholder and blocks old funders", async () => {
     const envSample = await Bun.file(".env.sample").text();
-    expect(envSample).toContain(`POLY_FUNDER_ADDRESS=${EXPECTED_FUNDER}`);
+    expect(envSample).toContain("POLY_FUNDER_ADDRESS=0xYOUR_DEPOSIT_WALLET_HERE");
     for (const wrong of WRONG_FUNDERS) {
       expect(envSample).not.toContain(`POLY_FUNDER_ADDRESS=${wrong}`);
     }
@@ -72,7 +72,8 @@ describe("Type 3 account model guardrails", () => {
 
   test("setup UI does not offer static CLOB API credentials as an auth bypass", async () => {
     const setup = await Bun.file("setup_env.py").text();
-    expect(setup).not.toContain("POLY_API_KEY");
+    // Nonce is allowed, but the actual key/secret/passphrase are blocked
+    expect(setup).not.toMatch(/POLY_API_KEY(?!_NONCE)/);
     expect(setup).not.toContain("POLY_API_SECRET");
     expect(setup).not.toContain("POLY_API_PASSPHRASE");
   });
