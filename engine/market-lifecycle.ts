@@ -876,7 +876,9 @@ export class MarketLifecycle {
     for (const id of cancellable) this._cancelingOrderIds.add(id);
     try {
       const response = await this.client.cancelOrders(cancellable);
-      for (const id of response.canceled) {
+      const canceled = response?.canceled || [];
+      const notCanceled = response?.not_canceled || {};
+      for (const id of canceled) {
         const pending = this._pendingOrders.find((o) => o.orderId === id);
         if (pending) {
           this._trackerUnlock(pending);
@@ -888,7 +890,7 @@ export class MarketLifecycle {
         }
         this._removePendingOrder(id);
       }
-      return response;
+      return { canceled, not_canceled: notCanceled };
     } finally {
       for (const id of cancellable) this._cancelingOrderIds.delete(id);
     }
