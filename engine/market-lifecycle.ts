@@ -621,6 +621,10 @@ export class MarketLifecycle {
       clobTokenIds: this._clobTokenIds,
       orderBook: this._orderBook,
       get walletBalanceUsd() { return self._tracker.balance; },
+      get openExposureUsd() { return self._openExposureUsd(); },
+      get maxOpenExposureUsd() { 
+        return (self._riskGate as any).staticLimits?.maxOpenExposureUsd ?? 50; 
+      },
       log: this._log,
       getOrderById: this.client.getOrderById.bind(this.client),
       postOrders: this._postOrders.bind(this),

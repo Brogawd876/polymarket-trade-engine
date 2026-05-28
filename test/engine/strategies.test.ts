@@ -853,4 +853,59 @@ describe("Strategy Logic Verification", () => {
 
     if (cleanup) cleanup();
   });
+
+  test("fair-value-maker exposure-aware sizing clamp", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      walletBalanceUsd: 100,
+      openExposureUsd: 45, // $45 current exposure
+      maxOpenExposureUsd: 50, // $50 limit, so only $5 budget remains
+      strategyConfig: { 
+        makerOnly: false, 
+        shares: 20 // Normally would buy 20 shares @ ~0.64 = $12.80 notional
+      },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.65
+        }),
+        subscribe: () => () => {}
+      } as any,
+      postOrders: async (orders) => {
+        postedOrders.push(...orders);
+        return [];
+      },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      orderBook: makerBook(),
+      log: (msg) => logs.push(msg)
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+    
+    const upOrder = postedOrders.find(o => o.req.tokenId === "up-id");
+    // $5 budget / 0.64 price = 7.81 shares -> Math.floor = 7 shares
+    expect(upOrder.req.shares).toBeLessThan(20);
+    expect(upOrder.req.shares).toBe(7);
+    expect(logs.some(l => l.includes("Clamping UP shares"))).toBe(true);
+
+    // Test suppression when budget is too low
+    (ctx as any).openExposureUsd = 49.5; // Only $0.50 budget
+    postedOrders.length = 0;
+    clock.setNowMs(10000);
+    expect(postedOrders.find(o => o.req.tokenId === "up-id")).toBeUndefined();
+    expect(logs.some(l => l.includes("Suppressing UP quote"))).toBe(true);
+
+    if (cleanup) cleanup();
+  });
 });

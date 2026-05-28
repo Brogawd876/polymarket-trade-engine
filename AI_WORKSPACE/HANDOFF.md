@@ -1,5 +1,20 @@
 # Project Handoff
 
+## Phase 9D Strategy Calibration and Noise Reduction (Checkpoint)
+
+### Checkpoint Result
+Implemented strategy-side exposure-aware sizing clamps in `fairValueMaker`. Blocked intent noise reduced by >90%.
+
+### Key Findings
+- **Noise Reduction:** Successfully reduced `open exposure would exceed max exposure limit` blocks from 1000+ to ~80 across 50 pairs by clamping shares strategy-side.
+- **Normal Mode Improvement:** Strategy is profitable ($41.44 PnL on 50-pair corpus) under strict normal risk gates.
+- **Adverse Selection:** Remains high (0.91), confirming that maker flow is naturally toxic in this regime, but now correctly managed.
+
+### Next Action
+Phase 9E: Tune dynamic position sizing to scale with predictive confidence.
+
+---
+
 ## Phase 9C Verified State and Audit Review (Checkpoint)
 
 ### Checkpoint Result

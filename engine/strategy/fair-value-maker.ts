@@ -173,7 +173,6 @@ export const fairValueMaker: Strategy = async (ctx) => {
     let targetShares = config.shares;
     if (config.sharesMode === "pct_of_balance" && balance > 0) {
       targetShares = balance * config.sharePct;
-      if (targetShares < 1) targetShares = 1; // Floor to at least 1 share if we try to quote
     }
 
     // 4. Update Orders
@@ -212,27 +211,44 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const allowUpFlow = flowAllowsSide(flow, "UP", config, ctx);
     const allowDownFlow = flowAllowsSide(flow, "DOWN", config, ctx);
 
+    // Strategy-side Exposure Clamp
+    const remainingExposure = Math.max(0, ctx.maxOpenExposureUsd - ctx.openExposureUsd);
+
     if (bidPriceUp !== null && bidPriceUp > 0.01 && bidPriceUp < 0.99 && evUp.edge >= config.minEdge && allowUpFlow) {
       if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
         if (existingUp) {
           ctx.log(`[fair-value] Replacing UP quote: ${existingUp.price} -> ${bidPriceUp} (P=${probUp.toFixed(3)})`, "dim");
           ctx.cancelOrders([existingUp.orderId]);
         }
-        if (inventoryUp < config.maxInventory) {
-          const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, targetShares);
-          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "UP", bidPriceUp, targetShares)) {
+        
+        let sharesToBuy = targetShares;
+        const notional = bidPriceUp * sharesToBuy;
+        if (notional > remainingExposure) {
+          sharesToBuy = Math.floor(remainingExposure / bidPriceUp);
+          if (sharesToBuy >= 1) {
+             ctx.log(`[fair-value] Clamping UP shares to ${sharesToBuy.toFixed(2)} due to remaining exposure budget ($${remainingExposure.toFixed(2)})`, "yellow");
+          }
+        }
+
+        if (inventoryUp < config.maxInventory && sharesToBuy >= 1) {
+          const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, sharesToBuy);
+          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "UP", bidPriceUp, sharesToBuy)) {
             ordersToPost.push({
               req: {
                 tokenId: upTokenId,
                 action: "buy" as const,
                 price: bidPriceUp,
-                shares: targetShares,
+                shares: sharesToBuy,
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
               onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
             });
           }
+        } else if (sharesToBuy < 1 && remainingExposure < 1) {
+           if (ctx.clock.nowMs() % 10000 === 0) {
+             ctx.log(`[fair-value] Suppressing UP quote: insufficient exposure budget ($${remainingExposure.toFixed(2)})`, "dim");
+           }
         }
       }
     } else if (existingUp) {
@@ -245,21 +261,35 @@ export const fairValueMaker: Strategy = async (ctx) => {
           ctx.log(`[fair-value] Replacing DOWN quote: ${existingDown.price} -> ${bidPriceDown}`, "dim");
           ctx.cancelOrders([existingDown.orderId]);
         }
-        if (inventoryUp > -config.maxInventory) {
-          const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, targetShares);
-          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "DOWN", bidPriceDown, targetShares)) {
+        
+        let sharesToBuy = targetShares;
+        const notional = bidPriceDown * sharesToBuy;
+        if (notional > remainingExposure) {
+          sharesToBuy = Math.floor(remainingExposure / bidPriceDown);
+          if (sharesToBuy >= 1) {
+             ctx.log(`[fair-value] Clamping DOWN shares to ${sharesToBuy.toFixed(2)} due to remaining exposure budget ($${remainingExposure.toFixed(2)})`, "yellow");
+          }
+        }
+
+        if (inventoryUp > -config.maxInventory && sharesToBuy >= 1) {
+          const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, sharesToBuy);
+          if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "DOWN", bidPriceDown, sharesToBuy)) {
             ordersToPost.push({
               req: {
                 tokenId: downTokenId,
                 action: "buy" as const,
                 price: bidPriceDown,
-                shares: targetShares,
+                shares: sharesToBuy,
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
               onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
             });
           }
+        } else if (sharesToBuy < 1 && remainingExposure < 1) {
+           if (ctx.clock.nowMs() % 10000 === 0) {
+             ctx.log(`[fair-value] Suppressing DOWN quote: insufficient exposure budget ($${remainingExposure.toFixed(2)})`, "dim");
+           }
         }
       }
     } else if (existingDown) {

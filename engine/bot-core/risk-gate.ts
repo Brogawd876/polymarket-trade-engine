@@ -424,6 +424,7 @@ export const DEFAULT_PRODUCTION_EXECUTION_QUALITY_LIMITS: ExecutionQualityLimits
 export class AggregatedRiskGate implements RiskGate {
   private readonly baseGate: RiskGate;
   private readonly qualityGate: RiskGate;
+  private readonly _staticLimits: StaticRiskLimits;
 
   constructor(private readonly opts: AggregatedRiskGateOptions = {}) {
     const isProd = Env.get("PROD");
@@ -438,9 +439,14 @@ export class AggregatedRiskGate implements RiskGate {
         ? DEFAULT_PRODUCTION_EXECUTION_QUALITY_LIMITS
         : DEFAULT_EXECUTION_QUALITY_LIMITS);
 
+    this._staticLimits = staticLimits;
     this.baseGate = opts.baseGate ?? new StaticRiskGate(staticLimits);
     this.qualityGate =
       opts.qualityGate ?? new ExecutionQualityGate(qualityLimits);
+  }
+
+  get staticLimits(): StaticRiskLimits {
+    return this._staticLimits;
   }
 
   evaluate(intent: StrategyIntent, snapshot: RiskSnapshot): RiskDecision {
