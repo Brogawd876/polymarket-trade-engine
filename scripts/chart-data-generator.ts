@@ -60,6 +60,7 @@ async function main() {
   
   for (let i = 0; i < indepResult.runs.length; i++) {
     const run = indepResult.runs[i];
+    if (!run) continue;
     indepRunningPnl += (run.pnl ?? 0);
     indepData.push(indepRunningPnl);
     indepLabels.push(`R${i + 1}`);
@@ -70,6 +71,7 @@ async function main() {
   
   for (let i = 0; i < contResult.runs.length; i++) {
     const run = contResult.runs[i];
+    if (!run) continue;
     contRunningPnl += (run.pnl ?? 0);
     contData.push(contRunningPnl);
   }

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import * as readline from "readline";
-import { strategies, DEFAULT_STRATEGY } from "./engine/strategy/index.ts";
+import { strategies, DEFAULT_STRATEGY, strategyVariants } from "./engine/strategy/index.ts";
 import { acquireProcessLock } from "./utils/process-lock.ts";
 import { validateContracts } from "./utils/contracts.ts";
 import { 
@@ -85,9 +85,9 @@ validateContracts({
     Boolean(opts.prod) && !opts.replay && !opts.idle,
 });
 
-if (!strategies[opts.strategy] && !opts.idle && !opts.replay) {
+if (!strategies[opts.strategy] && !strategyVariants[opts.strategy] && !opts.idle && !opts.replay) {
   console.error(`Unknown strategy: "${opts.strategy}"`);
-  console.error(`Available: ${Object.keys(strategies).join(", ")}`);
+  console.error(`Available: ${Object.keys(strategies).join(", ")}, ${Object.keys(strategyVariants).join(", ")}`);
   process.exit(1);
 }
 

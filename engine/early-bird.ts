@@ -213,6 +213,9 @@ export class EarlyBird {
         binance: 0.7, // Institutional weight: Binance usually has 10x liquidity
         coinbase: 0.3,
       },
+      divergenceThresholdAbs: typeof this._strategyConfig.divergenceThresholdAbs === "number"
+        ? this._strategyConfig.divergenceThresholdAbs
+        : (process.env.DIVERGENCE_THRESHOLD ? parseFloat(process.env.DIVERGENCE_THRESHOLD) : undefined),
       resolution: this._resolution,
       clock: this._clock,
     });
@@ -395,9 +398,13 @@ export class EarlyBird {
             this._orderBookFactory,
             this._clock,
             this._tradeTape,
+            this._prod,
           );
           for (const [slug, lifecycle] of recovered) {
             this._lifecycles.set(slug, lifecycle);
+          }
+          if (this._prod && this._persistState) {
+            this._saveState();
           }
         } else {
           log.write("[startup] No saved state found. Starting fresh.");
@@ -573,7 +580,8 @@ export class EarlyBird {
             alwaysLog: this._alwaysLog,
             marketLogMode: this._marketLogMode,
             eventWriter: this._eventWriter,
-            }),
+            liveMode: this._prod,
+          }),
 
         );
         this._roundsCreated++;

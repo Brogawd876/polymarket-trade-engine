@@ -10,6 +10,8 @@ export interface FairValueMakerConfig {
   /** Percentage of current wallet balance to use per trade if sharesMode is 'pct_of_balance'. (e.g. 0.10 for 10%) */
   sharePct?: number;
   shares?: number;
+  /** Minimum order size accepted by the venue for buy quotes. */
+  minShares?: number;
   /** Fixed profit margin buffer (e.g. 0.01 = 1 cent) */
   margin?: number;
   /** Inventory skew factor. Higher values make the bot more aggressive at offloading inventory. */
@@ -43,6 +45,7 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
   sharesMode: "fixed",
   sharePct: 0.10,
   shares: 10,
+  minShares: 1,
   margin: 0.01,
   inventorySkew: 0.05, // Skew price by 5% of fair value per maxInventory unit
   maxInventory: 100,
@@ -69,6 +72,7 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
 export const fairValueMaker: Strategy = async (ctx) => {
   const config = { ...DEFAULT_CONFIG, ...(ctx.strategyConfig as FairValueMakerConfig) };
   const exposureBlockCooldowns = new Map<string, number>();
+  const affordabilityLogCooldowns = new Map<string, number>();
   
   const releaseLock = ctx.hold?.() ?? (() => {});
 
@@ -212,7 +216,35 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const allowDownFlow = flowAllowsSide(flow, "DOWN", config, ctx);
 
     // Strategy-side Exposure Clamp
-    const remainingExposure = Math.max(0, ctx.maxOpenExposureUsd - ctx.openExposureUsd);
+    const hasExposureBudget =
+      Number.isFinite(ctx.maxOpenExposureUsd) &&
+      Number.isFinite(ctx.openExposureUsd);
+    const remainingExposure = hasExposureBudget
+      ? Math.max(0, ctx.maxOpenExposureUsd - ctx.openExposureUsd)
+      : Number.POSITIVE_INFINITY;
+    let cashBudget = Number.isFinite(balance) ? Math.max(0, balance) : 0;
+
+    const reserveAffordableShares = (side: "UP" | "DOWN", price: number, requestedShares: number): number => {
+      const maxSharesByExposure = Number.isFinite(remainingExposure)
+        ? Math.floor(remainingExposure / price)
+        : requestedShares;
+      const maxSharesByCash = Math.floor(cashBudget / price);
+      const minShares = Math.max(1, config.minShares);
+      const targetShares = Math.max(requestedShares, minShares);
+      const shares = Math.min(targetShares, maxSharesByExposure, maxSharesByCash);
+      if (shares < minShares) {
+        const reason = maxSharesByExposure < minShares ? "insufficient exposure budget" : "insufficient cash";
+        const available = maxSharesByExposure < minShares ? remainingExposure : cashBudget;
+        logSuppressedAffordability(ctx, affordabilityLogCooldowns, side, price, targetShares, reason, available);
+        return 0;
+      }
+      if (shares < targetShares) {
+        const reason = shares === maxSharesByCash ? "cash balance" : "remaining exposure budget";
+        ctx.log(`[fair-value] Clamping ${side} shares to ${shares.toFixed(2)} due to ${reason}`, "yellow");
+      }
+      cashBudget -= price * shares;
+      return shares;
+    };
 
     if (bidPriceUp !== null && bidPriceUp > 0.01 && bidPriceUp < 0.99 && evUp.edge >= config.minEdge && allowUpFlow) {
       if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
@@ -221,14 +253,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
           ctx.cancelOrders([existingUp.orderId]);
         }
         
-        let sharesToBuy = targetShares;
-        const notional = bidPriceUp * sharesToBuy;
-        if (notional > remainingExposure) {
-          sharesToBuy = Math.floor(remainingExposure / bidPriceUp);
-          if (sharesToBuy >= 1) {
-             ctx.log(`[fair-value] Clamping UP shares to ${sharesToBuy.toFixed(2)} due to remaining exposure budget ($${remainingExposure.toFixed(2)})`, "yellow");
-          }
-        }
+        const sharesToBuy = reserveAffordableShares("UP", bidPriceUp, targetShares);
 
         if (inventoryUp < config.maxInventory && sharesToBuy >= 1) {
           const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, sharesToBuy);
@@ -245,10 +270,6 @@ export const fairValueMaker: Strategy = async (ctx) => {
               onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
             });
           }
-        } else if (sharesToBuy < 1 && remainingExposure < 1) {
-           if (ctx.clock.nowMs() % 10000 === 0) {
-             ctx.log(`[fair-value] Suppressing UP quote: insufficient exposure budget ($${remainingExposure.toFixed(2)})`, "dim");
-           }
         }
       }
     } else if (existingUp) {
@@ -262,14 +283,7 @@ export const fairValueMaker: Strategy = async (ctx) => {
           ctx.cancelOrders([existingDown.orderId]);
         }
         
-        let sharesToBuy = targetShares;
-        const notional = bidPriceDown * sharesToBuy;
-        if (notional > remainingExposure) {
-          sharesToBuy = Math.floor(remainingExposure / bidPriceDown);
-          if (sharesToBuy >= 1) {
-             ctx.log(`[fair-value] Clamping DOWN shares to ${sharesToBuy.toFixed(2)} due to remaining exposure budget ($${remainingExposure.toFixed(2)})`, "yellow");
-          }
-        }
+        const sharesToBuy = reserveAffordableShares("DOWN", bidPriceDown, targetShares);
 
         if (inventoryUp > -config.maxInventory && sharesToBuy >= 1) {
           const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, sharesToBuy);
@@ -286,10 +300,6 @@ export const fairValueMaker: Strategy = async (ctx) => {
               onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
             });
           }
-        } else if (sharesToBuy < 1 && remainingExposure < 1) {
-           if (ctx.clock.nowMs() % 10000 === 0) {
-             ctx.log(`[fair-value] Suppressing DOWN quote: insufficient exposure budget ($${remainingExposure.toFixed(2)})`, "dim");
-           }
         }
       }
     } else if (existingDown) {
@@ -483,6 +493,26 @@ function recordExposureBlock(
 ): void {
   if (!reason.includes("open exposure would exceed max exposure limit")) return;
   cooldowns.set(key, ctx.clock.nowMs() + cooldownMs);
+}
+
+function logSuppressedAffordability(
+  ctx: StrategyContext,
+  cooldowns: Map<string, number>,
+  side: "UP" | "DOWN",
+  price: number,
+  shares: number,
+  reason: string,
+  available: number,
+): void {
+  const key = `${side}:${price.toFixed(2)}:${shares.toFixed(4)}`;
+  const now = ctx.clock.nowMs();
+  const nextLogMs = cooldowns.get(key) ?? Number.NEGATIVE_INFINITY;
+  if (now < nextLogMs) return;
+  cooldowns.set(key, now + 10_000);
+  ctx.log(
+    `[fair-value] Suppressing ${side} quote: ${reason} price=${price.toFixed(2)} shares=${shares} available=$${available.toFixed(4)}`,
+    "dim",
+  );
 }
 
 function isExposureBlocked(

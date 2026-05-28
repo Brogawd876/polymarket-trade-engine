@@ -908,4 +908,50 @@ describe("Strategy Logic Verification", () => {
 
     if (cleanup) cleanup();
   });
+
+  test("fair-value-maker suppresses unaffordable live-sized quotes before posting", async () => {
+    const clock = new VirtualClock();
+    const postedOrders: any[] = [];
+    const logs: string[] = [];
+    const ctx: Partial<StrategyContext> = {
+      clock,
+      ...settlementContext(clock, { settlement: 100_000, predictive: 100_043 }),
+      slotEndMs: 1000000,
+      clobTokenIds: ["up-id", "down-id"],
+      orderHistory: [],
+      pendingOrders: [],
+      walletBalanceUsd: 0.235151,
+      strategyConfig: {
+        makerOnly: false,
+        sharesMode: "fixed",
+        shares: 1,
+      },
+      quant: {
+        latest: () => ({
+          asset: "btc",
+          timestampMs: clock.nowMs(),
+          sigma: 0.20,
+          probabilityUp: 0.65
+        }),
+        subscribe: () => () => {}
+      } as any,
+      postOrders: async (orders) => {
+        postedOrders.push(...orders);
+        return [];
+      },
+      cancelOrders: async () => ({ canceled: [], not_canceled: {} }),
+      orderBook: makerBook(),
+      log: (msg) => logs.push(msg)
+    };
+
+    const cleanup = await fairValueMaker(ctx as StrategyContext);
+    clock.setNowMs(1000);
+
+    expect(postedOrders).toHaveLength(0);
+    expect(logs.some((l) => l.includes("insufficient cash"))).toBe(true);
+    expect(logs.some((l) => l.includes("Posting"))).toBe(false);
+
+    if (cleanup) cleanup();
+  });
+
 });

@@ -150,7 +150,10 @@ export const strategyVariants: Record<string, StrategyVariant> = {
     config: {
       skipHygiene: true,
       minCvd10s: Number.NEGATIVE_INFINITY,
-      shares: 10,
+      sharesMode: "fixed",
+      shares: 5,
+      minShares: 5,
+      divergenceThresholdAbs: 200,
     },
     paperEligible: false,
   },
