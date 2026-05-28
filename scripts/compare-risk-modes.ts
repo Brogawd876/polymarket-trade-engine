@@ -10,6 +10,7 @@ const { values } = parseArgs({
     "variants": { type: "string", multiple: true, default: ["fair-value-maker"] },
     "out-md": { type: "string", default: "data/reports/risk-mode-comparison.md" },
     "max-pairs": { type: "string", default: "5" },
+    "continuous": { type: "boolean", default: false },
   },
   strict: true,
   allowPositionals: true,
@@ -20,6 +21,7 @@ async function main() {
   const pairsDir = values["pairs-dir"] as string;
   const variants = values["variants"] as string[];
   const maxPairs = parseInt(values["max-pairs"] as string, 10);
+  const continuous = values["continuous"] as boolean;
 
   const pairFiles = readdirSync(pairsDir)
     .filter(f => f.endsWith(".pair.json"))
@@ -44,6 +46,7 @@ async function main() {
     files,
     l2Files,
     riskMode: "normal",
+    continuousBankroll: continuous,
   });
 
   // 2. Run Permissive Mode
@@ -52,6 +55,7 @@ async function main() {
     files,
     l2Files,
     riskMode: "permissive-counterfactual",
+    continuousBankroll: continuous,
   });
 
   // Poll for completion
@@ -68,16 +72,19 @@ async function main() {
     waitForBatch(permissiveBatch.id),
   ]);
 
-  const report = generateComparisonReport(nResult, pResult);
+  const report = generateComparisonReport(nResult, pResult, continuous);
   if (!existsSync(path.dirname(values["out-md"] as string))) mkdirSync(path.dirname(values["out-md"] as string), { recursive: true });
   writeFileSync(values["out-md"] as string, report);
 
   console.log(`Comparison report written to ${values["out-md"]}`);
 }
 
-function generateComparisonReport(normal: StrategyLabBatch, permissive: StrategyLabBatch): string {
+function generateComparisonReport(normal: StrategyLabBatch, permissive: StrategyLabBatch, isContinuous: boolean): string {
   let md = `# Risk Mode Comparison Audit\n\n`;
   md += `> **Warning:** Diagnostic-only replay report. Counterfactual mode allows trades that were blocked in reality. This is not proof of profitability.\n\n`;
+  if (isContinuous) {
+    md += `> **Note:** Continuous bankroll mode was active. Runs for a given variant were tracked chronologically with cumulative balances.\n\n`;
+  }
 
   md += `## Summary\n\n`;
   md += `| Metric | Normal Mode | Permissive Mode | Delta |\n`;

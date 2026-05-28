@@ -74,6 +74,7 @@ export type EarlyBirdRuntimeOptions = {
   conservativeFill?: boolean;
   riskMode?: CounterfactualRiskMode;
   bypassRiskReasons?: string[];
+  initialBalance?: number;
 };
 
 export type EngineStatus = {
@@ -109,6 +110,7 @@ export class EarlyBird {
   private readonly _maxSessionProfit: number;
   private readonly _alwaysLog: boolean;
   private _roundsCreated = 0;
+  private _initialBalanceOverride?: number;
   private _tracker!: WalletTracker;
   private _ticker: TickerTracker;
   private _tradeTape: TradeTapeTracker;
@@ -176,6 +178,7 @@ export class EarlyBird {
     this._orderBookFactory = runtime.orderBookFactory;
     const persistState = runtime.persistState ?? !replayFile;
     const conservativeFill = runtime.conservativeFill ?? false;
+    this._initialBalanceOverride = runtime.initialBalance;
 
     this._riskGate = new CounterfactualRiskGate({
       mode: runtime.riskMode ?? "normal",
@@ -343,7 +346,7 @@ export class EarlyBird {
           );
         }
       } else {
-        initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
+        initialBalance = this._initialBalanceOverride ?? parseFloat(process.env.WALLET_BALANCE ?? "50");
         log.write(`[startup] Sim balance: $${initialBalance.toFixed(2)}`);
       }
       this._tracker = new WalletTracker(initialBalance, (msg) =>

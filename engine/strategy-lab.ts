@@ -29,6 +29,7 @@ export type StrategyLabBatchRequest = {
   l2Files?: Record<string, string>; // mapping from fixture path to l2 log path
   riskMode?: CounterfactualRiskMode;
   bypassReasons?: string[];
+  continuousBankroll?: boolean;
 };
 
 export type ConservativeFillEvidencePoint = {
@@ -205,6 +206,7 @@ export type StrategyLabBatch = {
   l2Files?: Record<string, string>;
   riskMode?: CounterfactualRiskMode;
   bypassReasons?: string[];
+  continuousBankroll?: boolean;
   error?: string;
 };
 
@@ -276,7 +278,7 @@ function emptyExecutionSummary(): ExecutionQualitySummary {
   };
 }
 
-const MAX_BATCH_RUNS = 50;
+const MAX_BATCH_RUNS = 500;
 
 function emptySummary(totalRuns: number): StrategyLabBatchSummary {
   return {
@@ -918,6 +920,7 @@ export class StrategyLabBatchManager {
       l2Files: request.l2Files,
       riskMode: request.riskMode,
       bypassReasons: request.bypassReasons,
+      continuousBankroll: request.continuousBankroll,
     } as any;
     this.batches.set(batch.id, batch);
 
@@ -960,6 +963,8 @@ export class StrategyLabBatchManager {
     batch.state = "running";
     batch.updatedAtMs = Date.now();
 
+    const variantBalances = new Map<string, number>();
+
     for (const run of batch.runs) {
       if (this.cancelRequested.has(batchId) || (batch.state as StrategyLabBatchState) === "canceled") break;
       if (run.status !== "queued") continue;
@@ -980,6 +985,11 @@ export class StrategyLabBatchManager {
           run.paperEligible = false;
         }
 
+        let initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
+        if (batch.continuousBankroll) {
+          initialBalance = variantBalances.get(run.variantLabel) ?? initialBalance;
+        }
+
         const bot = new EarlyBird(run.strategy, 1, false, 1, false, run.file, {
           clock,
           persistState: false,
@@ -991,6 +1001,7 @@ export class StrategyLabBatchManager {
           conservativeFill: true,
           riskMode: useRiskMode,
           bypassRiskReasons: batch.bypassReasons,
+          initialBalance,
         });
         this.currentBots.set(batchId, bot);
         const reader = bot.replayReader;
@@ -1014,6 +1025,9 @@ export class StrategyLabBatchManager {
                 (cFill.conservativeFillUnavailableReasons[tokenMapping.reason] ?? 0) +
                 cFill.eligibleFillCount;
             }
+          }
+          if (batch.continuousBankroll && run.pnl !== null) {
+            variantBalances.set(run.variantLabel, initialBalance + run.pnl);
           }
         }
       } catch (error) {
