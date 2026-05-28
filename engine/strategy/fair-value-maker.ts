@@ -79,6 +79,9 @@ export const fairValueMaker: Strategy = async (ctx) => {
   let isDone = false;
   let lastLogSec = -1;
 
+  let inFlightUp = false;
+  let inFlightDown = false;
+
   const evaluateQuotes = () => {
     if (isDone) return;
     const quant = ctx.quant?.latest();
@@ -183,6 +186,13 @@ export const fairValueMaker: Strategy = async (ctx) => {
     let existingUp = ctx.pendingOrders.find(o => o.tokenId === upTokenId && o.action === "buy");
     let existingDown = ctx.pendingOrders.find(o => o.tokenId === downTokenId && o.action === "buy");
 
+    if (existingUp) {
+      inFlightUp = false;
+    }
+    if (existingDown) {
+      inFlightDown = false;
+    }
+
     const feeRateUp = feeRate(ctx, upTokenId);
     const feeRateDown = feeRate(ctx, downTokenId);
 
@@ -255,9 +265,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
         
         const sharesToBuy = reserveAffordableShares("UP", bidPriceUp, targetShares);
 
-        if (inventoryUp < config.maxInventory && sharesToBuy >= 1) {
+        if (inventoryUp < config.maxInventory && sharesToBuy >= 1 && !inFlightUp) {
           const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, sharesToBuy);
           if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "UP", bidPriceUp, sharesToBuy)) {
+            inFlightUp = true;
             ordersToPost.push({
               req: {
                 tokenId: upTokenId,
@@ -267,7 +278,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
-              onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
+              onFailed: (reason) => {
+                inFlightUp = false;
+                recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs);
+              },
             });
           }
         }
@@ -285,9 +299,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
         
         const sharesToBuy = reserveAffordableShares("DOWN", bidPriceDown, targetShares);
 
-        if (inventoryUp > -config.maxInventory && sharesToBuy >= 1) {
+        if (inventoryUp > -config.maxInventory && sharesToBuy >= 1 && !inFlightDown) {
           const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, sharesToBuy);
           if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "DOWN", bidPriceDown, sharesToBuy)) {
+            inFlightDown = true;
             ordersToPost.push({
               req: {
                 tokenId: downTokenId,
@@ -297,7 +312,10 @@ export const fairValueMaker: Strategy = async (ctx) => {
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
-              onFailed: (reason) => recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs),
+              onFailed: (reason) => {
+                inFlightDown = false;
+                recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs);
+              },
             });
           }
         }
