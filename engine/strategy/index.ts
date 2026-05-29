@@ -28,7 +28,7 @@ export const strategies: Record<string, Strategy> = {
   "late-entry-adaptive": lateEntryAdaptive,
   hyperaggressive: hyperAggressive,
   "fair-value-maker": fairValueMaker,
-  };
+};
 
 
 export const DEFAULT_STRATEGY = "simulation";
@@ -190,6 +190,30 @@ export const strategyVariants: Record<string, StrategyVariant> = {
       skipHygiene: false,
       minCvd10s: -100,
       shares: 10,
+    },
+    paperEligible: false,
+  },
+  "fvm-v1.3.0-profit-selective": {
+    id: "fvm-v1.3.0-profit-selective",
+    label: "FVM v1.3.0 (Profit-Selective)",
+    strategy: "fair-value-maker",
+    description: "Profit-directed descendant of v1.1.0-raw-ungated. Dynamic pct_of_balance sizing, edge-weighted and regime-weighted scaling, falling-knife add-block, unstable-basis downsize. Preserves mean-reversion alpha by inheriting the champion's open CVD and skip-hygiene config.",
+    config: {
+      // Inherit champion's core settings
+      skipHygiene: true,
+      minCvd10s: Number.NEGATIVE_INFINITY,
+      divergenceThresholdAbs: 200,
+      // Dynamic bankroll sizing (replaces fixed 5-share sizing)
+      sharesMode: "pct_of_balance",
+      sharePct: 0.10,    // 10% of balance per order
+      minShares: 1,
+      // v1.3.0 profit-selective controls
+      edgeWeightedSizing: true,
+      regimeWeightedSizing: true,
+      fallingKnifeBlock: true,
+      fallingKnifeWindow: 3,
+      unstableBasisDownsize: true,
+      unstableBasisThreshold: 5.0,
     },
     paperEligible: false,
   },

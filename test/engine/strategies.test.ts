@@ -848,8 +848,8 @@ describe("Strategy Logic Verification", () => {
     clock.setNowMs(1000);
     
     const upOrder = postedOrders.find(o => o.req.tokenId === "up-id");
-    // $200 * 10% = 20 shares
-    expect(upOrder.req.shares).toBe(20);
+    // $200 * 10% = $20 notional risk. $20 / 0.64 bidPrice = 31.25 shares.
+    expect(upOrder.req.shares).toBe(31.25);
 
     if (cleanup) cleanup();
   });

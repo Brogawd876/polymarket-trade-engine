@@ -38,6 +38,35 @@ export interface FairValueMakerConfig {
   maxMakerBidPrice?: number;
   /** Suppress repeated identical exposure-limit rejections for this long. */
   exposureBlockCooldownMs?: number;
+
+  // ── v1.3.0 Profit-Selective Controls ────────────────────────────────────────
+  /**
+   * Scale share size linearly with edge quality.
+   * Ratio = clamp(edge / minEdge, 0.5, 2.0). Fat edge → larger size; thin edge → smaller.
+   */
+  edgeWeightedSizing?: boolean;
+  /**
+   * Scale share size down when market regime is unfavourable:
+   * - High sigma (> 1.0): multiply by 1/sigma (capped 0.5..1.0)
+   * - Unstable basis (abs(composite - anchor) > unstableBasisThreshold): multiply by 0.5
+   */
+  regimeWeightedSizing?: boolean;
+  /**
+   * Block new BUY orders on a side after N consecutive fills where the mid-price
+   * at fill time was lower than the fill price (adverse momentum signal).
+   * Block persists for the remainder of the round.
+   */
+  fallingKnifeBlock?: boolean;
+  /** Number of consecutive adverse fills required to trigger the falling-knife block. Default: 3. */
+  fallingKnifeWindow?: number;
+  /**
+   * Halve target share size when the predictive composite price diverges from the
+   * settlement anchor by more than `unstableBasisThreshold` USD.
+   * Applied independently of regimeWeightedSizing.
+   */
+  unstableBasisDownsize?: boolean;
+  /** Threshold (USD) at which the basis is considered unstable. Default: 5.0. */
+  unstableBasisThreshold?: number;
 }
 
 const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
@@ -59,6 +88,13 @@ const DEFAULT_CONFIG: Required<FairValueMakerConfig> = {
   highVolExtraMargin: 0.02,
   maxMakerBidPrice: 0.89,
   exposureBlockCooldownMs: 10_000,
+  // v1.3.0 defaults — all disabled so legacy variants are unaffected
+  edgeWeightedSizing: false,
+  regimeWeightedSizing: false,
+  fallingKnifeBlock: false,
+  fallingKnifeWindow: 3,
+  unstableBasisDownsize: false,
+  unstableBasisThreshold: 5.0,
 };
 
 /**
@@ -81,6 +117,14 @@ export const fairValueMaker: Strategy = async (ctx) => {
 
   let inFlightUp = false;
   let inFlightDown = false;
+
+  // ── v1.3.0 Profit-Selective State ────────────────────────────────────────────
+  // Falling-knife tracking: count consecutive fills where mid-price at fill time
+  // was BELOW the fill price (adverse momentum — we bought into a down-move).
+  let consecutiveAdverseUp = 0;
+  let consecutiveAdverseDown = 0;
+  let sideBlockedUp = false;
+  let sideBlockedDown = false;
 
   const evaluateQuotes = () => {
     if (isDone) return;
@@ -175,11 +219,48 @@ export const fairValueMaker: Strategy = async (ctx) => {
     const bidPriceUp = Number.isFinite(rawBidPriceUp) ? makerSafePrice(ctx, "UP", "buy", rawBidPriceUp, config.makerOnly) : null;
     const bidPriceDown = Number.isFinite(rawBidPriceDown) ? makerSafePrice(ctx, "DOWN", "buy", rawBidPriceDown, config.makerOnly) : null;
 
-    // 3.5. Position Sizing
+    // 3.5. Position Sizing — base
+    // For fixed mode: targetShares is a constant share count.
+    // For pct_of_balance mode: targetNotional = balance × pct; shares = notional / sidePrice.
+    // This ensures notional risk is fixed regardless of price level.
     const balance = ctx.walletBalanceUsd;
-    let targetShares = config.shares;
+    let targetNotional: number | null = null;  // pct_of_balance mode: USD notional per order
+    let targetSharesBase = config.shares;      // fixed mode: share count
     if (config.sharesMode === "pct_of_balance" && balance > 0) {
-      targetShares = balance * config.sharePct;
+      targetNotional = balance * config.sharePct;
+      // targetSharesBase is unused in pct_of_balance mode; per-side shares computed from notional/price
+    }
+
+    // 3.5a. v1.3.0 — Regime-Weighted Sizing
+    // Reduces share size / notional when volatility is elevated.
+    let regimeSizeMultiplier = 1.0;
+    if (config.regimeWeightedSizing && sigma !== null && sigma !== undefined) {
+      if (sigma > 1.0) {
+        regimeSizeMultiplier = Math.max(0.5, Math.min(1.0, 1.0 / sigma));
+      }
+    }
+
+    // 3.5b. v1.3.0 — Unstable-Basis Downsize
+    // |composite - anchor| > threshold → halve size.
+    if (config.unstableBasisDownsize) {
+      const composite = aggregate?.predictiveTape?.compositePrice ?? aggregate?.price ?? null;
+      const anchorPrice = ctx.resolution?.latestAnchor()?.priceToBeat ?? ctx.resolution?.latestAnchor()?.price ?? null;
+      if (composite !== null && anchorPrice !== null) {
+        const basisAbs = Math.abs(composite - anchorPrice);
+        if (basisAbs > config.unstableBasisThreshold) {
+          regimeSizeMultiplier *= 0.5;
+          if (ctx.clock.nowMs() % 10000 === 0) {
+            ctx.log(`[fair-value] v1.3.0 unstable-basis downsize: basis=${basisAbs.toFixed(2)} > ${config.unstableBasisThreshold} → halving shares`, "yellow");
+          }
+        }
+      }
+    }
+
+    // Apply regime multiplier to both base modes
+    if (targetNotional !== null) {
+      targetNotional *= regimeSizeMultiplier;
+    } else {
+      targetSharesBase *= regimeSizeMultiplier;
     }
 
     // 4. Update Orders
@@ -256,19 +337,89 @@ export const fairValueMaker: Strategy = async (ctx) => {
       return shares;
     };
 
+    // 3.5c. v1.3.0 — Edge-Weighted Sizing
+    // Edge ratio relative to min edge: fat edge → up to 2x; thin edge → down to 0.5x.
+    // Computed per-side to account for asymmetric edge.
+    let edgeMultiplierUp = 1.0;
+    let edgeMultiplierDown = 1.0;
+    if (config.edgeWeightedSizing && config.minEdge > 0) {
+      if (bidPriceUp !== null && evUp.edge > 0) {
+        edgeMultiplierUp = Math.max(0.5, Math.min(2.0, evUp.edge / config.minEdge));
+      }
+      if (bidPriceDown !== null && evDown.edge > 0) {
+        edgeMultiplierDown = Math.max(0.5, Math.min(2.0, evDown.edge / config.minEdge));
+      }
+    }
+
+    // Helper: compute final shares for a given side, applying notional/price formula and edge multiplier.
+    // In pct_of_balance mode: shares = (balance × pct × regimeMultiplier × edgeMultiplier) / price
+    // In fixed mode: shares = targetSharesBase × regimeMultiplier × edgeMultiplier
+    const computeTargetShares = (side: "UP" | "DOWN", price: number, edgeMultiplier: number): number => {
+      if (targetNotional !== null && price > 0) {
+        // True notional sizing: fixed dollar risk per order
+        return Math.max(config.minShares, (targetNotional * edgeMultiplier) / price);
+      }
+      return Math.max(config.minShares, targetSharesBase * edgeMultiplier);
+    };
+
+    // Helper: compound falling-knife adverse signal check (all live-available signals, no replay leakage)
+    const checkFallingKnifeAdverse = (side: "UP" | "DOWN", fillPrice: number): boolean => {
+      let adverseSignals = 0;
+
+      // Signal 1: Current mid has moved below fill price (adverse momentum in OB)
+      const curBid = ctx.orderBook.bestBidPrice(side);
+      const curAsk = ctx.orderBook.bestAskPrice(side);
+      const curMid = curBid !== null && curAsk !== null ? (curBid + curAsk) / 2 : curBid;
+      if (curMid !== null && curMid < fillPrice - 0.005) adverseSignals++;
+
+      // Signal 2: OB imbalance turned against this side
+      const liveFlow = ctx.orderFlow?.latest() ?? null;
+      if (liveFlow) {
+        const imbalance = side === "UP" ? liveFlow.imbalanceUp : liveFlow.imbalanceDown;
+        if (imbalance !== null && imbalance < -0.10) adverseSignals++;
+
+        // Signal 3: CVD (10s) flowing against this side
+        const cvdThisSide = side === "UP"
+          ? liveFlow.cvd10s.up - liveFlow.cvd10s.down
+          : liveFlow.cvd10s.down - liveFlow.cvd10s.up;
+        if (cvdThisSide < -50) adverseSignals++;
+      }
+
+      // Signal 4: Predictive composite drifted against our side
+      const composite = ctx.predictive?.aggregate?.latest()?.price ?? null;
+      if (composite !== null) {
+        // For UP fills: adverse if composite is now well below our fill price
+        // For DOWN fills: adverse if composite is now well above (1 - fillPrice threshold)
+        const compositeAdverse = side === "UP"
+          ? composite < fillPrice - 0.010
+          : (1 - composite) < fillPrice - 0.010;
+        if (compositeAdverse) adverseSignals++;
+      }
+
+      // Require at least 2 of 4 signals for this to count as adverse
+      return adverseSignals >= 2;
+    };
+
     if (bidPriceUp !== null && bidPriceUp > 0.01 && bidPriceUp < 0.99 && evUp.edge >= config.minEdge && allowUpFlow) {
-      if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
+      // v1.3.0 — Falling-Knife Block: suppress new UP buys if we've detected consecutive adverse fills
+      if (config.fallingKnifeBlock && sideBlockedUp) {
+        if (ctx.clock.nowMs() % 10000 === 0) {
+          ctx.log(`[fair-value] v1.3.0 falling-knife block: UP side blocked (${consecutiveAdverseUp} consecutive adverse fills)`, "yellow");
+        }
+        if (existingUp) ctx.cancelOrders([existingUp.orderId]);
+      } else if (!existingUp || Math.abs(existingUp.price - bidPriceUp) > (TOLERANCE + EPSILON)) {
         if (existingUp) {
           ctx.log(`[fair-value] Replacing UP quote: ${existingUp.price} -> ${bidPriceUp} (P=${probUp.toFixed(3)})`, "dim");
           ctx.cancelOrders([existingUp.orderId]);
         }
-        
-        const sharesToBuy = reserveAffordableShares("UP", bidPriceUp, targetShares);
+
+        const sharesToBuy = reserveAffordableShares("UP", bidPriceUp, computeTargetShares("UP", bidPriceUp, edgeMultiplierUp));
 
         if (inventoryUp < config.maxInventory && sharesToBuy >= 1 && !inFlightUp) {
           const exposureKey = exposureBlockKey(ctx, "UP", bidPriceUp, sharesToBuy);
           if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "UP", bidPriceUp, sharesToBuy)) {
             inFlightUp = true;
+            const capturedFillPriceUp = bidPriceUp;
             ordersToPost.push({
               req: {
                 tokenId: upTokenId,
@@ -278,6 +429,19 @@ export const fairValueMaker: Strategy = async (ctx) => {
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
+              onFilled: config.fallingKnifeBlock ? (_filledShares) => {
+                // Compound falling-knife detection — only live-available signals, no replay leakage
+                const isAdverse = checkFallingKnifeAdverse("UP", capturedFillPriceUp);
+                if (isAdverse) {
+                  consecutiveAdverseUp += 1;
+                  if (consecutiveAdverseUp >= config.fallingKnifeWindow) {
+                    sideBlockedUp = true;
+                    ctx.log(`[fair-value] v1.3.0 falling-knife TRIGGERED: UP blocked after ${consecutiveAdverseUp} adverse fills @ ${capturedFillPriceUp.toFixed(3)}`, "yellow");
+                  }
+                } else {
+                  consecutiveAdverseUp = 0; // Reset on non-adverse fill
+                }
+              } : undefined,
               onFailed: (reason) => {
                 inFlightUp = false;
                 recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs);
@@ -291,18 +455,25 @@ export const fairValueMaker: Strategy = async (ctx) => {
     }
 
     if (bidPriceDown !== null && bidPriceDown > 0.01 && bidPriceDown < 0.99 && evDown.edge >= config.minEdge && allowDownFlow) {
-      if (!existingDown || Math.abs(existingDown.price - bidPriceDown) > (TOLERANCE + EPSILON)) {
+      // v1.3.0 — Falling-Knife Block: suppress new DOWN buys if we've detected consecutive adverse fills
+      if (config.fallingKnifeBlock && sideBlockedDown) {
+        if (ctx.clock.nowMs() % 10000 === 0) {
+          ctx.log(`[fair-value] v1.3.0 falling-knife block: DOWN side blocked (${consecutiveAdverseDown} consecutive adverse fills)`, "yellow");
+        }
+        if (existingDown) ctx.cancelOrders([existingDown.orderId]);
+      } else if (!existingDown || Math.abs(existingDown.price - bidPriceDown) > (TOLERANCE + EPSILON)) {
         if (existingDown) {
           ctx.log(`[fair-value] Replacing DOWN quote: ${existingDown.price} -> ${bidPriceDown}`, "dim");
           ctx.cancelOrders([existingDown.orderId]);
         }
-        
-        const sharesToBuy = reserveAffordableShares("DOWN", bidPriceDown, targetShares);
+
+        const sharesToBuy = reserveAffordableShares("DOWN", bidPriceDown, computeTargetShares("DOWN", bidPriceDown, edgeMultiplierDown));
 
         if (inventoryUp > -config.maxInventory && sharesToBuy >= 1 && !inFlightDown) {
           const exposureKey = exposureBlockKey(ctx, "DOWN", bidPriceDown, sharesToBuy);
           if (!isExposureBlocked(ctx, exposureBlockCooldowns, exposureKey, "DOWN", bidPriceDown, sharesToBuy)) {
             inFlightDown = true;
+            const capturedFillPriceDown = bidPriceDown;
             ordersToPost.push({
               req: {
                 tokenId: downTokenId,
@@ -312,6 +483,19 @@ export const fairValueMaker: Strategy = async (ctx) => {
                 orderType: "GTC" as const,
               },
               expireAtMs: ctx.clock.nowMs() + 10000,
+              onFilled: config.fallingKnifeBlock ? (_filledShares) => {
+                // Compound falling-knife detection — only live-available signals, no replay leakage
+                const isAdverse = checkFallingKnifeAdverse("DOWN", capturedFillPriceDown);
+                if (isAdverse) {
+                  consecutiveAdverseDown += 1;
+                  if (consecutiveAdverseDown >= config.fallingKnifeWindow) {
+                    sideBlockedDown = true;
+                    ctx.log(`[fair-value] v1.3.0 falling-knife TRIGGERED: DOWN blocked after ${consecutiveAdverseDown} adverse fills @ ${capturedFillPriceDown.toFixed(3)}`, "yellow");
+                  }
+                } else {
+                  consecutiveAdverseDown = 0;
+                }
+              } : undefined,
               onFailed: (reason) => {
                 inFlightDown = false;
                 recordExposureBlock(ctx, exposureBlockCooldowns, exposureKey, reason, config.exposureBlockCooldownMs);
