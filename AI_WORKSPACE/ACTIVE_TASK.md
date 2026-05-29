@@ -1,17 +1,16 @@
 # Active Task
 
-**Status:** Engine `origin/master` synced at `8f82f54`. Blocked-counterfactual audit complete.
+**Status:** Engine `master` updated with Phase 9D strategy calibration. 
 
-**Current Objective:** Phase 9D: Strategy Calibration and Noise Reduction.
+**Current Objective:** Phase 9E: Dynamic Position Sizing and Confidence Scaling.
 
 ## Current Status
 
 The engine is now a hardened research platform with the following status:
-- **Repository State Verified:** Successfully recovered and pushed 10 unpushed commits on `master`.
-- **Blocked-Decision Counterfactual Audit**: COMPLETED across 84 valid paired rounds. Revealed a near-even split (118/119) between good and bad blocks.
-- **Risk Mode Comparison**: Permissive mode showed extreme Adverse Selection (0.92), confirming current risk gates are necessary vital defenses and should **NOT** be loosened.
-- **Config Alignment**: Successfully aligned `.env.sample` and `setup_env.py` for live wallet requirements.
-- **Champion Variant**: `fvm-v1.1.0` remains the champion. Quote hygiene is rejected for production as it over-prunes profitable mean-reversion trades.
+- **Strategy Calibration (Phase 9D) COMPLETED**: Implemented strategy-side exposure-aware sizing clamps. Reduced blocked intent noise by >90%.
+- **Blocked-Decision Counterfactual Audit**: COMPLETED. Confirmed risk gates are vital defenses.
+- **Normal Mode Performance**: `fvm-v1.1.0` is profitable in Normal mode ($41.44 PnL across 50 pairs).
+- **Adverse Selection**: Remains high (~0.9), confirming the maker strategy's nature in this regime.
 
 ## Completed Steps
 
@@ -28,24 +27,25 @@ The engine is now a hardened research platform with the following status:
 - [x] Phase 9A: Blocked-decision counterfactual audit.
 - [x] Phase 9B: Establish "Repository Truth" and run audit.
 - [x] Phase 9C: Verify audit validity and decide next move (Decision: Do not loosen gates).
+- [x] Phase 9D: Strategy calibration and noise reduction (Implemented strategy-side clamps).
 
 ## Next Exact Task
 
-1. **Reduce Strategy Noise:** Tune `fair-value-maker` to generate higher quality intents that pass existing exposure gates more naturally.
-2. **Dynamic Position Sizing Tuning**: Finalize `sharesMode: "pct_of_balance"` calibration to optimize position scaling while respecting capital limits.
-3. **FVM v1.1.0 Standardization**: Deploy the "Institutional" variant as the primary champion trading base.
+1. **Tune Confidence Scaling:** Implement logic in `fairValueMaker` to scale `sharePct` based on predictive confidence (sigma) and edge.
+2. **Finalize Institutional Variant:** Standardize the variant with maker-safe hygiene and dynamic sizing as the production-ready champion.
+3. **Multi-Asset Replay:** Expand validation to other assets (ETH, SOL) if fixtures are available.
 
 ---
 
 ### A/B Test Findings & Sweep Results (2026-05-27)
-Dedicated backtests across all 84 valid corpus fixtures executing all 5 FVM variants:
+Post-Calibration results across 50 corpus fixtures (Phase 9D):
 
-| Strategy / Variant | PnL | Trades | ASR | Usable Fills | Status |
-|--------------------|-----|--------|-----|--------------|--------|
-| `fvm-v1.1.0` (Raw, Ungated) | **+$120.30** | 13 | 98.4% | 140 / 140 | **Champion / Highly Profitable** |
-| `fvm-v1.2.0` (Hygienic, Ungated) | **+$4.60** | 11 | 94.3% | 116 / 116 | Underperforming (Over-pruned fills) |
+| Strategy / Variant | PnL | Trades | ASR | Blocked Intents | Status |
+|--------------------|-----|--------|-----|-----------------|--------|
+| `fvm-v1.1.0` (Clamped) | **+$41.44** | 21 | 91.2% | 82 | **Champion / Hardened** |
+| `fvm-v1.1.0` (Baseline) | **-$2.20** | 7 | 72.2% | 1383 | Deprecated (Noisy) |
 
 **Verdict**: 
-1. **The Raw Ungated/Gated FVM v1.1.x is the Undisputed Champion**.
-2. **Quote Hygiene Decimates Profitability** by over-pruning mean-reversion opportunities.
-3. **Risk Gates are Necessary**: The 0.92 Adverse Selection in permissive mode confirms gates prevent toxic capture.
+1. **Strategy-side clamping is effective**: 94% reduction in blocked intent noise.
+2. **Profitability restored in Normal mode**: Clamping allows the strategy to capture more usable fills by scaling down rather than hitting hard rejections.
+3. **Risk Gates are Unchanged**: Security posture remains strict.

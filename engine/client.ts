@@ -605,11 +605,12 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   restoreOrder(_order: Order): void {}
 
   async getUSDCBalance(): Promise<number> {
-    const resp = await this.clob.getBalanceAllowance({
-      asset_type: AssetType.COLLATERAL,
-    });
-    if (!resp || typeof resp === "string") return 0;
-    return Number(resp.balance ?? 0) / 1e6;
+    try {
+      const bal = await this.getTokenBalance(pUSD_ADDRESS);
+      return Number(bal) / 1e6;
+    } catch {
+      return 0;
+    }
   }
 
   async getAvailableShares(tokenId: string): Promise<number> {

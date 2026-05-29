@@ -38,6 +38,7 @@ export async function recover(
   orderBookFactory?: OrderBookFactory,
   clock?: Clock,
   tradeTape?: TradeTapeTracker,
+  liveMode = false,
 ): Promise<Map<string, MarketLifecycle>> {
   const lifecycles = new Map<string, MarketLifecycle>();
 
@@ -53,6 +54,7 @@ export async function recover(
       orderBookFactory,
       clock,
       tradeTape,
+      liveMode,
     );
     if (lifecycle) lifecycles.set(market.slug, lifecycle);
   }
@@ -71,6 +73,7 @@ async function recoverMarket(
   orderBookFactory?: OrderBookFactory,
   clock?: Clock,
   tradeTape?: TradeTapeTracker,
+  liveMode = false,
 ): Promise<MarketLifecycle | null> {
   let resolvedStrategy: ReturnType<typeof resolveStrategySelection>;
   try {
@@ -196,6 +199,7 @@ async function recoverMarket(
       pendingOrders: pendingSells,
       orderHistory,
     },
+    liveMode,
   });
   await lifecycle.setup();
   return lifecycle;

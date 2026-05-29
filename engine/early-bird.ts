@@ -74,6 +74,7 @@ export type EarlyBirdRuntimeOptions = {
   conservativeFill?: boolean;
   riskMode?: CounterfactualRiskMode;
   bypassRiskReasons?: string[];
+  initialBalance?: number;
 };
 
 export type EngineStatus = {
@@ -109,6 +110,7 @@ export class EarlyBird {
   private readonly _maxSessionProfit: number;
   private readonly _alwaysLog: boolean;
   private _roundsCreated = 0;
+  private _initialBalanceOverride?: number;
   private _tracker!: WalletTracker;
   private _ticker: TickerTracker;
   private _tradeTape: TradeTapeTracker;
@@ -176,6 +178,7 @@ export class EarlyBird {
     this._orderBookFactory = runtime.orderBookFactory;
     const persistState = runtime.persistState ?? !replayFile;
     const conservativeFill = runtime.conservativeFill ?? false;
+    this._initialBalanceOverride = runtime.initialBalance;
 
     this._riskGate = new CounterfactualRiskGate({
       mode: runtime.riskMode ?? "normal",
@@ -210,6 +213,9 @@ export class EarlyBird {
         binance: 0.7, // Institutional weight: Binance usually has 10x liquidity
         coinbase: 0.3,
       },
+      divergenceThresholdAbs: typeof this._strategyConfig.divergenceThresholdAbs === "number"
+        ? this._strategyConfig.divergenceThresholdAbs
+        : (process.env.DIVERGENCE_THRESHOLD ? parseFloat(process.env.DIVERGENCE_THRESHOLD) : undefined),
       resolution: this._resolution,
       clock: this._clock,
     });
@@ -343,7 +349,7 @@ export class EarlyBird {
           );
         }
       } else {
-        initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
+        initialBalance = this._initialBalanceOverride ?? parseFloat(process.env.WALLET_BALANCE ?? "50");
         log.write(`[startup] Sim balance: $${initialBalance.toFixed(2)}`);
       }
       this._tracker = new WalletTracker(initialBalance, (msg) =>
@@ -392,9 +398,13 @@ export class EarlyBird {
             this._orderBookFactory,
             this._clock,
             this._tradeTape,
+            this._prod,
           );
           for (const [slug, lifecycle] of recovered) {
             this._lifecycles.set(slug, lifecycle);
+          }
+          if (this._prod && this._persistState) {
+            this._saveState();
           }
         } else {
           log.write("[startup] No saved state found. Starting fresh.");
@@ -570,7 +580,8 @@ export class EarlyBird {
             alwaysLog: this._alwaysLog,
             marketLogMode: this._marketLogMode,
             eventWriter: this._eventWriter,
-            }),
+            liveMode: this._prod,
+          }),
 
         );
         this._roundsCreated++;

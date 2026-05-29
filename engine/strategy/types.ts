@@ -40,6 +40,8 @@ export type StrategyContext = {
   clobTokenIds: [string, string];
   orderBook: OrderBook;
   readonly walletBalanceUsd: number;
+  readonly openExposureUsd: number;
+  readonly maxOpenExposureUsd: number;
   log: (msg: string, color?: LogColor) => void;
 
   getOrderById: (orderId: string) => Promise<Order | null>;

@@ -126,6 +126,7 @@ type MarketLifecycleOptions = {
   feedReadinessPollMs?: number;
   telemetry?: TelemetrySink;
   eventWriter?: EventWriter;
+  liveMode?: boolean;
 };
 
 export class MarketLifecycle {
@@ -156,6 +157,8 @@ export class MarketLifecycle {
   private _strategyCleanup: (() => void) | null = null;
   private _feedReadinessDeadlineMs: number | null = null;
   private _setupPromise: Promise<void> | null = null;
+  private _cancelingOrderIds = new Set<string>();
+  private _lastLiveCancelGateLogMs = Number.NEGATIVE_INFINITY;
 
   readonly slug: string;
   private readonly apiQueue: APIQueue;
@@ -178,6 +181,7 @@ export class MarketLifecycle {
   private readonly _maintenance?: MaintenanceTracker;
   private readonly _venue: VenueDataAdapter;
   private readonly _riskGate: RiskGate;
+  private readonly _liveMode: boolean;
   private readonly _feedReadinessTimeoutMs: number;
   private readonly _feedReadinessPollMs: number;
 
@@ -197,6 +201,7 @@ export class MarketLifecycle {
     this._clock = opts.clock ?? new RealClock();
     this._telemetry = opts.telemetry ?? new NullTelemetrySink();
     this._eventWriter = opts.eventWriter;
+    this._liveMode = opts.liveMode ?? false;
     this._orderBook = opts.orderBook ?? new OrderBook(this._clock);
     this._userChannel = opts.userChannel;
     this._resolution = opts.resolution;
@@ -621,6 +626,10 @@ export class MarketLifecycle {
       clobTokenIds: this._clobTokenIds,
       orderBook: this._orderBook,
       get walletBalanceUsd() { return self._tracker.balance; },
+      get openExposureUsd() { return self._openExposureUsd(); },
+      get maxOpenExposureUsd() { 
+        return (self._riskGate as any).staticLimits?.maxOpenExposureUsd ?? 50; 
+      },
       log: this._log,
       getOrderById: this.client.getOrderById.bind(this.client),
       postOrders: this._postOrders.bind(this),
@@ -810,14 +819,41 @@ export class MarketLifecycle {
       return;
     }
 
-    const buys = requests.filter(
+    let buys = requests.filter(
       (o) => o.req.action === "buy" && !this._buyBlocked,
     );
     const sells = requests.filter(
       (o) => o.req.action === "sell" && !this._sellBlocked,
     );
 
-    const maxRetries = parseInt(process.env.BUY_MAX_RETRIES ?? "30", 10);
+    if (this._liveMode && buys.length > 0) {
+      const now = this._clock.nowMs();
+      if (this._cancelingOrderIds.size > 0) {
+        if (now - this._lastLiveCancelGateLogMs >= 1000) {
+          this._log(
+            `[${this.slug}] Live placement gated: waiting for ${this._cancelingOrderIds.size} cancel(s) to confirm`,
+            "yellow",
+          );
+          this._lastLiveCancelGateLogMs = now;
+        }
+        for (const item of buys) item.onFailed?.("cancel in flight");
+        buys = [];
+      }
+
+      const maxActiveBuys = parseEnvInt("LIVE_MAX_ACTIVE_BUYS", 1);
+      const activeBuys = this._pendingOrders.filter((o) => o.action === "buy").length;
+      const slots = Math.max(0, maxActiveBuys - activeBuys);
+      if (buys.length > slots) {
+        for (const item of buys.slice(slots)) {
+          item.onFailed?.("live active buy limit reached");
+        }
+        buys = buys.slice(0, slots);
+      }
+    }
+
+    const maxRetries = this._liveMode
+      ? parseEnvInt("LIVE_BUY_MAX_RETRIES", 0)
+      : parseEnvInt("BUY_MAX_RETRIES", 30);
     const retryDelayMs = parseInt(process.env.BUY_RETRY_DELAY_MS ?? "500", 10);
 
     if (buys.length > 0) this._placeWithRetry(buys, retryDelayMs, maxRetries);
@@ -837,20 +873,27 @@ export class MarketLifecycle {
     // untrack order to avoid "CANCELLATION" event in processOrderEvent
     for (const id of cancellable) this._userChannel.untrackOrder(id);
 
-    const response = await this.client.cancelOrders(cancellable);
-    for (const id of response.canceled) {
-      const pending = this._pendingOrders.find((o) => o.orderId === id);
-      if (pending) {
-        this._trackerUnlock(pending);
-        this._marketLogger.log(this._createOrderEntry(pending, status));
-        this._emitOrderLifecycle(pending, status, {
-          orderId: id,
-          intentId: pending.intentId,
-        });
+    for (const id of cancellable) this._cancelingOrderIds.add(id);
+    try {
+      const response = await this.client.cancelOrders(cancellable);
+      const canceled = response?.canceled || [];
+      const notCanceled = response?.not_canceled || {};
+      for (const id of canceled) {
+        const pending = this._pendingOrders.find((o) => o.orderId === id);
+        if (pending) {
+          this._trackerUnlock(pending);
+          this._marketLogger.log(this._createOrderEntry(pending, status));
+          this._emitOrderLifecycle(pending, status, {
+            orderId: id,
+            intentId: pending.intentId,
+          });
+        }
+        this._removePendingOrder(id);
       }
-      this._removePendingOrder(id);
+      return { canceled, not_canceled: notCanceled };
+    } finally {
+      for (const id of cancellable) this._cancelingOrderIds.delete(id);
     }
-    return response;
   }
 
   private async _emergencySells(orderIds: string[]): Promise<void> {
@@ -1096,8 +1139,17 @@ export class MarketLifecycle {
 
           const reason = decision.reasons.join("; ");
           const side = this._side(item.req.tokenId);
+          let feedDetails = "";
+          if (reason.includes("predictive aggregate disagreement") && this._aggregator) {
+            const agg = this._aggregator.latest();
+            const details: string[] = [];
+            for (const [name, f] of Object.entries(agg.feeds)) {
+              details.push(`${name}: price=${f.price} quality=${f.quality} age=${f.latestEventAgeMs}ms`);
+            }
+            feedDetails = ` | Feeds [${details.join(", ")}] div=${agg.divergenceAbs !== null ? `$${agg.divergenceAbs.toFixed(2)}` : "N/A"}`;
+          }
           this._log(
-            `[${this.slug}] Risk gate blocked ${item.req.action.toUpperCase()} ${side} @ ${item.req.price}: ${reason}`,
+            `[${this.slug}] Risk gate blocked ${item.req.action.toUpperCase()} ${side} @ ${item.req.price}: ${reason}${feedDetails}`,
             "yellow",
           );
           this._marketLogger.log(
