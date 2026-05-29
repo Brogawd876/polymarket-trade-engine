@@ -206,7 +206,7 @@ export const strategyVariants: Record<string, StrategyVariant> = {
       // Dynamic bankroll sizing (replaces fixed 5-share sizing)
       sharesMode: "pct_of_balance",
       sharePct: 0.10,    // 10% of balance per order
-      minShares: 1,
+      minShares: 5,
       // v1.3.0 profit-selective controls
       edgeWeightedSizing: true,
       regimeWeightedSizing: true,
